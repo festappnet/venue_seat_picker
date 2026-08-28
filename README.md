@@ -68,8 +68,9 @@ VenueSeatPicker<VenueSeat, Object>(
 Create the controller in `State.initState` and dispose it with its owning
 widget. The runnable [example application](example/) and its
 [live web version](https://festappnet.github.io/venue_seat_picker/) demonstrate
-selection, pending state, zoom, runtime SVG/PNG backdrop switching, status
-rendering and live layout editing. It follows the device's light or dark
+selection, pending state, zoom, local SVG/PNG/JPG backdrop selection, bounded
+panning, status rendering and live layout editing. Selected files stay in the
+browser and are not uploaded. The example follows the device's light or dark
 appearance automatically.
 
 ## Use an existing domain model

@@ -82,7 +82,7 @@ class _VenueSeatViewerState<T, Id extends Object>
         child: InteractiveViewer(
           minScale: controller.minScale.clamp(0.01, widget.config.maxScale),
           maxScale: widget.config.maxScale,
-          boundaryMargin: const EdgeInsets.all(double.infinity),
+          boundaryMargin: widget.config.boundaryMargin,
           constrained: false,
           transformationController: controller.transformationController,
           child: RepaintBoundary(
@@ -135,6 +135,13 @@ class _VenueSeatViewerState<T, Id extends Object>
               height: height,
               fit: BoxFit.cover,
             );
+    } else if (backdrop case MemoryVenueBackdrop(:final bytes)) {
+      child = Image.memory(
+        bytes,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+      );
     }
     return GestureDetector(
       behavior: HitTestBehavior.translucent,

@@ -6,6 +6,7 @@ environment:
   flutter: ">=3.32.0"
 
 dependencies:
+  file_selector: ^1.0.4
   flutter:
     sdk: flutter
   venue_seat_picker:
@@ -19,4 +20,3 @@ flutter:
   assets:
     - assets/venue.json
     - assets/venue_floor_plan.svg
-    - assets/venue_zones.png

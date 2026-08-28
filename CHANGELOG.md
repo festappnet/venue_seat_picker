@@ -1,3 +1,8 @@
+## Unreleased
+
+- Added in-memory image backdrops for local file previews and configurable pan
+  boundaries.
+
 ## 0.1.1
 
 - Removed visual grid lines from empty editor slots while keeping them tappable.

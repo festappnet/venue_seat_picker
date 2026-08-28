@@ -43,6 +43,7 @@ class VenueSeatThemeData {
 class VenueSeatViewConfig {
   const VenueSeatViewConfig({
     this.maxScale = 5,
+    this.boundaryMargin = const EdgeInsets.all(double.infinity),
     this.backgroundColor = Colors.white,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
     this.theme = const VenueSeatThemeData(),
@@ -52,16 +53,19 @@ class VenueSeatViewConfig {
   factory VenueSeatViewConfig.fromTheme(
     BuildContext context, {
     double maxScale = 5,
+    EdgeInsets boundaryMargin = const EdgeInsets.all(double.infinity),
     BorderRadius borderRadius = const BorderRadius.all(Radius.circular(12)),
     VenueSeatThemeData theme = const VenueSeatThemeData(),
   }) => VenueSeatViewConfig(
     maxScale: maxScale,
+    boundaryMargin: boundaryMargin,
     backgroundColor: Theme.of(context).colorScheme.surface,
     borderRadius: borderRadius,
     theme: theme,
   );
 
   final double maxScale;
+  final EdgeInsets boundaryMargin;
   final Color backgroundColor;
   final BorderRadius borderRadius;
   final VenueSeatThemeData theme;

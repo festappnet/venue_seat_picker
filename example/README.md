@@ -8,8 +8,9 @@ This runnable application demonstrates:
 - a six-seat selection limit;
 - zooming and panning around a compact theatre where individual seats remain
   easy to inspect;
-- switching the venue background between an inline SVG floor plan, a PNG image
-  and no backdrop;
+- choosing a local SVG, PNG or JPG venue background without uploading the file
+  to a server;
+- bounded panning that keeps the venue within a practical working area;
 - available, held, booked, checked-in and blocked statuses;
 - switching the same venue into edit mode;
 - painting, erasing and resizing the grid.

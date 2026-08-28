@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
@@ -40,10 +40,11 @@ class ExamplePage extends StatefulWidget {
 class _ExamplePageState extends State<ExamplePage> {
   static const selectionLimit = 6;
   static const demoSelectionTarget = 5;
+  static const maxBackdropBytes = 8 * 1024 * 1024;
 
   late final VenueSeatController<VenueSeat, Object> controller;
   late final String svgBackdropSource;
-  _BackdropChoice backdropChoice = _BackdropChoice.svg;
+  _BackdropKind backdropKind = _BackdropKind.sampleSvg;
   bool editing = Uri.base.queryParameters['mode'] == 'editor';
   bool closeUp = false;
   bool hasInspectedSeats = false;
@@ -106,36 +107,43 @@ class _ExamplePageState extends State<ExamplePage> {
                 ),
               ),
             ),
-          PopupMenuButton<_BackdropChoice>(
+          PopupMenuButton<_BackdropAction>(
             tooltip: 'Change venue background',
             enabled: !loading,
-            initialValue: backdropChoice,
-            onSelected: _setBackdrop,
-            icon: Icon(switch (backdropChoice) {
-              _BackdropChoice.svg => Icons.draw_outlined,
-              _BackdropChoice.png => Icons.image_outlined,
-              _BackdropChoice.none => Icons.hide_image_outlined,
+            onSelected: _handleBackdropAction,
+            icon: Icon(switch (backdropKind) {
+              _BackdropKind.sampleSvg => Icons.draw_outlined,
+              _BackdropKind.customSvg => Icons.code,
+              _BackdropKind.customImage => Icons.image_outlined,
+              _BackdropKind.none => Icons.hide_image_outlined,
             }),
             itemBuilder: (context) => const [
               PopupMenuItem(
-                value: _BackdropChoice.svg,
+                value: _BackdropAction.uploadSvg,
                 child: _BackdropMenuItem(
-                  icon: Icons.draw_outlined,
-                  label: 'SVG floor plan',
+                  icon: Icons.upload_file,
+                  label: 'Choose your SVG…',
                 ),
               ),
               PopupMenuItem(
-                value: _BackdropChoice.png,
+                value: _BackdropAction.uploadImage,
                 child: _BackdropMenuItem(
-                  icon: Icons.image_outlined,
-                  label: 'PNG section zones',
+                  icon: Icons.add_photo_alternate_outlined,
+                  label: 'Choose your PNG or JPG…',
                 ),
               ),
               PopupMenuItem(
-                value: _BackdropChoice.none,
+                value: _BackdropAction.restoreSample,
+                child: _BackdropMenuItem(
+                  icon: Icons.refresh,
+                  label: 'Restore sample SVG',
+                ),
+              ),
+              PopupMenuItem(
+                value: _BackdropAction.remove,
                 child: _BackdropMenuItem(
                   icon: Icons.hide_image_outlined,
-                  label: 'No background',
+                  label: 'Remove background',
                 ),
               ),
             ],
@@ -202,7 +210,7 @@ class _ExamplePageState extends State<ExamplePage> {
                   : editing
                   ? VenueSeatEditor<VenueSeat, Object>(
                       controller: controller,
-                      config: VenueSeatViewConfig.fromTheme(context),
+                      config: _viewConfig(context),
                       editing: SeatEditingDelegate<VenueSeat>(
                         create: (position, status) => VenueSeat(
                           id: 'custom-${nextCustomSeatId++}',
@@ -220,7 +228,7 @@ class _ExamplePageState extends State<ExamplePage> {
                     )
                   : VenueSeatPicker<VenueSeat, Object>(
                       controller: controller,
-                      config: VenueSeatViewConfig.fromTheme(context),
+                      config: _viewConfig(context),
                       maxSelectedSeats: selectionLimit,
                       onSelectionRequested: (request) async {
                         await Future<void>.delayed(
@@ -261,19 +269,113 @@ class _ExamplePageState extends State<ExamplePage> {
     });
   }
 
-  void _setBackdrop(_BackdropChoice value) {
-    controller.setBackdrop(switch (value) {
-      _BackdropChoice.svg => SvgVenueBackdrop(svgBackdropSource),
-      _BackdropChoice.png => NetworkVenueBackdrop(_pngBackdropSource),
-      _BackdropChoice.none => null,
-    });
-    setState(() => backdropChoice = value);
+  VenueSeatViewConfig _viewConfig(BuildContext context) =>
+      VenueSeatViewConfig.fromTheme(
+        context,
+        boundaryMargin: const EdgeInsets.all(48),
+      );
+
+  Future<void> _handleBackdropAction(_BackdropAction action) async {
+    switch (action) {
+      case _BackdropAction.uploadSvg:
+        await _chooseSvgBackdrop();
+        return;
+      case _BackdropAction.uploadImage:
+        await _chooseImageBackdrop();
+        return;
+      case _BackdropAction.restoreSample:
+        controller.setBackdrop(SvgVenueBackdrop(svgBackdropSource));
+        setState(() => backdropKind = _BackdropKind.sampleSvg);
+        return;
+      case _BackdropAction.remove:
+        controller.setBackdrop(null);
+        setState(() => backdropKind = _BackdropKind.none);
+        return;
+    }
   }
 
-  String get _pngBackdropSource => kIsWeb
-      ? Uri.base.resolve('assets/assets/venue_zones.png').toString()
-      : 'https://raw.githubusercontent.com/festappnet/venue_seat_picker/'
-            'main/example/assets/venue_zones.png';
+  Future<void> _chooseSvgBackdrop() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'SVG', extensions: ['svg']),
+      ],
+    );
+    if (file == null) return;
+    try {
+      final bytes = await _readBackdropBytes(file);
+      final source = utf8.decode(bytes);
+      if (!RegExp(r'<svg(?:\s|>)', caseSensitive: false).hasMatch(source)) {
+        throw const FormatException('Missing SVG root');
+      }
+      if (!mounted) return;
+      controller.setBackdrop(SvgVenueBackdrop(source));
+      setState(() => backdropKind = _BackdropKind.customSvg);
+      _showBackdropMessage('Your SVG background is active.');
+    } on Object {
+      if (mounted) _showBackdropError('Choose a valid SVG under 8 MB.');
+    }
+  }
+
+  Future<void> _chooseImageBackdrop() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Images', extensions: ['png', 'jpg', 'jpeg']),
+      ],
+    );
+    if (file == null) return;
+    try {
+      final bytes = await _readBackdropBytes(file);
+      final extension = file.name.split('.').last.toLowerCase();
+      if (!_matchesImageSignature(bytes, extension)) {
+        throw const FormatException('Image signature does not match');
+      }
+      final mimeType = extension == 'png' ? 'image/png' : 'image/jpeg';
+      if (!mounted) return;
+      controller.setBackdrop(MemoryVenueBackdrop(bytes, mimeType: mimeType));
+      setState(() => backdropKind = _BackdropKind.customImage);
+      _showBackdropMessage('Your image background is active.');
+    } on Object {
+      if (mounted) _showBackdropError('Choose a valid PNG or JPG under 8 MB.');
+    }
+  }
+
+  Future<Uint8List> _readBackdropBytes(XFile file) async {
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty || bytes.length > maxBackdropBytes) {
+      throw const FormatException('Invalid backdrop size');
+    }
+    return bytes;
+  }
+
+  bool _matchesImageSignature(Uint8List bytes, String extension) {
+    if (extension == 'png') {
+      const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+      if (bytes.length < signature.length) return false;
+      for (var index = 0; index < signature.length; index++) {
+        if (bytes[index] != signature[index]) return false;
+      }
+      return true;
+    }
+    return bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[2] == 0xff;
+  }
+
+  void _showBackdropMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  void _showBackdropError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
 
   void _setEditing(bool value) {
     if (closeUp) controller.fitToViewport();
@@ -284,7 +386,9 @@ class _ExamplePageState extends State<ExamplePage> {
   }
 }
 
-enum _BackdropChoice { svg, png, none }
+enum _BackdropAction { uploadSvg, uploadImage, restoreSample, remove }
+
+enum _BackdropKind { sampleSvg, customSvg, customImage, none }
 
 class _BackdropMenuItem extends StatelessWidget {
   const _BackdropMenuItem({required this.icon, required this.label});

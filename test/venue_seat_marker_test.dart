@@ -54,4 +54,35 @@ void main() {
     await expectSurfaceFor(Brightness.dark);
     controller.dispose();
   });
+
+  testWidgets('viewer forwards a finite pan boundary to InteractiveViewer', (
+    tester,
+  ) async {
+    final controller = VenueSeatController<VenueSeat, Object>(
+      adapter: venueSeatAdapter,
+    )..loadPlan(rows: 1, columns: 1, seats: const []);
+    const margin = EdgeInsets.all(48);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 200,
+          height: 200,
+          child: VenueSeatViewer<VenueSeat, Object>(
+            controller: controller,
+            config: const VenueSeatViewConfig(boundaryMargin: margin),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+          .boundaryMargin,
+      margin,
+    );
+    controller.dispose();
+  });
 }
