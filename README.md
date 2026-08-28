@@ -6,6 +6,8 @@ reservation picker and grid editor behind one consistent model seam.
 Built for and used in production by [Festapp](https://festapp.net), including
 the live application at [live.festapp.net](https://live.festapp.net).
 
+[Try the live interactive picker and editor demo](https://festappnet.github.io/venue_seat_picker/)
+
 ![Slower close-up of seat selection and venue editing](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
 
 [Watch the higher-quality close-up WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
@@ -64,9 +66,11 @@ VenueSeatPicker<VenueSeat, Object>(
 ```
 
 Create the controller in `State.initState` and dispose it with its owning
-widget. The runnable [example application](example/) demonstrates selection,
-pending state, zoom, a compact SVG floor plan, status rendering and live layout
-editing. It follows the device's light or dark appearance automatically.
+widget. The runnable [example application](example/) and its
+[live web version](https://festappnet.github.io/venue_seat_picker/) demonstrate
+selection, pending state, zoom, a compact SVG floor plan, status rendering and
+live layout editing. It follows the device's light or dark appearance
+automatically.
 
 ## Use an existing domain model
 

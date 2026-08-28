@@ -1,5 +1,7 @@
 # venue_seat_picker example
 
+[Open the live interactive demo](https://festappnet.github.io/venue_seat_picker/)
+
 This runnable application demonstrates:
 
 - optimistic asynchronous selection with a pending indicator;
@@ -26,6 +28,9 @@ For web:
 ```console
 flutter run -d chrome
 ```
+
+Every push to the repository's `main` branch rebuilds and publishes the web
+version to GitHub Pages.
 
 The artificial 350 ms delay represents a backend reservation request. Replace
 it with your application's atomic hold/release operation.
