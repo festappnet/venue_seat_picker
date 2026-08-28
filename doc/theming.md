@@ -1,54 +1,53 @@
 # Theming and custom rendering
 
-Pass `SeatLayoutConfig` to any layout widget to control zoom, surface styling
-and state colors:
+`VenueSeatThemeData` follows Flutter's `ThemeData` naming convention. Pass it
+inside `VenueSeatViewConfig` to any viewer, picker or editor:
 
 ```dart
-const config = SeatLayoutConfig(
+const config = VenueSeatViewConfig(
   maxScale: 8,
   backgroundColor: Color(0xfff7f7fb),
   borderRadius: BorderRadius.all(Radius.circular(20)),
-  theme: SeatLayoutTheme(
+  theme: VenueSeatThemeData(
     available: Color(0xff00695c),
-    selectedByMe: Color(0xff4527a0),
+    selected: Color(0xff4527a0),
     blocked: Color(0xff263238),
     selectionBorder: Color(0xffffb300),
   ),
 );
 ```
 
-## Custom seats and tooltips
+## Custom markers and tooltips
 
 ```dart
-SeatPicker<MySeat>(
+VenueSeatPicker<MySeat, int>(
   controller: controller,
   config: config,
-  tooltipBuilder: (context, cell) =>
-      '${cell.item!.seatLabel} · ${cell.item!.priceLabel}',
-  seatBuilder: (context, cell) => DecoratedBox(
+  tooltipBuilder: (context, slot) =>
+      '${slot.label} · ${slot.seat!.priceLabel}',
+  seatBuilder: (context, slot) => DecoratedBox(
     decoration: BoxDecoration(
-      color: config.theme.colorFor(cell.state),
+      color: slot.isSelected
+          ? config.theme.selected
+          : config.theme.colorFor(slot.status!),
       shape: BoxShape.circle,
     ),
-    child: Center(child: Text(cell.item!.shortLabel)),
+    child: Center(child: Text(slot.seat!.shortLabel)),
   ),
 )
 ```
 
-Custom builders receive the complete `SeatCell`, including visual highlight
-flags. Preserve a sufficiently large tap target for touch and keep state
-distinctions accessible without relying on color alone.
+Custom builders receive `SeatSlot`, including selected, pending and highlight
+flags. Preserve a sufficiently large tap target and avoid relying on color
+alone.
 
-## Backgrounds
+## Backdrops
 
-Use `SvgSeatLayoutBackground` for inline SVG, or
-`NetworkSeatLayoutBackground` for an HTTPS image/SVG URL. The convenience
-factory detects inline SVG automatically:
+Use `SvgVenueBackdrop` for inline SVG or `NetworkVenueBackdrop` for an HTTPS
+image/SVG URL:
 
 ```dart
-controller.setBackground(SeatLayoutBackground.parse(backgroundSource));
+controller.setBackdrop(VenueBackdrop.parse(source));
 ```
 
-Remote asset loading follows the platform's normal network and CORS rules. For
-offline use, load an asset yourself and pass its SVG source as an inline
-background, or render the asset in a custom surrounding widget.
+Remote loading follows the platform's network and CORS rules.

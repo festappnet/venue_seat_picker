@@ -4,6 +4,7 @@
 build/
 doc/demo.gif
 doc/demo.webm
+doc/*.png
 example/.dart_tool/
 example/build/
 example/pubspec.lock

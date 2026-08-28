@@ -1,140 +1,134 @@
 # venue_seat_picker
 
-Interactive, editable venue seat layouts for Flutter. The package provides one
-model seam for a zoomable viewer, an optimistic reservation picker, and a grid
-editor. It works with the built-in JSON model or an application's existing
-domain model.
+Interactive venue seat maps for Flutter: a zoomable viewer, optimistic
+reservation picker and grid editor behind one consistent model seam.
 
 Built for and used in production by [Festapp](https://festapp.net), including
 the live application at [live.festapp.net](https://live.festapp.net).
 
-![Picker selection and layout editing demo](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
+![Selection and venue editing demo](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
 
 [Watch the higher-quality WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
 
+| Customer picker | Venue editor |
+| --- | --- |
+| ![Selecting seats on a venue floor plan](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/picker.png) | ![Editing seats on the same venue floor plan](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/editor.png) |
+
+The picker and editor operate on the same controller and venue document, so an
+application can offer customer selection and staff editing without maintaining
+two layout implementations. The media above uses an anonymized venue plan
+adapted from Festapp's production deployment at
+[vstupenky.online](https://vstupenky.online).
+
 ## Features
 
-- Zoom and pan with automatic fit-to-viewport.
-- Selection limits and optimistic async reservation with automatic rollback.
-- Grid editor with paintable available, blocked and empty cells.
-- Custom seat builders, tooltips, colors and background SVG/images.
-- Versioned JSON documents through `BasicSeat` and `SeatLayoutDocument`.
-- Generic `SeatLayoutItem` interface; no backend or state-management dependency.
+- Zoom, pan and automatic fit-to-viewport.
+- Optimistic async selection with rollback and duplicate-tap protection.
+- Selection limits, pending indicators and custom eligibility rules.
+- Grid editor with immutable create/update delegates.
+- Custom seat builders, tooltips, colors and SVG/image backdrops.
+- Versioned JSON through `VenueSeat` and `VenueSeatDocument`.
+- Read-only `SeatAdapter`; the package never mutates your domain objects.
 - Android, iOS, Linux, macOS, web and Windows support.
 
 ## Quick start
-
-Add the dependency:
 
 ```yaml
 dependencies:
   venue_seat_picker: ^0.1.0
 ```
 
-Create a controller, load a layout, and pass it to `SeatPicker`:
-
 ```dart
 final seats = [
-  BasicSeat(seatId: 'A1', seatRow: 0, seatColumn: 0, seatLabel: 'A1'),
-  BasicSeat(seatId: 'A2', seatRow: 0, seatColumn: 1, seatLabel: 'A2'),
+  const VenueSeat(id: 'A1', position: SeatPosition(0, 0), label: 'A1'),
+  const VenueSeat(id: 'A2', position: SeatPosition(0, 1), label: 'A2'),
 ];
 
-final controller = SeatLayoutController<BasicSeat>()
-  ..loadLayout(rows: 4, columns: 8, items: seats);
+final controller = VenueSeatController<VenueSeat, Object>(
+  adapter: venueSeatAdapter,
+)..loadPlan(rows: 4, columns: 8, seats: seats);
 
-SeatPicker<BasicSeat>(
+VenueSeatPicker<VenueSeat, Object>(
   controller: controller,
-  maxSelection: 4,
-  onSelectionRequest: (cell, selected) async {
-    // Reserve or release cell.item!.seatId in your backend.
-    return true; // false rolls the optimistic visual change back.
+  maxSelectedSeats: 4,
+  onSelectionRequested: (request) async {
+    return request.selected
+        ? reservations.hold(request.seatId)
+        : reservations.release(request.seatId);
   },
-  onSelectionChanged: (selection) {
-    print(selection.map((cell) => cell.item!.seatId));
+  onSelectionChanged: (selectedIds) {
+    debugPrint('$selectedIds');
   },
 )
 ```
 
 Create the controller in `State.initState` and dispose it with its owning
 widget. The runnable [example application](example/) demonstrates selection,
-the state legend, zoom and pan, and switching the same layout into edit mode.
+pending state, zoom, a detailed SVG floor plan, status rendering and live
+layout editing.
 
 ## Use an existing domain model
 
-Implement the small `SeatLayoutItem` interface. Pricing, authorization,
-persistence and reservation locking remain in your application.
+Map it through a read-only adapter. Pricing, authorization, persistence and
+reservation locking remain in your application.
 
 ```dart
-class VenueSeat implements SeatLayoutItem {
-  VenueSeat(this.id, this.row, this.column, this.status);
+final adapter = SeatAdapter<MySeat, int>(
+  idOf: (seat) => seat.id,
+  positionOf: (seat) => SeatPosition(seat.row, seat.column),
+  statusOf: (seat) => switch (seat.status) {
+    MyStatus.free => SeatStatus.available,
+    MyStatus.held => SeatStatus.held,
+    MyStatus.sold => SeatStatus.booked,
+  },
+  labelOf: (seat) => seat.label,
+  groupOf: (seat) => seat.sectionId,
+);
 
-  final int id;
-  final int row;
-  final int column;
-  SeatState status;
-
-  @override Object get seatId => id;
-  @override int get seatRow => row;
-  @override int get seatColumn => column;
-  @override SeatState get seatState => status;
-  @override set seatState(SeatState value) => status = value;
-  @override String get seatLabel => 'Seat $id';
-  @override Object? get seatGroupId => null;
-}
+final controller = VenueSeatController<MySeat, int>(adapter: adapter)
+  ..loadPlan(rows: venue.rows, columns: venue.columns, seats: venue.seats);
 ```
+
+Current-user selection is an optimistic UI overlay, not a `SeatStatus`. This
+keeps the package from writing transient state into your authoritative model.
 
 ## Editor
 
-`SeatLayoutEditor` edits the same controller used by the viewer and picker.
-The host supplies a factory so newly painted cells use its canonical model.
-
 ```dart
-SeatLayoutEditor<BasicSeat>(
+VenueSeatEditor<VenueSeat, Object>(
   controller: controller,
-  createItem: (row, column, state) => BasicSeat(
-    seatId: '$row:$column',
-    seatRow: row,
-    seatColumn: column,
-    seatState: state,
+  editing: SeatEditingDelegate(
+    create: (position, status) => VenueSeat(
+      id: '${position.row}:${position.column}',
+      position: position,
+      status: status,
+    ),
+    withStatus: (seat, status) => seat.copyWith(status: status),
   ),
   onChanged: saveDraft,
 )
 ```
 
-See `example/` for a runnable editor and picker.
-
 ## Guides
 
-- [Getting started](doc/getting-started.md) — lifecycle, selection and errors.
-- [Backend integration](doc/backend-integration.md) — optimistic reservations,
-  rollback and real-time updates.
-- [Editing and JSON](doc/editing-and-serialization.md) — layout authoring and
-  persistence.
-- [Theming and custom rendering](doc/theming.md) — colors, backgrounds,
-  tooltips and custom seats.
-
-The public API also has generated Dart documentation. Run `dart doc` locally or
-open the API reference linked from pub.dev after release.
+- [Getting started](doc/getting-started.md)
+- [Backend integration](doc/backend-integration.md)
+- [Editing and JSON](doc/editing-and-serialization.md)
+- [Theming and custom rendering](doc/theming.md)
 
 ## Contract
 
-- Rows, columns and cell size must be positive.
-- Seat coordinates must be unique and inside the document dimensions.
-- `setDimensions` refuses to clip occupied cells.
-- `updateVisualState` is temporary; `updateSeat` also writes the host model.
-- Async selection is optimistic and rejects duplicate taps while pending.
+- Rows, columns and seat size must be positive.
+- Seat IDs and positions must be unique and inside the venue grid.
+- Missing positions are empty slots, not a seat status.
+- Shrinking refuses to clip occupied slots.
+- Only `available` seats can be selected; selected seats can be released.
+- A rejected or failed request restores the previous optimistic selection.
 
-## Platform and SDK support
+Flutter 3.32+ and Dart 3.8+ are supported. The package intentionally has no
+backend or state-management dependency.
 
-The package supports Android, iOS, Linux, macOS, web and Windows on Flutter
-3.32 or newer and Dart 3.8 or newer. It intentionally has no backend or
-state-management dependency.
-
-## Contributing and support
-
-Bug reports and feature requests belong in the
-[issue tracker](https://github.com/festappnet/venue_seat_picker/issues). See
-[CONTRIBUTING.md](CONTRIBUTING.md) for local checks and [SECURITY.md](SECURITY.md)
-for private vulnerability reporting.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the
+[issue tracker](https://github.com/festappnet/venue_seat_picker/issues).
 
 Licensed under the MIT License.

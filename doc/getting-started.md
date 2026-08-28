@@ -1,32 +1,30 @@
 # Getting started
 
-`venue_seat_picker` separates layout state from rendering. Your widget owns a
-`SeatLayoutController`, loads seats into it, and chooses whether to render a
+`venue_seat_picker` separates authoritative seat data from interaction state.
+Your widget owns a `VenueSeatController`, loads a venue plan, and renders a
 viewer, picker or editor.
 
-## 1. Add the package
+## Add the package
 
 ```yaml
 dependencies:
   venue_seat_picker: ^0.1.0
 ```
 
-## 2. Own the controller
-
-Create and dispose the controller with the widget that owns the layout:
+## Own the controller
 
 ```dart
-late final SeatLayoutController<BasicSeat> controller;
+late final VenueSeatController<VenueSeat, Object> controller;
 
 @override
 void initState() {
   super.initState();
-  controller = SeatLayoutController<BasicSeat>()
-    ..loadLayout(
+  controller = VenueSeatController(adapter: venueSeatAdapter)
+    ..loadPlan(
       rows: 20,
       columns: 30,
-      items: seats,
-      cellSize: 44,
+      seats: seats,
+      seatSize: 44,
     );
 }
 
@@ -37,36 +35,35 @@ void dispose() {
 }
 ```
 
-Coordinates are zero-based. Each occupied coordinate must be unique and inside
-the declared dimensions. Missing coordinates render as empty space.
+Coordinates are zero-based. Every seat ID and position must be unique and
+inside the declared dimensions. A coordinate without a seat is an empty slot.
 
-## 3. Render a picker
+## Render a picker
 
 ```dart
-SeatPicker<BasicSeat>(
+VenueSeatPicker<VenueSeat, Object>(
   controller: controller,
-  maxSelection: 6,
-  onSelectionRequest: reserveSeat,
-  onSelectionChanged: (cells) {
-    setState(() => selectedIds = {
-      for (final cell in cells) cell.item!.seatId,
-    });
+  maxSelectedSeats: 6,
+  onSelectionRequested: reserveSeat,
+  onSelectionChanged: (selectedIds) {
+    setState(() => checkoutSeatIds = selectedIds);
   },
-  onLimitReached: showSelectionLimit,
+  onSelectionLimitReached: showSelectionLimit,
   onSelectionError: reportSelectionError,
 )
 ```
 
-Only `available` and `selectedByMe` cells toggle by default. Use `isSelectable`
-for application rules such as price-zone access. The picker applies the visual
-change immediately while `onSelectionRequest` runs, then commits or rolls it
-back from the returned boolean.
+The picker immediately updates its selection overlay while
+`onSelectionRequested` runs. Returning `false` or throwing restores the prior
+selection. Repeated taps on the same seat are ignored while the request is
+pending.
 
 ## Choosing a model
 
-Use `BasicSeat` when its versioned JSON shape fits your application. If you
-already have a domain model, implement `SeatLayoutItem`; the picker will keep
-using your object instances and does not require a data conversion layer.
+Use immutable `VenueSeat` when its JSON shape fits. For an existing domain
+model, provide `SeatAdapter<T, Id>`. The adapter reads stable identity,
+position, authoritative status, label and optional group without granting the
+package write access to your model.
 
-See the repository [example](../example/) for a complete runnable application
-and [backend integration](backend-integration.md) for concurrent reservations.
+Call `controller.refreshSeat(updatedSeat)` when a server or state-management
+update produces a new authoritative value.

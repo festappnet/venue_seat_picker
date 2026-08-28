@@ -1,54 +1,49 @@
 # Backend integration
 
 The package owns interaction state, not reservation authority. Your backend
-must remain the source of truth and atomically reject a seat that another user
-already holds.
+must atomically reject a seat already held by another visitor.
 
 ## Optimistic reservation
 
-`onSelectionRequest` runs after the picker shows the requested state. Return
-`true` only when the backend has accepted the operation:
-
 ```dart
-Future<bool> reserveSeat(SeatCell<MySeat> cell, bool selected) async {
+Future<bool> reserveSeat(
+  SeatSelectionRequest<MySeat, int> request,
+) async {
   try {
-    if (selected) {
-      await reservations.hold(cell.item!.seatId);
+    if (request.selected) {
+      await reservations.hold(request.seatId);
     } else {
-      await reservations.release(cell.item!.seatId);
+      await reservations.release(request.seatId);
     }
     return true;
   } on SeatAlreadyHeldException {
-    return false; // The picker restores the previous visual state.
+    return false;
   }
 }
 ```
 
-Thrown errors also roll back. Use `onSelectionError` to report them or show a
-message. Duplicate taps on the same cell are ignored while its request is
-pending.
+The visual selection changes immediately. A `false` result or exception rolls
+it back. Use `onSelectionError` to report unexpected failures. Duplicate taps
+are ignored while that seat has a pending request.
 
 ## Real-time updates
 
-Apply server events to the canonical item and controller:
+Map backend state to `SeatStatus` in your adapter and replace the authoritative
+seat value:
 
 ```dart
-void applyRemoteState(Object seatId, SeatState state) {
-  for (final cell in controller.cells) {
-    if (cell.item?.seatId == seatId) {
-      controller.updateSeat(cell, state);
-      return;
-    }
-  }
+void applyRemoteSeat(MySeat updated) {
+  controller.refreshSeat(updated);
 }
 ```
 
-Translate backend status names at your data boundary instead of coupling
-transport details to the widget.
+`SeatStatus` represents server-visible availability: `available`, `held`,
+`booked`, `checkedIn` or `blocked`. The current visitor's selected IDs remain a
+separate overlay in `controller.selectedSeatIds`.
 
 ## Recommended server contract
 
-Send a stable seat ID, the requested operation, event or performance ID, and a
-reservation version/token. Treat success as authoritative, make release
-idempotent, and broadcast committed state changes to all connected clients.
+Send a stable seat ID, hold/release action, event or performance ID, and a
+reservation revision or token. Treat success as authoritative, make release
+idempotent, and broadcast committed status changes to connected clients.
 Pricing, authentication, authorization and expiry remain application concerns.

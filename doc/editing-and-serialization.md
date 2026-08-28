@@ -1,54 +1,44 @@
 # Editing and serialization
 
-`SeatLayoutEditor` edits the same controller used by `SeatLayout` and
-`SeatPicker`. It can resize the grid and paint the states supplied through
-`states`.
+`VenueSeatEditor` edits the same controller used by `VenueSeatViewer` and
+`VenueSeatPicker`. It resizes the grid, paints authoritative statuses and
+removes seats through immutable model operations.
 
 ```dart
-SeatLayoutEditor<BasicSeat>(
+VenueSeatEditor<VenueSeat, Object>(
   controller: controller,
-  states: const [
-    SeatState.available,
-    SeatState.blocked,
-    SeatState.empty,
-  ],
-  createItem: (row, column, state) => BasicSeat(
-    seatId: '$row:$column',
-    seatRow: row,
-    seatColumn: column,
-    seatState: state,
+  statuses: const [SeatStatus.available, SeatStatus.blocked],
+  editing: SeatEditingDelegate(
+    create: (position, status) => VenueSeat(
+      id: '${position.row}:${position.column}',
+      position: position,
+      status: status,
+    ),
+    withStatus: (seat, status) => seat.copyWith(status: status),
   ),
   onChanged: saveDraft,
 )
 ```
 
-Use your application's stable ID generator when coordinates are not permanent.
-Shrinking is refused when it would clip an occupied cell. Remove or move those
-cells first.
+Use a stable ID generator if coordinates can change. Shrinking is refused when
+it would clip an occupied slot.
 
 ## Save the built-in model
 
 ```dart
-final document = SeatLayoutDocument(
+final document = VenueSeatDocument(
   rows: controller.rows,
   columns: controller.columns,
-  seats: controller.cells
-      .map((cell) => cell.item)
-      .whereType<BasicSeat>()
-      .toList(),
-  background: controller.background,
+  seats: controller.seats.cast<VenueSeat>(),
+  backdrop: controller.backdrop,
 );
 
 final encoded = jsonEncode(document.toJson());
-final restored = SeatLayoutDocument.fromJson(
+final restored = VenueSeatDocument.fromJson(
   jsonDecode(encoded) as Map<String, Object?>,
 );
 ```
 
-`schemaVersion` protects the portable document format against incompatible
-changes. The current reader accepts version 1. When using your own
-`SeatLayoutItem`, serialize that domain model directly and call `loadLayout`
-after restoring it.
-
-Call `updateSeat` for durable model changes. `updateVisualState` intentionally
-changes only the rendered cell and is primarily useful for optimistic UI.
+`schemaVersion` protects the portable format against incompatible changes. For
+a custom model, persist your own domain objects and load them through their
+`SeatAdapter`.
