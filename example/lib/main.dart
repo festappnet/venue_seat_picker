@@ -37,11 +37,16 @@ class ExamplePage extends StatefulWidget {
 }
 
 class _ExamplePageState extends State<ExamplePage> {
+  static const selectionLimit = 6;
+  static const demoSelectionTarget = 5;
+
   late final VenueSeatController<VenueSeat, Object> controller;
   bool editing = Uri.base.queryParameters['mode'] == 'editor';
   bool closeUp = false;
+  bool hasInspectedSeats = false;
   bool hasEditedVenue = false;
   bool loading = true;
+  int editCount = 0;
   int nextCustomSeatId = 1000;
   Set<Object> selectedSeatIds = {};
 
@@ -91,8 +96,8 @@ class _ExamplePageState extends State<ExamplePage> {
                 avatar: const Icon(Icons.event_seat, size: 18),
                 label: Text(
                   compact
-                      ? '${selectedSeatIds.length} / 4'
-                      : '${selectedSeatIds.length} / 4 selected',
+                      ? '${selectedSeatIds.length} / $selectionLimit'
+                      : '${selectedSeatIds.length} / $selectionLimit selected',
                 ),
               ),
             ),
@@ -127,18 +132,29 @@ class _ExamplePageState extends State<ExamplePage> {
                   ? 5
                   : closeUp
                   ? 2
-                  : selectedSeatIds.length < 2
+                  : selectedSeatIds.length < demoSelectionTarget
                   ? 1
-                  : 3,
+                  : hasInspectedSeats
+                  ? 3
+                  : 2,
               message: editing
-                  ? 'Choose a tool, then paint or erase seats.'
+                  ? editCount < 3
+                        ? 'Change three seats to blocked.'
+                        : editCount < 5
+                        ? 'Erase two seats from the plan.'
+                        : editCount < 8
+                        ? 'Add three new available seats.'
+                        : 'Review the edits, then return to the picker.'
                   : hasEditedVenue
                   ? 'Picker and editor share the updated plan.'
                   : closeUp
                   ? 'Inspect individual seat states up close.'
-                  : selectedSeatIds.length < 2
-                  ? 'Select an available seat.'
-                  : 'Open the editor to modify this same plan.',
+                  : selectedSeatIds.length < demoSelectionTarget
+                  ? 'Select five available seats '
+                        '(${selectedSeatIds.length} / $demoSelectionTarget).'
+                  : hasInspectedSeats
+                  ? 'Open the editor to modify this same plan.'
+                  : 'Zoom in and inspect the selected seats.',
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -158,12 +174,15 @@ class _ExamplePageState extends State<ExamplePage> {
                         withStatus: (seat, status) =>
                             seat.copyWith(status: status),
                       ),
-                      onChanged: () => setState(() => hasEditedVenue = true),
+                      onChanged: () => setState(() {
+                        hasEditedVenue = true;
+                        editCount++;
+                      }),
                     )
                   : VenueSeatPicker<VenueSeat, Object>(
                       controller: controller,
                       config: VenueSeatViewConfig.fromTheme(context),
-                      maxSelectedSeats: 4,
+                      maxSelectedSeats: selectionLimit,
                       onSelectionRequested: (request) async {
                         await Future<void>.delayed(
                           const Duration(milliseconds: 350),
@@ -176,7 +195,7 @@ class _ExamplePageState extends State<ExamplePage> {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text(
-                                'You can select at most four seats.',
+                                'You can select at most six seats.',
                               ),
                             ),
                           ),
@@ -197,7 +216,10 @@ class _ExamplePageState extends State<ExamplePage> {
         controller.transformationController.value,
       )..scaleByDouble(1.45, 1.45, 1, 1);
     }
-    setState(() => closeUp = !closeUp);
+    setState(() {
+      if (closeUp) hasInspectedSeats = true;
+      closeUp = !closeUp;
+    });
   }
 
   void _setEditing(bool value) {
