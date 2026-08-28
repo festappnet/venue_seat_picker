@@ -1,0 +1,12 @@
+.dart_tool/
+.github/
+.packages
+build/
+doc/demo.gif
+doc/demo.webm
+example/.dart_tool/
+example/build/
+example/pubspec.lock
+pubspec.lock
+CONTRIBUTING.md
+SECURITY.md
