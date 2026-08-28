@@ -36,6 +36,8 @@ class ExamplePage extends StatefulWidget {
 class _ExamplePageState extends State<ExamplePage> {
   late final VenueSeatController<VenueSeat, Object> controller;
   bool editing = Uri.base.queryParameters['mode'] == 'editor';
+  bool closeUp = false;
+  bool hasEditedVenue = false;
   bool loading = true;
   int nextCustomSeatId = 1000;
   Set<Object> selectedSeatIds = {};
@@ -91,17 +93,22 @@ class _ExamplePageState extends State<ExamplePage> {
                 ),
               ),
             ),
+          IconButton(
+            tooltip: closeUp ? 'Fit entire venue' : 'Zoom in on seats',
+            onPressed: loading ? null : _toggleCloseUp,
+            icon: Icon(closeUp ? Icons.zoom_out_map : Icons.zoom_in),
+          ),
           if (compact)
             IconButton(
               tooltip: editing ? 'Open picker' : 'Open editor',
-              onPressed: () => setState(() => editing = !editing),
+              onPressed: () => _setEditing(!editing),
               icon: Icon(editing ? Icons.event_seat : Icons.edit_outlined),
             )
           else ...[
             const Text('Edit'),
             Switch(
               value: editing,
-              onChanged: (value) => setState(() => editing = value),
+              onChanged: _setEditing,
             ),
           ],
           const SizedBox(width: 4),
@@ -113,14 +120,27 @@ class _ExamplePageState extends State<ExamplePage> {
             : const EdgeInsets.fromLTRB(24, 12, 24, 20),
         child: Column(
           children: [
-            Text(
-              editing
-                  ? 'Choose a tool, then tap seats to edit the plan.'
-                  : compact
-                  ? 'Tap a seat to select it. Pinch to zoom.'
-                  : 'Click available seats to select them. Scroll to zoom.',
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
+            _DemoStepBanner(
+              step: editing
+                  ? 4
+                  : hasEditedVenue
+                  ? 5
+                  : selectedSeatIds.isEmpty
+                  ? 1
+                  : selectedSeatIds.length < 3
+                  ? 2
+                  : 3,
+              message: editing
+                  ? 'Choose a tool, then paint or erase seats.'
+                  : hasEditedVenue
+                  ? 'Picker and editor share the updated plan.'
+                  : selectedSeatIds.isEmpty
+                  ? compact
+                        ? 'Select an available seat. Pinch to zoom.'
+                        : 'Select an available seat. Scroll to zoom.'
+                  : selectedSeatIds.length < 3
+                  ? 'Review each selected seat before continuing.'
+                  : 'Open the editor to modify this same plan.',
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -140,6 +160,7 @@ class _ExamplePageState extends State<ExamplePage> {
                         withStatus: (seat, status) =>
                             seat.copyWith(status: status),
                       ),
+                      onChanged: () => setState(() => hasEditedVenue = true),
                     )
                   : VenueSeatPicker<VenueSeat, Object>(
                       controller: controller,
@@ -169,6 +190,49 @@ class _ExamplePageState extends State<ExamplePage> {
       ),
     );
   }
+
+  void _toggleCloseUp() {
+    if (closeUp) {
+      controller.fitToViewport();
+    } else {
+      controller.transformationController.value = Matrix4.copy(
+        controller.transformationController.value,
+      )..scaleByDouble(1.45, 1.45, 1, 1);
+    }
+    setState(() => closeUp = !closeUp);
+  }
+
+  void _setEditing(bool value) {
+    if (closeUp) controller.fitToViewport();
+    setState(() {
+      editing = value;
+      closeUp = false;
+    });
+  }
+}
+
+class _DemoStepBanner extends StatelessWidget {
+  const _DemoStepBanner({required this.step, required this.message});
+
+  final int step;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      '$step  $message',
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+      textAlign: TextAlign.center,
+    ),
+  );
 }
 
 class _Legend extends StatelessWidget {

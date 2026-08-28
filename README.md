@@ -6,19 +6,18 @@ reservation picker and grid editor behind one consistent model seam.
 Built for and used in production by [Festapp](https://festapp.net), including
 the live application at [live.festapp.net](https://live.festapp.net).
 
-![Mobile selection and venue editing demo](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
+![Slower close-up of seat selection and venue editing](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
 
-[Watch the higher-quality mobile WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
+[Watch the higher-quality close-up WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
 
 | Customer picker | Venue editor |
 | --- | --- |
-| ![Selecting seats on a venue floor plan](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/picker.png) | ![Editing seats on the same venue floor plan](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/editor.png) |
+| ![Selecting seats in a compact theatre](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/picker.png) | ![Editing seats in the same compact theatre](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/editor.png) |
 
 The picker and editor operate on the same controller and venue document, so an
 application can offer customer selection and staff editing without maintaining
-two layout implementations. The media above uses an anonymized venue plan
-adapted from Festapp's production deployment at
-[vstupenky.online](https://vstupenky.online).
+two layout implementations. The media above uses a small fictional theatre so
+individual seat states and interactions remain easy to follow.
 
 ## Features
 
@@ -66,8 +65,8 @@ VenueSeatPicker<VenueSeat, Object>(
 
 Create the controller in `State.initState` and dispose it with its owning
 widget. The runnable [example application](example/) demonstrates selection,
-pending state, zoom, a detailed SVG floor plan, status rendering and live
-layout editing. It follows the device's light or dark appearance automatically.
+pending state, zoom, a compact SVG floor plan, status rendering and live layout
+editing. It follows the device's light or dark appearance automatically.
 
 ## Use an existing domain model
 
