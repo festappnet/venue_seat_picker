@@ -27,7 +27,7 @@ class ExamplePage extends StatefulWidget {
 
 class _ExamplePageState extends State<ExamplePage> {
   late final VenueSeatController<VenueSeat, Object> controller;
-  bool editing = false;
+  bool editing = Uri.base.queryParameters['mode'] == 'editor';
   bool loading = true;
   int nextCustomSeatId = 1000;
   Set<Object> selectedSeatIds = {};
@@ -65,77 +65,100 @@ class _ExamplePageState extends State<ExamplePage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Venue seat picker'),
-      actions: [
-        if (!editing)
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Chip(
-              avatar: const Icon(Icons.event_seat, size: 18),
-              label: Text('${selectedSeatIds.length} / 4 selected'),
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 600;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(compact ? 'Seat map' : 'Venue seat picker'),
+        actions: [
+          if (!editing)
+            Padding(
+              padding: EdgeInsets.only(right: compact ? 4 : 12),
+              child: Chip(
+                avatar: const Icon(Icons.event_seat, size: 18),
+                label: Text(
+                  compact
+                      ? '${selectedSeatIds.length} / 4'
+                      : '${selectedSeatIds.length} / 4 selected',
+                ),
+              ),
             ),
-          ),
-        const Text('Edit'),
-        Switch(
-          value: editing,
-          onChanged: (value) => setState(() => editing = value),
-        ),
-      ],
-    ),
-    body: Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
-      child: Column(
-        children: [
-          Text(
-            editing
-                ? 'Choose a tool, then click seats to change the plan.'
-                : 'Click available seats to select them. Scroll to zoom.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: loading
-                ? const Center(child: CircularProgressIndicator())
-                : editing
-                ? VenueSeatEditor<VenueSeat, Object>(
-                    controller: controller,
-                    editing: SeatEditingDelegate<VenueSeat>(
-                      create: (position, status) => VenueSeat(
-                        id: 'custom-${nextCustomSeatId++}',
-                        position: position,
-                        status: status,
-                        label: 'New ${position.row}:${position.column}',
-                      ),
-                      withStatus: (seat, status) =>
-                          seat.copyWith(status: status),
-                    ),
-                  )
-                : VenueSeatPicker<VenueSeat, Object>(
-                    controller: controller,
-                    maxSelectedSeats: 4,
-                    onSelectionRequested: (request) async {
-                      await Future<void>.delayed(
-                        const Duration(milliseconds: 350),
-                      );
-                      return true;
-                    },
-                    onSelectionChanged: (selection) =>
-                        setState(() => selectedSeatIds = selection),
-                    onSelectionLimitReached: () =>
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('You can select at most four seats.'),
-                          ),
-                        ),
-                  ),
-          ),
-          if (!editing && !loading) const _Legend(),
+          if (compact)
+            IconButton(
+              tooltip: editing ? 'Open picker' : 'Open editor',
+              onPressed: () => setState(() => editing = !editing),
+              icon: Icon(editing ? Icons.event_seat : Icons.edit_outlined),
+            )
+          else ...[
+            const Text('Edit'),
+            Switch(
+              value: editing,
+              onChanged: (value) => setState(() => editing = value),
+            ),
+          ],
+          const SizedBox(width: 4),
         ],
       ),
-    ),
-  );
+      body: Padding(
+        padding: compact
+            ? const EdgeInsets.fromLTRB(8, 8, 8, 12)
+            : const EdgeInsets.fromLTRB(24, 12, 24, 20),
+        child: Column(
+          children: [
+            Text(
+              editing
+                  ? 'Choose a tool, then tap seats to edit the plan.'
+                  : compact
+                  ? 'Tap a seat to select it. Pinch to zoom.'
+                  : 'Click available seats to select them. Scroll to zoom.',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : editing
+                  ? VenueSeatEditor<VenueSeat, Object>(
+                      controller: controller,
+                      editing: SeatEditingDelegate<VenueSeat>(
+                        create: (position, status) => VenueSeat(
+                          id: 'custom-${nextCustomSeatId++}',
+                          position: position,
+                          status: status,
+                          label: 'New ${position.row}:${position.column}',
+                        ),
+                        withStatus: (seat, status) =>
+                            seat.copyWith(status: status),
+                      ),
+                    )
+                  : VenueSeatPicker<VenueSeat, Object>(
+                      controller: controller,
+                      maxSelectedSeats: 4,
+                      onSelectionRequested: (request) async {
+                        await Future<void>.delayed(
+                          const Duration(milliseconds: 350),
+                        );
+                        return true;
+                      },
+                      onSelectionChanged: (selection) =>
+                          setState(() => selectedSeatIds = selection),
+                      onSelectionLimitReached: () =>
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'You can select at most four seats.',
+                              ),
+                            ),
+                          ),
+                    ),
+            ),
+            if (!editing && !loading) const _Legend(),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Legend extends StatelessWidget {

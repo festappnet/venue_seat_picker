@@ -6,9 +6,9 @@ reservation picker and grid editor behind one consistent model seam.
 Built for and used in production by [Festapp](https://festapp.net), including
 the live application at [live.festapp.net](https://live.festapp.net).
 
-![Selection and venue editing demo](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
+![Mobile selection and venue editing demo](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/demo.gif)
 
-[Watch the higher-quality WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
+[Watch the higher-quality mobile WebM demo](https://github.com/festappnet/venue_seat_picker/raw/main/doc/demo.webm)
 
 | Customer picker | Venue editor |
 | --- | --- |
