@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
@@ -41,6 +42,8 @@ class _ExamplePageState extends State<ExamplePage> {
   static const demoSelectionTarget = 5;
 
   late final VenueSeatController<VenueSeat, Object> controller;
+  late final String svgBackdropSource;
+  _BackdropChoice backdropChoice = _BackdropChoice.svg;
   bool editing = Uri.base.queryParameters['mode'] == 'editor';
   bool closeUp = false;
   bool hasInspectedSeats = false;
@@ -63,7 +66,9 @@ class _ExamplePageState extends State<ExamplePage> {
     final values =
         jsonDecode(await rootBundle.loadString('assets/venue.json'))
             as Map<String, Object?>;
-    final backdrop = await rootBundle.loadString('assets/venue_floor_plan.svg');
+    svgBackdropSource = await rootBundle.loadString(
+      'assets/venue_floor_plan.svg',
+    );
     final seats = (values['seats']! as List<Object?>)
         .cast<Map<String, Object?>>()
         .map(VenueSeat.fromJson);
@@ -71,7 +76,7 @@ class _ExamplePageState extends State<ExamplePage> {
       rows: values['rows']! as int,
       columns: values['columns']! as int,
       seats: seats,
-      backdrop: SvgVenueBackdrop(backdrop),
+      backdrop: SvgVenueBackdrop(svgBackdropSource),
     );
     if (mounted) setState(() => loading = false);
   }
@@ -101,6 +106,40 @@ class _ExamplePageState extends State<ExamplePage> {
                 ),
               ),
             ),
+          PopupMenuButton<_BackdropChoice>(
+            tooltip: 'Change venue background',
+            enabled: !loading,
+            initialValue: backdropChoice,
+            onSelected: _setBackdrop,
+            icon: Icon(switch (backdropChoice) {
+              _BackdropChoice.svg => Icons.draw_outlined,
+              _BackdropChoice.png => Icons.image_outlined,
+              _BackdropChoice.none => Icons.hide_image_outlined,
+            }),
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _BackdropChoice.svg,
+                child: _BackdropMenuItem(
+                  icon: Icons.draw_outlined,
+                  label: 'SVG floor plan',
+                ),
+              ),
+              PopupMenuItem(
+                value: _BackdropChoice.png,
+                child: _BackdropMenuItem(
+                  icon: Icons.image_outlined,
+                  label: 'PNG section zones',
+                ),
+              ),
+              PopupMenuItem(
+                value: _BackdropChoice.none,
+                child: _BackdropMenuItem(
+                  icon: Icons.hide_image_outlined,
+                  label: 'No background',
+                ),
+              ),
+            ],
+          ),
           IconButton(
             tooltip: closeUp ? 'Fit entire venue' : 'Zoom in on seats',
             onPressed: loading ? null : _toggleCloseUp,
@@ -222,6 +261,20 @@ class _ExamplePageState extends State<ExamplePage> {
     });
   }
 
+  void _setBackdrop(_BackdropChoice value) {
+    controller.setBackdrop(switch (value) {
+      _BackdropChoice.svg => SvgVenueBackdrop(svgBackdropSource),
+      _BackdropChoice.png => NetworkVenueBackdrop(_pngBackdropSource),
+      _BackdropChoice.none => null,
+    });
+    setState(() => backdropChoice = value);
+  }
+
+  String get _pngBackdropSource => kIsWeb
+      ? Uri.base.resolve('assets/assets/venue_zones.png').toString()
+      : 'https://raw.githubusercontent.com/festappnet/venue_seat_picker/'
+            'main/example/assets/venue_zones.png';
+
   void _setEditing(bool value) {
     if (closeUp) controller.fitToViewport();
     setState(() {
@@ -229,6 +282,20 @@ class _ExamplePageState extends State<ExamplePage> {
       closeUp = false;
     });
   }
+}
+
+enum _BackdropChoice { svg, png, none }
+
+class _BackdropMenuItem extends StatelessWidget {
+  const _BackdropMenuItem({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
+  );
 }
 
 class _DemoStepBanner extends StatelessWidget {

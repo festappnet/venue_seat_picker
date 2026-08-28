@@ -19,3 +19,4 @@ flutter:
   assets:
     - assets/venue.json
     - assets/venue_floor_plan.svg
+    - assets/venue_zones.png
