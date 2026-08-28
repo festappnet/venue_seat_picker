@@ -3,6 +3,10 @@
 `VenueSeatThemeData` follows Flutter's `ThemeData` naming convention. Pass it
 inside `VenueSeatViewConfig` to any viewer, picker or editor:
 
+Use `VenueSeatViewConfig.fromTheme(context)` to inherit the host app's light or
+dark surface. Interaction highlights and surrounding Material widgets already
+follow `ThemeData`. Status colors stay consistent and can be overridden:
+
 ```dart
 const config = VenueSeatViewConfig(
   maxScale: 8,

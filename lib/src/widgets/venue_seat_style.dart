@@ -48,6 +48,19 @@ class VenueSeatViewConfig {
     this.theme = const VenueSeatThemeData(),
   }) : assert(maxScale > 0);
 
+  /// Creates a config whose surface follows the host light or dark theme.
+  factory VenueSeatViewConfig.fromTheme(
+    BuildContext context, {
+    double maxScale = 5,
+    BorderRadius borderRadius = const BorderRadius.all(Radius.circular(12)),
+    VenueSeatThemeData theme = const VenueSeatThemeData(),
+  }) => VenueSeatViewConfig(
+    maxScale: maxScale,
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    borderRadius: borderRadius,
+    theme: theme,
+  );
+
   final double maxScale;
   final Color backgroundColor;
   final BorderRadius borderRadius;

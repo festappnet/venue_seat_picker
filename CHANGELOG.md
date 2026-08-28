@@ -1,3 +1,9 @@
+## 0.1.1
+
+- Removed visual grid lines from empty editor slots while keeping them tappable.
+- Added native light and dark surface support through the host `ThemeData`.
+- Improved the mobile demo with explanatory action captions.
+
 ## 0.1.0
 
 - Initial release with `VenueSeatViewer`, `VenueSeatPicker` and

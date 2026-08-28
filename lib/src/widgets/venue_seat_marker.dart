@@ -41,8 +41,6 @@ class VenueSeatMarker extends StatelessWidget {
                 theme.highlightBorder ?? Theme.of(context).colorScheme.primary,
             width: 2,
           )
-        : status == null
-        ? Border.all(color: Theme.of(context).dividerColor, width: .5)
         : null;
     return Opacity(
       opacity: pending ? .58 : 1,

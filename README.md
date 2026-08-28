@@ -27,6 +27,8 @@ adapted from Festapp's production deployment at
 - Selection limits, pending indicators and custom eligibility rules.
 - Grid editor with immutable create/update delegates.
 - Custom seat builders, tooltips, colors and SVG/image backdrops.
+- Native light and dark mode support through
+  `VenueSeatViewConfig.fromTheme(context)`.
 - Versioned JSON through `VenueSeat` and `VenueSeatDocument`.
 - Read-only `SeatAdapter`; the package never mutates your domain objects.
 - Android, iOS, Linux, macOS, web and Windows support.
@@ -35,7 +37,7 @@ adapted from Festapp's production deployment at
 
 ```yaml
 dependencies:
-  venue_seat_picker: ^0.1.0
+  venue_seat_picker: ^0.1.1
 ```
 
 ```dart
@@ -65,7 +67,7 @@ VenueSeatPicker<VenueSeat, Object>(
 Create the controller in `State.initState` and dispose it with its owning
 widget. The runnable [example application](example/) demonstrates selection,
 pending state, zoom, a detailed SVG floor plan, status rendering and live
-layout editing.
+layout editing. It follows the device's light or dark appearance automatically.
 
 ## Use an existing domain model
 

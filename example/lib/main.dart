@@ -14,6 +14,14 @@ class ExampleApp extends StatelessWidget {
     title: 'Venue seat picker',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+    darkTheme: ThemeData(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.indigo,
+        brightness: Brightness.dark,
+      ),
+      useMaterial3: true,
+    ),
+    themeMode: ThemeMode.system,
     home: const ExamplePage(),
   );
 }
@@ -121,6 +129,7 @@ class _ExamplePageState extends State<ExamplePage> {
                   : editing
                   ? VenueSeatEditor<VenueSeat, Object>(
                       controller: controller,
+                      config: VenueSeatViewConfig.fromTheme(context),
                       editing: SeatEditingDelegate<VenueSeat>(
                         create: (position, status) => VenueSeat(
                           id: 'custom-${nextCustomSeatId++}',
@@ -134,6 +143,7 @@ class _ExamplePageState extends State<ExamplePage> {
                     )
                   : VenueSeatPicker<VenueSeat, Object>(
                       controller: controller,
+                      config: VenueSeatViewConfig.fromTheme(context),
                       maxSelectedSeats: 4,
                       onSelectionRequested: (request) async {
                         await Future<void>.delayed(
