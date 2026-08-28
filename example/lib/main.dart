@@ -10,20 +10,23 @@ class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Venue seat picker',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-    darkTheme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.indigo,
-        brightness: Brightness.dark,
+  Widget build(BuildContext context) {
+    final demoMode = Uri.base.queryParameters['demo'] == 'true';
+    return MaterialApp(
+      title: 'Venue seat picker',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.indigo,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
       ),
-      useMaterial3: true,
-    ),
-    themeMode: ThemeMode.system,
-    home: const ExamplePage(),
-  );
+      themeMode: demoMode ? ThemeMode.light : ThemeMode.system,
+      home: const ExamplePage(),
+    );
+  }
 }
 
 class ExamplePage extends StatefulWidget {
@@ -106,10 +109,7 @@ class _ExamplePageState extends State<ExamplePage> {
             )
           else ...[
             const Text('Edit'),
-            Switch(
-              value: editing,
-              onChanged: _setEditing,
-            ),
+            Switch(value: editing, onChanged: _setEditing),
           ],
           const SizedBox(width: 4),
         ],
@@ -125,21 +125,19 @@ class _ExamplePageState extends State<ExamplePage> {
                   ? 4
                   : hasEditedVenue
                   ? 5
-                  : selectedSeatIds.isEmpty
-                  ? 1
-                  : selectedSeatIds.length < 3
+                  : closeUp
                   ? 2
+                  : selectedSeatIds.length < 2
+                  ? 1
                   : 3,
               message: editing
                   ? 'Choose a tool, then paint or erase seats.'
                   : hasEditedVenue
                   ? 'Picker and editor share the updated plan.'
-                  : selectedSeatIds.isEmpty
-                  ? compact
-                        ? 'Select an available seat. Pinch to zoom.'
-                        : 'Select an available seat. Scroll to zoom.'
-                  : selectedSeatIds.length < 3
-                  ? 'Review each selected seat before continuing.'
+                  : closeUp
+                  ? 'Inspect individual seat states up close.'
+                  : selectedSeatIds.length < 2
+                  ? 'Select an available seat.'
                   : 'Open the editor to modify this same plan.',
             ),
             const SizedBox(height: 8),
