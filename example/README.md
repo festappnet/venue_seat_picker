@@ -3,7 +3,7 @@
 This runnable application demonstrates:
 
 - optimistic asynchronous selection with a pending indicator;
-- a four-seat selection limit;
+- a six-seat selection limit;
 - zooming and panning around a compact theatre where individual seats remain
   easy to inspect;
 - available, held, booked, checked-in and blocked statuses;
