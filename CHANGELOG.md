@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Keep zoomed plans visible by default in the viewer, picker and editor, center
+  small plans, and update pan bounds when the viewport changes. Explicit infinite
+  boundary margins retain unrestricted panning.
+
 - Added in-memory image backdrops for local file previews and configurable pan
   boundaries.
 

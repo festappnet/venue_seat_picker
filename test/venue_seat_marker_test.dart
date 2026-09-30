@@ -55,12 +55,12 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('viewer forwards a finite pan boundary to InteractiveViewer', (
+  testWidgets('viewer applies finite pan allowance at the current zoom', (
     tester,
   ) async {
     final controller = VenueSeatController<VenueSeat, Object>(
       adapter: venueSeatAdapter,
-    )..loadPlan(rows: 1, columns: 1, seats: const []);
+    )..loadPlan(rows: 20, columns: 20, seats: const []);
     const margin = EdgeInsets.all(48);
 
     await tester.pumpWidget(
@@ -75,14 +75,13 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-
-    expect(
-      tester
-          .widget<InteractiveViewer>(find.byType(InteractiveViewer))
-          .boundaryMargin,
-      margin,
-    );
+    await tester.pumpAndSettle();
+    controller.transformationController.value = Matrix4.diagonal3Values(2, 2, 1)
+      ..setTranslationRaw(10000, 10000, 0);
+    final position = controller.transformationController.value.getTranslation();
+    expect(position.x, closeTo(margin.left * 2, 0.001));
+    expect(position.y, closeTo(margin.top * 2, 0.001));
+    await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
 }

@@ -43,7 +43,7 @@ class VenueSeatThemeData {
 class VenueSeatViewConfig {
   const VenueSeatViewConfig({
     this.maxScale = 5,
-    this.boundaryMargin = const EdgeInsets.all(double.infinity),
+    this.boundaryMargin = EdgeInsets.zero,
     this.backgroundColor = Colors.white,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
     this.theme = const VenueSeatThemeData(),
@@ -53,7 +53,7 @@ class VenueSeatViewConfig {
   factory VenueSeatViewConfig.fromTheme(
     BuildContext context, {
     double maxScale = 5,
-    EdgeInsets boundaryMargin = const EdgeInsets.all(double.infinity),
+    EdgeInsets boundaryMargin = EdgeInsets.zero,
     BorderRadius borderRadius = const BorderRadius.all(Radius.circular(12)),
     VenueSeatThemeData theme = const VenueSeatThemeData(),
   }) => VenueSeatViewConfig(
@@ -65,6 +65,9 @@ class VenueSeatViewConfig {
   );
 
   final double maxScale;
+
+  /// Extra scene-space pan allowance. Finite margins keep the plan visible;
+  /// an all-infinite margin explicitly enables unrestricted panning.
   final EdgeInsets boundaryMargin;
   final Color backgroundColor;
   final BorderRadius borderRadius;

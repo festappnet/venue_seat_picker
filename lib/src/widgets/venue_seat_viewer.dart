@@ -39,6 +39,8 @@ class VenueSeatViewer<T, Id extends Object> extends StatefulWidget {
 class _VenueSeatViewerState<T, Id extends Object>
     extends State<VenueSeatViewer<T, Id>> {
   final GlobalKey _layoutKey = GlobalKey();
+  Size _viewport = Size.zero;
+  bool _constraintScheduled = false;
 
   @override
   void initState() {
@@ -46,6 +48,7 @@ class _VenueSeatViewerState<T, Id extends Object>
     widget.controller
       ..attachLayoutKey(_layoutKey)
       ..addListener(_changed);
+    widget.controller.transformationController.addListener(_constrainPosition);
   }
 
   @override
@@ -53,20 +56,89 @@ class _VenueSeatViewerState<T, Id extends Object>
     super.didUpdateWidget(oldWidget);
     if (widget.controller != oldWidget.controller) {
       oldWidget.controller.removeListener(_changed);
+      oldWidget.controller.transformationController.removeListener(
+        _constrainPosition,
+      );
       widget.controller
         ..attachLayoutKey(_layoutKey)
         ..addListener(_changed);
+      widget.controller.transformationController.addListener(
+        _constrainPosition,
+      );
     }
+    _scheduleConstraint();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_changed);
+    widget.controller.transformationController.removeListener(
+      _constrainPosition,
+    );
     super.dispose();
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _scheduleConstraint();
+    }
+  }
+
+  void _scheduleConstraint() {
+    if (_constraintScheduled) return;
+    _constraintScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _constraintScheduled = false;
+      if (mounted) _constrainPosition();
+    });
+  }
+
+  void _constrainPosition() {
+    if (_viewport.isEmpty) return;
+    final controller = widget.controller;
+    final transform = controller.transformationController;
+    final matrix = transform.value;
+    final scale = matrix.getMaxScaleOnAxis();
+    final position = matrix.getTranslation();
+    final width = controller.columns * controller.seatSize * scale;
+    final height = controller.rows * controller.seatSize * scale;
+    if (width <= 0 || height <= 0) return;
+    final margin = widget.config.boundaryMargin;
+
+    double constrain(
+      double offset,
+      double content,
+      double viewport,
+      double leading,
+      double trailing,
+    ) {
+      if (leading.isInfinite && trailing.isInfinite) return offset;
+      if (content <= viewport) return (viewport - content) / 2;
+      // Cap finite overscroll so even a generous margin cannot hide the plan.
+      final before = (leading * scale).clamp(0.0, viewport / 2);
+      final after = (trailing * scale).clamp(0.0, viewport / 2);
+      return offset.clamp(viewport - content - after, before).toDouble();
+    }
+
+    final x = constrain(
+      position.x,
+      width,
+      _viewport.width,
+      margin.left,
+      margin.right,
+    );
+    final y = constrain(
+      position.y,
+      height,
+      _viewport.height,
+      margin.top,
+      margin.bottom,
+    );
+    if ((x - position.x).abs() < 0.001 && (y - position.y).abs() < 0.001) {
+      return;
+    }
+    transform.value = Matrix4.copy(matrix)..setTranslationRaw(x, y, position.z);
   }
 
   @override
@@ -74,40 +146,51 @@ class _VenueSeatViewerState<T, Id extends Object>
     final controller = widget.controller;
     final width = controller.columns * controller.seatSize;
     final height = controller.rows * controller.seatSize;
-    return Container(
-      key: _layoutKey,
-      child: AnimatedOpacity(
-        opacity: controller.isLayoutReady ? 1 : 0,
-        duration: const Duration(milliseconds: 200),
-        child: InteractiveViewer(
-          minScale: controller.minScale.clamp(0.01, widget.config.maxScale),
-          maxScale: widget.config.maxScale,
-          boundaryMargin: widget.config.boundaryMargin,
-          constrained: false,
-          transformationController: controller.transformationController,
-          child: RepaintBoundary(
-            child: SizedBox(
-              width: width,
-              height: height,
-              child: Stack(
-                children: [
-                  Positioned.fill(child: _backdrop(width, height)),
-                  for (final slot in controller.slots)
-                    if (slot.seat != null || widget.editorMode)
-                      Positioned(
-                        left: slot.column * slot.size,
-                        top: slot.row * slot.size,
-                        child: _SeatTapTarget(
-                          onTap: () => _tap(slot),
-                          child: _seat(context, slot),
-                        ),
-                      ),
-                ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        if (size.isFinite && size != _viewport) {
+          _viewport = size;
+          _scheduleConstraint();
+        }
+        return Container(
+          key: _layoutKey,
+          child: AnimatedOpacity(
+            opacity: controller.isLayoutReady ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: InteractiveViewer(
+              minScale: controller.minScale.clamp(0.01, widget.config.maxScale),
+              maxScale: widget.config.maxScale,
+              // Constrain the scaled plan ourselves: native scene bounds cannot
+              // center a plan that is smaller than the viewport on one axis.
+              boundaryMargin: const EdgeInsets.all(double.infinity),
+              constrained: false,
+              transformationController: controller.transformationController,
+              child: RepaintBoundary(
+                child: SizedBox(
+                  width: width,
+                  height: height,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: _backdrop(width, height)),
+                      for (final slot in controller.slots)
+                        if (slot.seat != null || widget.editorMode)
+                          Positioned(
+                            left: slot.column * slot.size,
+                            top: slot.row * slot.size,
+                            child: _SeatTapTarget(
+                              onTap: () => _tap(slot),
+                              child: _seat(context, slot),
+                            ),
+                          ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

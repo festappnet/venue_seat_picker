@@ -65,6 +65,12 @@ VenueSeatPicker<VenueSeat, Object>(
 )
 ```
 
+The viewer, picker and editor keep the plan visible during zoom and pan by
+default, centering any axis that fits inside the viewport. Use
+`VenueSeatViewConfig(boundaryMargin: EdgeInsets.all(24))` for a small edge
+allowance, or explicitly pass `EdgeInsets.all(double.infinity)` to allow
+unrestricted panning.
+
 Create the controller in `State.initState` and dispose it with its owning
 widget. The runnable [example application](example/) and its
 [live web version](https://festappnet.github.io/venue_seat_picker/) demonstrate
