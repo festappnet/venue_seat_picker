@@ -260,10 +260,12 @@ class VenueSeatController<T, Id extends Object> extends ChangeNotifier {
         .toDouble();
     final x = (renderBox.size.width - layoutWidth * minScale) / 2;
     final y = (renderBox.size.height - layoutHeight * minScale) / 2;
+    // InteractiveViewer and viewport bounds use the maximum scale across
+    // all three axes. Keep Z consistent so zooming out reports the true scale.
     transformationController.value = Matrix4.diagonal3Values(
       minScale,
       minScale,
-      1,
+      minScale,
     )..setTranslationRaw(x, y, 0);
     isLayoutReady = true;
     notifyListeners();

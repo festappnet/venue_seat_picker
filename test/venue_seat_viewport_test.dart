@@ -73,6 +73,54 @@ void main() {
     });
   }
 
+  testWidgets('tall editor plan is physically centered in loose column space', (
+    tester,
+  ) async {
+    final controller = VenueSeatController<VenueSeat, Object>(
+      adapter: venueSeatAdapter,
+    )..loadPlan(rows: 72, columns: 40, seats: const []);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 700,
+            height: 550,
+            child: Column(
+              children: [
+                const SizedBox(height: 50, width: 700),
+                Flexible(
+                  child: VenueSeatViewer(
+                    controller: controller,
+                    editorMode: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scene = tester.renderObject<RenderBox>(
+      find
+          .descendant(
+            of: find.byType(InteractiveViewer),
+            matching: find.byType(RepaintBoundary),
+          )
+          .first,
+    );
+    final center = scene.localToGlobal(scene.size.center(Offset.zero));
+    expect(
+      center.dx,
+      closeTo(350, 0.1),
+      reason:
+          'viewer=${tester.getRect(find.byType(InteractiveViewer))}, scene=${scene.size}, matrix=${controller.transformationController.value}',
+    );
+    expect(center.dy, closeTo(300, 0.1));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('small plans stay centered after zoom and viewport resize', (
     tester,
   ) async {
