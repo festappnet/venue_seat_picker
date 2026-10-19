@@ -6,6 +6,69 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 
 void main() {
   testWidgets(
+    'rapid canvas input publishes one preview per frame and flushes the final pointer on release',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final original = tableLayout(shape: 'rect', count: 8);
+      final c = VenueLayoutController(original);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(controller: c, showGallery: false),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('edit-canvas')));
+      await tester.pumpAndSettle();
+      LayoutSceneSurface surface() =>
+          tester.widget(find.byType(LayoutSceneSurface));
+      var updates = 0;
+      c.addListener(() => updates++);
+      final right =
+          (original.canvas['x'] as num) + (original.canvas['width'] as num);
+      surface().onHandleStart!(
+        'Canvas resize e',
+        Offset(right.toDouble(), 300),
+      );
+      for (var i = 1; i <= 100; i++) {
+        surface().onDragUpdate!(Offset(right + i.toDouble(), 300));
+      }
+      expect(
+        updates,
+        lessThanOrEqualTo(1),
+        reason:
+            'Intermediate pointer positions cannot be painted in the same frame',
+      );
+      await tester.pump();
+      expect(
+        c.document.canvas['width'],
+        (original.canvas['width'] as num) + 100,
+      );
+      surface().onDragUpdate!(Offset(right + 130, 300));
+      surface().onDragEnd!();
+      expect(
+        c.document.canvas['width'],
+        (original.canvas['width'] as num) + 130,
+      );
+      await tester.pump();
+      c.undo();
+      expect(c.document, same(original));
+      expect(c.canUndo, isFalse);
+      surface().onHandleStart!(
+        'Canvas resize e',
+        Offset(right.toDouble(), 300),
+      );
+      surface().onDragUpdate!(Offset(right + 500, 300));
+      surface().onDragCancel!();
+      await tester.pump();
+      expect(c.document, same(original));
+      expect(c.canUndo, isFalse);
+    },
+  );
+
+  testWidgets(
     'canvas drag retains the inspector across host rebuilds and changes only canvas bounds',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1440, 900));

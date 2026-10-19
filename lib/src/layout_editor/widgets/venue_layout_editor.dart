@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'layout_scene_surface.dart';
 import 'layout_palette_drag_feedback.dart';
@@ -91,6 +92,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _libraryOpen = false;
   Map<String, dynamic>? _previewSeating;
   Map<String, double>? _canvasResizeBounds;
+  Offset? _pendingCanvasPoint;
+  int? _canvasFrameCallback;
   final Map<String, VenueLayoutDocument> _previews = {};
   final Map<String, VenueLayoutDocument> _themedPreviews = {};
   String _librarySearch = '';
@@ -202,6 +205,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   @override
   void dispose() {
+    _discardCanvasPreview();
     _stopPaste();
     _paletteFeedbackState.dispose();
     _focus.dispose();
@@ -789,7 +793,38 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     c.beginGesture();
   }
 
+  void _discardCanvasPreview() {
+    final callback = _canvasFrameCallback;
+    _canvasFrameCallback = null;
+    _pendingCanvasPoint = null;
+    if (callback != null) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
+    }
+  }
+
+  void _flushCanvasPreview() {
+    final point = _pendingCanvasPoint;
+    _discardCanvasPreview();
+    if (point != null && mounted) _applyDragUpdate(point);
+  }
+
   void _dragUpdate(Offset point) {
+    if (_gestureTool?.startsWith('Canvas resize ') ?? false) {
+      // Multiple mouse samples can arrive before one frame is paintable.
+      // Apply only the latest sample before that frame's build and paint.
+      _pendingCanvasPoint = point;
+      _canvasFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((
+        _,
+      ) {
+        _canvasFrameCallback = null;
+        _flushCanvasPreview();
+      });
+      return;
+    }
+    _applyDragUpdate(point);
+  }
+
+  void _applyDragUpdate(Offset point) {
     try {
       _dragUpdateUnsafe(point);
     } catch (error) {
@@ -1243,6 +1278,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _endGesture() {
+    _flushCanvasPreview();
     _resizeRemovedSeats = 0;
     _selectionBeforeDown = null;
     if (_startDocument != null &&
@@ -1330,6 +1366,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _cancelGesture() {
+    _discardCanvasPreview();
     _surfaceBrush = null;
     _resizeRemovedSeats = 0;
     _drawId = null;
@@ -1974,6 +2011,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _handleStart(String mode, Offset point) {
+    _discardCanvasPreview();
     _resizeRemovedSeats = 0;
     _focus.requestFocus();
     _gestureTool = mode;
