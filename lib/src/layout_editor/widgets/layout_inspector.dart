@@ -20,6 +20,7 @@ class LayoutInspector extends StatefulWidget {
     required this.onPivotChanged,
     this.hostBuilder,
     this.onRenameNode,
+    this.fontPickerBuilder,
     this.canvasSelected = false,
     this.onImportBackground,
     this.onClearSelection,
@@ -28,6 +29,9 @@ class LayoutInspector extends StatefulWidget {
     this.readOnlyLabelNodeIds = const {},
   });
   final VenueLayoutController controller;
+
+  /// Optional host font catalog for object typography, built only in edit mode.
+  final Widget Function(BuildContext, LayoutNode)? fontPickerBuilder;
   final void Function(LayoutNode, String)? onRenameNode;
   final Set<String> readOnlyLabelNodeIds;
   final bool cornerPivot;
@@ -915,28 +919,30 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          EditorFontPicker(
-            value: p['fontId'] as String?,
-            label: 'Font',
-            enabled: !(c.readOnly || c.saving),
-            translate: (text) => VenueLayoutStrings.text(context, text),
-            options: [
-              for (final entry in (c.resources['fonts'] as Map? ?? {}).entries)
-                EditorFontOption(
-                  id: '${entry.key}',
-                  family: '${entry.value['family'] ?? 'Font'}',
-                ),
-            ],
-            onSelected: (id) async {
-              final properties = Map<String, dynamic>.from(n.properties);
-              if (id == null) {
-                properties.remove('fontId');
-              } else {
-                properties['fontId'] = id;
-              }
-              c.updateNode(n.copyWith(properties: properties));
-            },
-          ),
+          widget.fontPickerBuilder?.call(context, n) ??
+              EditorFontPicker(
+                value: p['fontId'] as String?,
+                label: 'Font',
+                enabled: !(c.readOnly || c.saving),
+                translate: (text) => VenueLayoutStrings.text(context, text),
+                options: [
+                  for (final entry
+                      in (c.resources['fonts'] as Map? ?? {}).entries)
+                    EditorFontOption(
+                      id: '${entry.key}',
+                      family: '${entry.value['family'] ?? 'Font'}',
+                    ),
+                ],
+                onSelected: (id) async {
+                  final properties = Map<String, dynamic>.from(n.properties);
+                  if (id == null) {
+                    properties.remove('fontId');
+                  } else {
+                    properties['fontId'] = id;
+                  }
+                  c.updateNode(n.copyWith(properties: properties));
+                },
+              ),
           const SizedBox(height: 12),
           LayoutFontSizeControl(
             key: ValueKey('font-size-${n.id}'),
