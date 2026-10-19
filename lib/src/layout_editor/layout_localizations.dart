@@ -327,6 +327,11 @@ const _cs = <String, String>{
   'Object color': 'Barva objektu',
   'Outline color': 'Barva obrysu',
   'Text color': 'Barva textu',
+  'Seat details': 'Detail místa',
+  'Select a seat to view its details.':
+      'Kliknutím na místo zobrazíš jeho podrobnosti.',
+  'Select a seat to view its details. Drag to pan; scroll to zoom.':
+      'Kliknutím zobrazíš detail místa. Tažením posuneš pohled, kolečkem přiblížíš.',
   'Canvas settings': 'Nastavení plátna',
   'Changes apply immediately. Undo restores the previous style.':
       'Změny se projeví ihned. Zpět obnoví předchozí styl.',

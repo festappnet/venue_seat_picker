@@ -154,10 +154,23 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       }
       return c.pasteSelectionText(text);
     });
-    if (widget.showGallery && c.document.nodes.isEmpty) {
+    if (widget.showGallery && _canEdit && c.document.nodes.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _gallery();
+        if (mounted && _canEdit) _gallery();
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant VenueLayoutEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.interactionEnabled != widget.interactionEnabled) {
+      // Keep the surface (and camera), but never carry a drawing tool into viewing.
+      _cancelGesture();
+      _tool = 'Select';
+      _canvasSelected = false;
+      _inlineId = null;
+      _gesturePanels.clear();
     }
   }
 
@@ -257,8 +270,17 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     }
   }
 
+  bool _viewSelectable(LayoutNode node) =>
+      node.kind == 'seat' || node.kind == 'capacityArea';
+
   void _tap(Offset point) {
-    final activated = _hitAt(point);
+    var activated = _hitAt(point);
+    if (!_canEdit &&
+        !c.document.nodes.any(
+          (node) => node.id == activated && _viewSelectable(node),
+        )) {
+      activated = null;
+    }
     if (activated != null) widget.onNodeActivated?.call(activated);
     if (!_canEdit) {
       _focus.requestFocus();
@@ -1294,11 +1316,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     }
     if (!widget.interactionEnabled &&
         event.logicalKey == LogicalKeyboardKey.tab) {
-      final nodes = c.document.nodes;
+      final nodes = c.document.nodes.where(_viewSelectable).toList();
       if (nodes.isEmpty) return KeyEventResult.ignored;
       final current = nodes.indexWhere((n) => c.selection.contains(n.id));
       final direction = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;
-      c.select({nodes[(current + direction) % nodes.length].id});
+      final next = current < 0
+          ? (direction > 0 ? 0 : nodes.length - 1)
+          : (current + direction) % nodes.length;
+      c.select({nodes[next].id});
       return KeyEventResult.handled;
     }
     if (!_canEdit) return KeyEventResult.ignored;
@@ -2222,8 +2247,12 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         (n) => c.selection.contains(n.id),
       );
       return SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (selected.isEmpty)
+              const LayoutText('Select a seat to view its details.'),
             for (final node in selected)
               if (widget.inspectorBuilder != null)
                 widget.inspectorBuilder!(context, node),
@@ -2281,26 +2310,28 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                             children: [
                               if (widget.toolbarLeading != null)
                                 widget.toolbarLeading!,
-                              IconButton(
-                                tooltip: VenueLayoutStrings.text(
-                                  context,
-                                  'Undo',
+                              if (widget.interactionEnabled)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Undo',
+                                  ),
+                                  onPressed: c.canUndo && _canEdit
+                                      ? c.undo
+                                      : null,
+                                  icon: const Icon(Icons.undo),
                                 ),
-                                onPressed: c.canUndo && _canEdit
-                                    ? c.undo
-                                    : null,
-                                icon: const Icon(Icons.undo),
-                              ),
-                              IconButton(
-                                tooltip: VenueLayoutStrings.text(
-                                  context,
-                                  'Redo',
+                              if (widget.interactionEnabled)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Redo',
+                                  ),
+                                  onPressed: c.canRedo && _canEdit
+                                      ? c.redo
+                                      : null,
+                                  icon: const Icon(Icons.redo),
                                 ),
-                                onPressed: c.canRedo && _canEdit
-                                    ? c.redo
-                                    : null,
-                                icon: const Icon(Icons.redo),
-                              ),
                               if (!wide && _canEdit)
                                 FilledButton.tonalIcon(
                                   onPressed: _library,
@@ -2352,71 +2383,80 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         setState(() => _snap = v),
                                   ),
                                 ),
-                              IconButton(
-                                key: const ValueKey('edit-canvas'),
-                                tooltip: VenueLayoutStrings.text(
-                                  context,
-                                  'Canvas settings',
-                                ),
-                                isSelected: _editingCanvas,
-                                icon: const Icon(Icons.aspect_ratio, size: 20),
-                                onPressed: !_canEdit
-                                    ? null
-                                    : () {
-                                        _cancelGesture();
-                                        c.select({});
-                                        setState(() {
-                                          _tool = 'Select';
-                                          _canvasSelected = true;
-                                        });
-                                        _focus.requestFocus();
-                                        if (!wide) {
-                                          showModalBottomSheet<void>(
-                                            context: context,
-                                            isScrollControlled: true,
-                                            builder: (context) => SizedBox(
-                                              height:
-                                                  MediaQuery.sizeOf(
-                                                    context,
-                                                  ).height *
-                                                  .8,
-                                              child: AnimatedBuilder(
-                                                animation: c,
-                                                builder: (context, _) =>
-                                                    _inspector(),
+                              if (widget.interactionEnabled)
+                                IconButton(
+                                  key: const ValueKey('edit-canvas'),
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Canvas settings',
+                                  ),
+                                  isSelected: _editingCanvas,
+                                  icon: const Icon(
+                                    Icons.aspect_ratio,
+                                    size: 20,
+                                  ),
+                                  onPressed: !_canEdit
+                                      ? null
+                                      : () {
+                                          _cancelGesture();
+                                          c.select({});
+                                          setState(() {
+                                            _tool = 'Select';
+                                            _canvasSelected = true;
+                                          });
+                                          _focus.requestFocus();
+                                          if (!wide) {
+                                            showModalBottomSheet<void>(
+                                              context: context,
+                                              isScrollControlled: true,
+                                              builder: (context) => SizedBox(
+                                                height:
+                                                    MediaQuery.sizeOf(
+                                                      context,
+                                                    ).height *
+                                                    .8,
+                                                child: AnimatedBuilder(
+                                                  animation: c,
+                                                  builder: (context, _) =>
+                                                      _inspector(),
+                                                ),
                                               ),
-                                            ),
-                                          );
-                                        }
-                                      },
-                              ),
-                              TextButton.icon(
-                                onPressed: !_canEdit
-                                    ? null
-                                    : () => showLayoutGlobalStyleDialog(
-                                        context,
-                                        c,
-                                      ),
-                                icon: const Icon(
-                                  Icons.palette_outlined,
-                                  size: 18,
+                                            );
+                                          }
+                                        },
                                 ),
-                                label: const LayoutText('Plan style'),
-                              ),
+                              if (widget.interactionEnabled)
+                                TextButton.icon(
+                                  onPressed: !_canEdit
+                                      ? null
+                                      : () => showLayoutGlobalStyleDialog(
+                                          context,
+                                          c,
+                                        ),
+                                  icon: const Icon(
+                                    Icons.palette_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const LayoutText('Plan style'),
+                                ),
                               const SizedBox(width: 8),
-                              Tooltip(
-                                message: VenueLayoutStrings.text(
-                                  context,
-                                  'Show the grid (G). Grid visibility does not change snapping.',
+                              if (widget.interactionEnabled)
+                                Tooltip(
+                                  message: VenueLayoutStrings.text(
+                                    context,
+                                    'Show the grid (G). Grid visibility does not change snapping.',
+                                  ),
+                                  child: FilterChip(
+                                    avatar: const Icon(
+                                      Icons.grid_4x4,
+                                      size: 18,
+                                    ),
+                                    label: const LayoutText('Grid'),
+                                    selected: _showGrid,
+                                    onSelected: (v) =>
+                                        setState(() => _showGrid = v),
+                                  ),
                                 ),
-                                child: FilterChip(
-                                  avatar: const Icon(Icons.grid_4x4, size: 18),
-                                  label: const LayoutText('Grid'),
-                                  selected: _showGrid,
-                                  onSelected: (v) =>
-                                      setState(() => _showGrid = v),
-                                ),
-                              ),
                               if (widget.showGallery && _canEdit)
                                 TextButton.icon(
                                   onPressed: _gallery,
@@ -2430,7 +2470,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                 IconButton(
                                   tooltip: VenueLayoutStrings.text(
                                     context,
-                                    'Properties and layers',
+                                    widget.interactionEnabled
+                                        ? 'Properties and layers'
+                                        : 'Seat details',
                                   ),
                                   onPressed: () => showModalBottomSheet<void>(
                                     context: context,
@@ -2448,10 +2490,10 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   icon: const Icon(Icons.tune),
                                 ),
                               LayoutText(
-                                !_canEdit
-                                    ? 'Read only'
-                                    : c.dirty
+                                c.dirty
                                     ? 'Unsaved changes'
+                                    : !_canEdit
+                                    ? 'Read only'
                                     : 'Saved',
                                 style: Theme.of(context).textTheme.labelMedium,
                               ),
@@ -2501,6 +2543,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                     key: ValueKey(_templateViewport),
                                     document: c.document,
                                     canvasSelected:
+                                        _canEdit &&
                                         _editingCanvas &&
                                         !c.readOnly &&
                                         !c.saving,
@@ -2533,9 +2576,11 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         : {_seatTargetId!},
                                     warningIds: c.placementWarningIds,
                                     snapGuides: _snapGuides,
-                                    showGrid: _surfaceTool
-                                        ? _surfaceBrush != null
-                                        : _showGrid,
+                                    showGrid:
+                                        _canEdit &&
+                                        (_surfaceTool
+                                            ? _surfaceBrush != null
+                                            : _showGrid),
                                     gridOrigin:
                                         _surfaceTool && _surfaceBrush != null
                                         ? Offset(
@@ -2709,7 +2754,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: LayoutText(
-                    _seatTargetId != null
+                    !widget.interactionEnabled
+                        ? 'Select a seat to view its details. Drag to pan; scroll to zoom.'
+                        : _seatTargetId != null
                         ? 'Release to attach chair to table.'
                         : _editingCanvas
                         ? 'Canvas selected. Drag an edge or corner to resize. Escape exits.'

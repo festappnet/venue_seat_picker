@@ -205,7 +205,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
     }
     if (_scene != null &&
         (!identical(oldWidget.document, widget.document) ||
-            !identical(oldWidget.presentation, widget.presentation))) {
+            !sameLayoutValue(oldWidget.presentation, widget.presentation))) {
       _motionFrom = _motion.isAnimating && _motionFrom != null
           ? interpolateScene(_motionFrom!, _scene!, _motion.value)
           : _scene;
@@ -340,17 +340,34 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final size = Size(constraints.maxWidth, constraints.maxHeight);
-      if (_size != size) {
-        _size = size;
-        _frame = null;
-        _camera.value = Matrix4.identity();
-      }
       _frame ??= Map<String, dynamic>.from(widget.document.canvas);
       final frame = _frame!;
       final width = (frame['width'] as num? ?? 2400).toDouble();
       final height = (frame['height'] as num? ?? 1600).toDouble();
       final x = (frame['x'] as num? ?? 0).toDouble();
       final y = (frame['y'] as num? ?? 0).toDouble();
+      Offset? previousCenter;
+      double? previousWorldZoom;
+      final previousSize = _size;
+      if (previousSize != null && previousSize != size) {
+        final previousScale = math
+            .min(
+              (previousSize.width - 32) / width,
+              (previousSize.height - 32) / height,
+            )
+            .clamp(.00001, 100.0);
+        final previousOffset = Offset(
+          (previousSize.width - width * previousScale) / 2,
+          (previousSize.height - height * previousScale) / 2,
+        );
+        previousCenter =
+            (_camera.toScene(previousSize.center(Offset.zero)) -
+                    previousOffset) /
+                previousScale +
+            Offset(x, y);
+        previousWorldZoom = previousScale * _cameraScale(_camera.value);
+      }
+      _size = size;
       final scale = math
           .min((size.width - 32) / width, (size.height - 32) / height)
           .clamp(.00001, 100.0);
@@ -365,6 +382,21 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         (canvas['width'] as num).toDouble() * scale,
         (canvas['height'] as num).toDouble() * scale,
       );
+      if (previousCenter != null) {
+        final fit = _fitCameraZoom;
+        final zoom = (previousWorldZoom! / scale).clamp(
+          fit * (widget.compactZoomControls ? 1 : .9),
+          fit * (widget.compactZoomControls ? 5 : 20),
+        );
+        final at = (previousCenter - Offset(x, y)) * scale + offset;
+        _camera.value = _boundCamera(
+          Matrix4.diagonal3Values(zoom, zoom, 1)..setTranslationRaw(
+            size.width / 2 - at.dx * zoom,
+            size.height / 2 - at.dy * zoom,
+            0,
+          ),
+        );
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           widget.onViewportScaleChanged?.call(
@@ -1673,5 +1705,29 @@ class LayoutScenePainter extends CustomPainter {
       false;
 
   @override
-  bool shouldRepaint(covariant LayoutScenePainter oldDelegate) => true;
+  bool shouldRepaint(covariant LayoutScenePainter oldDelegate) =>
+      !identical(scene, oldDelegate.scene) ||
+      !identical(resources, oldDelegate.resources) ||
+      camera != oldDelegate.camera ||
+      motion != oldDelegate.motion ||
+      fromScene != oldDelegate.fromScene ||
+      scale != oldDelegate.scale ||
+      offset != oldDelegate.offset ||
+      canvasColor != oldDelegate.canvasColor ||
+      selectionColor != oldDelegate.selectionColor ||
+      showGrid != oldDelegate.showGrid ||
+      gridStep != oldDelegate.gridStep ||
+      gridOrigin != oldDelegate.gridOrigin ||
+      // Geometry overlays follow live gestures. A bare, unchanged scene can
+      // retain its painted layer when only a hover tooltip is rebuilt.
+      seatLinks.isNotEmpty ||
+      oldDelegate.seatLinks.isNotEmpty ||
+      selectionHulls.isNotEmpty ||
+      oldDelegate.selectionHulls.isNotEmpty ||
+      warningHulls.isNotEmpty ||
+      oldDelegate.warningHulls.isNotEmpty ||
+      snapGuides.isNotEmpty ||
+      oldDelegate.snapGuides.isNotEmpty ||
+      transientForegroundIds.isNotEmpty ||
+      oldDelegate.transientForegroundIds.isNotEmpty;
 }

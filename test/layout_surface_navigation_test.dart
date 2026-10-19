@@ -60,9 +60,14 @@ void main() {
       expect(end.dx, lessThanOrEqualTo(784.01));
       expect(origin.dy, greaterThanOrEqualTo(15.99));
       expect(end.dy, lessThanOrEqualTo(584.01));
+      final worldZoom = painter().scale * camera.value.entry(0, 0);
       await tester.binding.setSurfaceSize(const Size(360, 700));
       await tester.pump();
-      expect(camera.value.getMaxScaleOnAxis(), 1);
+      expect(
+        painter().scale * camera.value.entry(0, 0),
+        closeTo(worldZoom, .000001),
+        reason: 'Viewport changes preserve zoom; Fit plan explicitly resets it',
+      );
       await tester.tap(find.text('Fit plan'));
       await tester.pump();
       expect(camera.value, Matrix4.identity());
