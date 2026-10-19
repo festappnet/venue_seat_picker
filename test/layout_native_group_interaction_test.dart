@@ -82,9 +82,11 @@ void main() {
               (bounds['x']! + bounds['width']!) * scale,
               (bounds['y']! + bounds['height']!) * scale,
             );
-        final actual = tester.getCenter(find.byTooltip('Resize handle'));
+        final resizeHandle = find.byTooltip('Resize handle');
+        final actual = tester.getCenter(resizeHandle);
+        final outset = tester.getSize(resizeHandle).width / 2 + 2;
         expect(
-          (actual - expected).distance,
+          (actual - expected - Offset(outset, outset)).distance,
           lessThan(1),
           reason:
               'Group handles must follow the visible table and chairs, not the dummy group origin',
@@ -131,6 +133,35 @@ void main() {
         await move.up();
         await tester.pumpAndSettle();
         expect(c.error, isNull);
+        final seat = c.document.nodes.firstWhere((node) => node.id == chair);
+        final seatPosition = worldMatrix(c.document, seat);
+        expect(hitTest(c.document, seatPosition[4], seatPosition[5]), chair);
+        final seatScreen =
+            origin + Offset(seatPosition[4] * scale, seatPosition[5] * scale);
+        for (final element
+            in find
+                .byWidgetPredicate(
+                  (widget) =>
+                      widget is Tooltip && widget.message?.startsWith('Resize') == true,
+                )
+                .evaluate()) {
+          expect(
+            tester.getRect(find.byWidget(element.widget)).contains(seatScreen),
+            isFalse,
+          );
+        }
+
+        await tester.tapAt(
+          origin + Offset(seatPosition[4] * scale, seatPosition[5] * scale),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          c.selection,
+          {chair},
+          reason:
+              'A commercial table group keeps each imported chair individually selectable',
+        );
+        expect(find.byTooltip('Resize handle'), findsNothing);
       } finally {
         semantics.dispose();
       }

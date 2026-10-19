@@ -53,7 +53,9 @@ String _czechLayoutText(String text) {
   if (available != null) return 'Volných: ${available[1]}';
   final selectedSeats = RegExp(r'^(\d+) seats selected$').firstMatch(text);
   if (selectedSeats != null) return 'Vybraná místa: ${selectedSeats[1]}';
-  final selectionResult = RegExp(r'^(\d+) seats? (selected|released)\.$').firstMatch(text);
+  final selectionResult = RegExp(
+    r'^(\d+) seats? (selected|released)\.$',
+  ).firstMatch(text);
   if (selectionResult != null) {
     return '${selectionResult[2] == 'selected' ? 'Vybraná' : 'Uvolněná'} místa: ${selectionResult[1]}';
   }
@@ -500,6 +502,8 @@ const _cs = <String, String>{
   'Compartment': 'Kupé',
   'Your text': 'Tvůj text',
 
+  'Objects stay in place. To move an object that fills the canvas, increase Width or Height first.':
+      'Objekty zůstanou na místě. Pokud objekt vyplňuje celé plátno, před přesunem nejprve zvětši šířku nebo výšku plátna.',
   'Schematic size. No physical measurements required.':
       'Rozměry jsou orientační. Nemusíš znát skutečné rozměry sálu.',
   'Canvas selected. Drag an edge or corner to resize. Escape exits.':

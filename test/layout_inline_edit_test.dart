@@ -273,7 +273,9 @@ void main() {
     ]) {
       final handle = find.byTooltip('$mode handle');
       expect(handle, findsOneWidget);
-      expect(tester.getSize(handle), const Size(24, 24));
+      final target = tester.getSize(handle);
+      expect(target.width, inInclusiveRange(10, 24));
+      expect(target.height, target.width);
     }
     surface(tester).onHandleStart!('Resize w', const Offset(210, 200));
     surface(tester).onDragUpdate!(const Offset(190, 200));

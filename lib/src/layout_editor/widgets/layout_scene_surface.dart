@@ -379,10 +379,22 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         return (_camera.toScene(p) - offset) / scale + Offset(x, y);
       }
 
+      final presentation = widget.onSelectDown == null
+          ? widget.presentation
+          : {
+              ...widget.presentation,
+              for (final node in widget.document.nodes)
+                if (node.kind == 'seat' && widget.selected.contains(node.id))
+                  node.id: {
+                    ...?widget.presentation[node.id] as Map?,
+                    'selected': true,
+                    'fill': layoutSelectedSeatFill,
+                  },
+            };
       _scene = _sceneCache.update(
         widget.document,
         resources: widget.resources,
-        presentation: widget.presentation,
+        presentation: presentation,
       );
       final scene = _scene!;
       final issues = scene['issues'] as List? ?? const [];
@@ -423,7 +435,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
       }) => AnimatedBuilder(
         animation: _camera,
         builder: (context, _) {
-          final screen =
+          var screen =
               MatrixUtils.transformPoint(
                 _camera.value,
                 (Offset(at[0], at[1]) - Offset(x, y)) * scale + offset,
@@ -452,6 +464,25 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                         3)
                     .clamp(10.0, 24.0)
               : 24.0;
+          // Keep group controls outside the chairs on the selection boundary.
+          if (mode.startsWith('Resize') &&
+              resizeSelection?.kind == 'group' &&
+              resizeSelection!.properties['assembly'] == null) {
+            final direction = mode == 'Resize' ? 'se' : mode.substring(7);
+            final outset = target / 2 + 2;
+            screen += Offset(
+              direction.contains('w')
+                  ? -outset
+                  : direction.contains('e')
+                  ? outset
+                  : 0,
+              direction.contains('n')
+                  ? -outset
+                  : direction.contains('s')
+                  ? outset
+                  : 0,
+            );
+          }
           return Positioned(
             left: screen.dx - target / 2,
             top: screen.dy - target / 2,
@@ -866,7 +897,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                       [l, b],
                                     ];
                                   })(),
-                                for (final node in selectedNodes)
+                                for (final node in selectedNodes.where(
+                                  (node) => node.kind != 'seat',
+                                ))
                                   if (node.kind == 'group')
                                     (() {
                                       final b = selectionBounds(
@@ -1019,6 +1052,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 ),
               if (widget.onHandleStart != null &&
                   selectedNodes.length == 1 &&
+                  selectedNodes.single.kind != 'seat' &&
                   unlocked(selectedNodes.single)) ...[
                 // Edge targets precede corner targets so corners win overlaps.
                 if (!const [
@@ -1630,6 +1664,13 @@ class LayoutScenePainter extends CustomPainter {
       canvas.drawPath(path, outline);
     }
   }
+
+  // Accessible object controls are owned by widgets around the canvas. This
+  // painter emits no semantic nodes, so geometry previews must not invalidate
+  // and traverse that surrounding tree on every pointer movement.
+  @override
+  bool shouldRebuildSemantics(covariant LayoutScenePainter oldDelegate) =>
+      false;
 
   @override
   bool shouldRepaint(covariant LayoutScenePainter oldDelegate) => true;

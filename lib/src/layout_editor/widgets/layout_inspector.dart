@@ -1692,10 +1692,6 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     title: const LayoutText('Canvas'),
     children: [
       const SizedBox(height: 12),
-      _canvasColor(),
-      LayoutFloorStyleField(controller: c),
-      const LayoutText('Schematic size. No physical measurements required.'),
-      const SizedBox(height: 8),
       if (widget.canvasSelected) ...[
         _number(
           'Width',
@@ -1741,6 +1737,12 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                 },
           child: const LayoutText('Set canvas size'),
         ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LayoutText(
+          'Objects stay in place. To move an object that fills the canvas, increase Width or Height first.',
+        ),
+      ),
       TextButton(
         onPressed: (c.readOnly || c.saving)
             ? null
@@ -1752,6 +1754,10 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               ),
         child: const LayoutText('Fit canvas to content'),
       ),
+      const SizedBox(height: 8),
+      _canvasColor(),
+      LayoutFloorStyleField(controller: c),
+      const LayoutText('Schematic size. No physical measurements required.'),
       const SizedBox(height: 8),
       _backgroundControls(),
     ],
@@ -1813,7 +1819,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             ),
     );
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: layoutPanelColor(context),
       child: SingleChildScrollView(
         key: ValueKey('inspector-context-$selectionContext'),
         primary: false,

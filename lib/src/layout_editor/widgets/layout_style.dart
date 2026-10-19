@@ -7,6 +7,14 @@ import 'package:venue_seat_picker/editor_ui.dart';
 import '../venue_layout_controller.dart';
 import 'layout_strings.dart';
 
+/// Neutral work panels in light mode, with the host surface retained in dark mode.
+Color layoutPanelColor(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.brightness == Brightness.light
+      ? Colors.white
+      : theme.colorScheme.surface;
+}
+
 /// Visual properties only: never transfers geometry, labels or seat identities.
 class LayoutAppearance {
   const LayoutAppearance(this.object, {this.seats, this.canvasFill});

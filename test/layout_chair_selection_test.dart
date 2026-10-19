@@ -63,6 +63,29 @@ void main() {
       final at = Offset(matrix[4], matrix[5]);
       surface(tester).onTap!(at);
       expect(c.selection, {chair.id});
+      await tester.pumpAndSettle();
+      expect(
+        find.byTooltip('Resize handle'),
+        findsNothing,
+        reason:
+            'Seat selection must not be covered by furniture transform handles',
+      );
+      expect(find.byTooltip('Rotate handle'), findsNothing);
+      final painter = tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<LayoutScenePainter>()
+          .firstWhere((painter) => painter.selected.contains(chair.id));
+      expect(
+        (painter.scene['items'] as List).any(
+          (item) =>
+              item['nodeId'] == chair.id &&
+              item['kind'] == 'state' &&
+              item['stroke'] == '#FFFFFFFF',
+        ),
+        isTrue,
+        reason: 'Selected seats retain the original white check marker',
+      );
       await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
       surface(tester).onDragStart!(at);
       surface(tester).onDragUpdate!(at + const Offset(23, 11));

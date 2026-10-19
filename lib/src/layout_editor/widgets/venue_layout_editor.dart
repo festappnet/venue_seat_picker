@@ -18,6 +18,8 @@ class VenueLayoutEditor extends StatefulWidget {
     super.key,
     required this.controller,
     this.inspectorBuilder,
+    this.toolbarLeading,
+    this.toolbarTrailing,
     this.showGallery = true,
     this.onTemplateSelected,
     this.onImportBackground,
@@ -27,6 +29,11 @@ class VenueLayoutEditor extends StatefulWidget {
     this.onNodeActivated,
   });
   final VenueLayoutController controller;
+
+  /// Host actions share the editor toolbar. Trailing actions stay visible while
+  /// tools scroll horizontally on smaller screens.
+  final Widget? toolbarLeading;
+  final Widget? toolbarTrailing;
 
   /// Transient host state. Does not enter document, dirty state or history.
   final Map<String, dynamic> seatPresentation, capacityPresentation;
@@ -142,8 +149,19 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     )) {
       return id;
     }
-    // Table chairs are independently editable; furniture seating remains atomic.
-    if (node.kind == 'seat' && parent?.kind == 'table') return id;
+    // Native imports place a table and its chairs beside each other in a group.
+    // Those chairs, like direct table children, remain individually editable.
+    // Specialized assemblies and ordinary groups retain atomic selection.
+    if (node.kind == 'seat' && parent != null) {
+      if (parent.kind == 'table') return id;
+      if (parent.kind == 'group' &&
+          parent.properties['assembly'] == null &&
+          c.document.nodes.any(
+            (sibling) => sibling.kind == 'table' && sibling.parentId == parent.id,
+          )) {
+        return id;
+      }
+    }
     return node.parentId ?? id;
   }
 
@@ -1562,7 +1580,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     }
     return Material(
-      color: colors.surface,
+      key: const ValueKey('layout-palette'),
+      color: layoutPanelColor(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2209,134 +2228,203 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           child: Column(
             children: [
               Material(
+                key: const ValueKey('layout-editor-toolbar'),
                 color: Theme.of(context).colorScheme.surface,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 4,
                   ),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: VenueLayoutStrings.text(context, 'Undo'),
-                          onPressed: c.canUndo && _canEdit ? c.undo : null,
-                          icon: const Icon(Icons.undo),
-                        ),
-                        IconButton(
-                          tooltip: VenueLayoutStrings.text(context, 'Redo'),
-                          onPressed: c.canRedo && _canEdit ? c.redo : null,
-                          icon: const Icon(Icons.redo),
-                        ),
-                        if (!wide && _canEdit)
-                          FilledButton.tonalIcon(
-                            onPressed: _library,
-                            icon: const Icon(Icons.add),
-                            label: const LayoutText('Insert'),
-                          ),
-                        const SizedBox(width: 12),
-                        for (final entry
-                            in <String, IconData>{
-                              'Select': Icons.near_me_outlined,
-                              'Pan': Icons.pan_tool_outlined,
-                              'Resize': Icons.open_in_full,
-                              'Rotate': Icons.rotate_right,
-                            }.entries.where(
-                              (entry) =>
-                                  widget.interactionEnabled ||
-                                  ['Select', 'Pan'].contains(entry.key),
-                            ))
-                          IconButton(
-                            tooltip: VenueLayoutStrings.text(
-                              context,
-                              entry.key,
-                            ),
-                            isSelected: _tool == entry.key,
-                            style: IconButton.styleFrom(
-                              backgroundColor: _tool == entry.key
-                                  ? Theme.of(
-                                      context,
-                                    ).colorScheme.primaryContainer
-                                  : Colors.transparent,
-                            ),
-                            onPressed: () {
-                              _cancelGesture();
-                              setState(() => _tool = entry.key);
-                            },
-                            icon: Icon(entry.value, size: 20),
-                          ),
-                        const SizedBox(width: 16),
-                        if (_canEdit)
-                          Tooltip(
-                            message: VenueLayoutStrings.text(
-                              context,
-                              'Snap to objects, 8-unit grid and 15° angles. Hold Alt to bypass.',
-                            ),
-                            child: FilterChip(
-                              label: const LayoutText('Snap'),
-                              selected: _snap,
-                              onSelected: (v) => setState(() => _snap = v),
-                            ),
-                          ),
-                        TextButton.icon(
-                          onPressed: !_canEdit
-                              ? null
-                              : () => showLayoutGlobalStyleDialog(context, c),
-                          icon: const Icon(Icons.palette_outlined, size: 18),
-                          label: const LayoutText('Plan style'),
-                        ),
-                        const SizedBox(width: 8),
-                        Tooltip(
-                          message: VenueLayoutStrings.text(
-                            context,
-                            'Show the grid (G). Grid visibility does not change snapping.',
-                          ),
-                          child: FilterChip(
-                            avatar: const Icon(Icons.grid_4x4, size: 18),
-                            label: const LayoutText('Grid'),
-                            selected: _showGrid,
-                            onSelected: (v) => setState(() => _showGrid = v),
-                          ),
-                        ),
-                        if (widget.showGallery && _canEdit)
-                          TextButton.icon(
-                            onPressed: _gallery,
-                            icon: const Icon(
-                              Icons.dashboard_outlined,
-                              size: 18,
-                            ),
-                            label: const LayoutText('Choose template'),
-                          ),
-                        if (!wide)
-                          IconButton(
-                            tooltip: VenueLayoutStrings.text(
-                              context,
-                              'Properties and layers',
-                            ),
-                            onPressed: () => showModalBottomSheet<void>(
-                              context: context,
-                              isScrollControlled: true,
-                              builder: (context) => SizedBox(
-                                height: MediaQuery.sizeOf(context).height * .8,
-                                child: AnimatedBuilder(
-                                  animation: c,
-                                  builder: (context, _) => _inspector(),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              if (widget.toolbarLeading != null)
+                                widget.toolbarLeading!,
+                              IconButton(
+                                tooltip: VenueLayoutStrings.text(
+                                  context,
+                                  'Undo',
+                                ),
+                                onPressed: c.canUndo && _canEdit
+                                    ? c.undo
+                                    : null,
+                                icon: const Icon(Icons.undo),
+                              ),
+                              IconButton(
+                                tooltip: VenueLayoutStrings.text(
+                                  context,
+                                  'Redo',
+                                ),
+                                onPressed: c.canRedo && _canEdit
+                                    ? c.redo
+                                    : null,
+                                icon: const Icon(Icons.redo),
+                              ),
+                              if (!wide && _canEdit)
+                                FilledButton.tonalIcon(
+                                  onPressed: _library,
+                                  icon: const Icon(Icons.add),
+                                  label: const LayoutText('Insert'),
+                                ),
+                              const SizedBox(width: 12),
+                              for (final entry
+                                  in <String, IconData>{
+                                    'Select': Icons.near_me_outlined,
+                                    'Pan': Icons.pan_tool_outlined,
+                                    'Resize': Icons.open_in_full,
+                                    'Rotate': Icons.rotate_right,
+                                  }.entries.where(
+                                    (entry) =>
+                                        widget.interactionEnabled ||
+                                        ['Select', 'Pan'].contains(entry.key),
+                                  ))
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    entry.key,
+                                  ),
+                                  isSelected: _tool == entry.key,
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: _tool == entry.key
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.primaryContainer
+                                        : Colors.transparent,
+                                  ),
+                                  onPressed: () {
+                                    _cancelGesture();
+                                    setState(() => _tool = entry.key);
+                                  },
+                                  icon: Icon(entry.value, size: 20),
+                                ),
+                              const SizedBox(width: 16),
+                              if (_canEdit)
+                                Tooltip(
+                                  message: VenueLayoutStrings.text(
+                                    context,
+                                    'Snap to objects, 8-unit grid and 15° angles. Hold Alt to bypass.',
+                                  ),
+                                  child: FilterChip(
+                                    label: const LayoutText('Snap'),
+                                    selected: _snap,
+                                    onSelected: (v) =>
+                                        setState(() => _snap = v),
+                                  ),
+                                ),
+                              IconButton(
+                                key: const ValueKey('edit-canvas'),
+                                tooltip: VenueLayoutStrings.text(
+                                  context,
+                                  'Canvas settings',
+                                ),
+                                isSelected: _editingCanvas,
+                                icon: const Icon(Icons.aspect_ratio, size: 20),
+                                onPressed: !_canEdit
+                                    ? null
+                                    : () {
+                                        _cancelGesture();
+                                        c.select({});
+                                        setState(() {
+                                          _tool = 'Select';
+                                          _canvasSelected = true;
+                                        });
+                                        _focus.requestFocus();
+                                        if (!wide) {
+                                          showModalBottomSheet<void>(
+                                            context: context,
+                                            isScrollControlled: true,
+                                            builder: (context) => SizedBox(
+                                              height:
+                                                  MediaQuery.sizeOf(
+                                                    context,
+                                                  ).height *
+                                                  .8,
+                                              child: AnimatedBuilder(
+                                                animation: c,
+                                                builder: (context, _) =>
+                                                    _inspector(),
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                              ),
+                              TextButton.icon(
+                                onPressed: !_canEdit
+                                    ? null
+                                    : () => showLayoutGlobalStyleDialog(
+                                        context,
+                                        c,
+                                      ),
+                                icon: const Icon(
+                                  Icons.palette_outlined,
+                                  size: 18,
+                                ),
+                                label: const LayoutText('Plan style'),
+                              ),
+                              const SizedBox(width: 8),
+                              Tooltip(
+                                message: VenueLayoutStrings.text(
+                                  context,
+                                  'Show the grid (G). Grid visibility does not change snapping.',
+                                ),
+                                child: FilterChip(
+                                  avatar: const Icon(Icons.grid_4x4, size: 18),
+                                  label: const LayoutText('Grid'),
+                                  selected: _showGrid,
+                                  onSelected: (v) =>
+                                      setState(() => _showGrid = v),
                                 ),
                               ),
-                            ),
-                            icon: const Icon(Icons.tune),
+                              if (widget.showGallery && _canEdit)
+                                TextButton.icon(
+                                  onPressed: _gallery,
+                                  icon: const Icon(
+                                    Icons.dashboard_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const LayoutText('Choose template'),
+                                ),
+                              if (!wide)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Properties and layers',
+                                  ),
+                                  onPressed: () => showModalBottomSheet<void>(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    builder: (context) => SizedBox(
+                                      height:
+                                          MediaQuery.sizeOf(context).height *
+                                          .8,
+                                      child: AnimatedBuilder(
+                                        animation: c,
+                                        builder: (context, _) => _inspector(),
+                                      ),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.tune),
+                                ),
+                              LayoutText(
+                                !_canEdit
+                                    ? 'Read only'
+                                    : c.dirty
+                                    ? 'Unsaved changes'
+                                    : 'Saved',
+                                style: Theme.of(context).textTheme.labelMedium,
+                              ),
+                            ],
                           ),
-                        LayoutText(
-                          !_canEdit
-                              ? 'Read only'
-                              : c.dirty
-                              ? 'Unsaved changes'
-                              : 'Saved',
-                          style: Theme.of(context).textTheme.labelMedium,
                         ),
-                      ],
-                    ),
+                      ),
+                      if (widget.toolbarTrailing != null)
+                        widget.toolbarTrailing!,
+                    ],
                   ),
                 ),
               ),
@@ -2345,6 +2433,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 SizedBox(height: 240, child: _palette()),
               Expanded(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (wide && _canEdit) ...[
                       SizedBox(width: 232, child: _palette()),
@@ -2365,6 +2454,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   }
                                 },
                                 child: Semantics(
+                                  container: true,
+                                  explicitChildNodes: true,
                                   label: VenueLayoutStrings.text(
                                     context,
                                     'Layout canvas. Select an object, then use arrow keys to move. Shift moves ten steps. Escape cancels.',
@@ -2561,7 +2652,13 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                     ),
                     if (wide) ...[
                       const VerticalDivider(width: 1),
-                      SizedBox(width: 280, child: _inspector()),
+                      SizedBox(
+                        width: 280,
+                        child: Material(
+                          color: layoutPanelColor(context),
+                          child: _inspector(),
+                        ),
+                      ),
                     ],
                   ],
                 ),
