@@ -607,10 +607,11 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         for (final node in selectedNodes) node.id: localBounds(node),
       };
       List<double> handlePoint(LayoutNode node, double dx, double dy) {
-        if (const [
-          'bus',
-          'compartments',
-        ].contains(node.properties['assembly'])) {
+        if (node.kind == 'group' ||
+            const [
+              'bus',
+              'compartments',
+            ].contains(node.properties['assembly'])) {
           final b = selectionBounds(widget.document, {node.id});
           return [
             b['x']! + b['width']! * (dx + 1) / 2,

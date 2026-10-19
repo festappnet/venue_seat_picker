@@ -857,6 +857,76 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     } else if (gesture.startsWith('Resize') && c.selection.length == 1) {
       final n = start.nodes.firstWhere((n) => c.selection.contains(n.id));
+      if (n.kind == 'group') {
+        final bounds = selectionBounds(start, {n.id});
+        final direction = gesture == 'Resize' ? 'se' : gesture.substring(7);
+        final west = direction.contains('w'), north = direction.contains('n');
+        final horizontal = west || direction.contains('e');
+        final vertical = north || direction.contains('s');
+        final dx = (point.dx - pointer.dx) * (west ? -1 : 1);
+        final dy = (point.dy - pointer.dy) * (north ? -1 : 1);
+        // Uniform scaling preserves rotated furniture and all existing seats.
+        final change =
+            horizontal &&
+                (!vertical ||
+                    (dx / bounds['width']!).abs() >=
+                        (dy / bounds['height']!).abs())
+            ? dx / bounds['width']!
+            : dy / bounds['height']!;
+        final scale = math.max(.01, 1 + change);
+        final pivot = Offset(
+          bounds['x']! +
+              (west
+                  ? bounds['width']!
+                  : horizontal
+                  ? 0
+                  : bounds['width']! / 2),
+          bounds['y']! +
+              (north
+                  ? bounds['height']!
+                  : vertical
+                  ? 0
+                  : bounds['height']! / 2),
+        );
+        final matrices = worldMatrices(start), root = matrices[n.id]!;
+        final x = pivot.dx + (root[4] - pivot.dx) * scale;
+        final y = pivot.dy + (root[5] - pivot.dy) * scale;
+        final parent = matrices[n.parentId];
+        final origin = parent == null
+            ? [x, y]
+            : transformPoint(inverseMatrix(parent), x, y);
+        final ids = layoutSubtree(start, {n.id});
+        c.preview(
+          start.copyWith(
+            nodes: start.nodes.map((node) {
+              if (!ids.contains(node.id)) return node;
+              return node.copyWith(
+                x: node.id == n.id ? origin[0] : node.x * scale,
+                y: node.id == n.id ? origin[1] : node.y * scale,
+                width: node.width * scale,
+                height: node.height * scale,
+                properties: {
+                  ...node.properties,
+                  if (node.properties['points'] is List)
+                    'points': [
+                      for (final p in node.properties['points'] as List)
+                        [(p[0] as num) * scale, (p[1] as num) * scale],
+                    ],
+                  if (node.properties['holes'] is List)
+                    'holes': [
+                      for (final hole in node.properties['holes'] as List)
+                        [
+                          for (final p in hole as List)
+                            [(p[0] as num) * scale, (p[1] as num) * scale],
+                        ],
+                    ],
+                },
+              );
+            }).toList(),
+          ),
+        );
+        return;
+      }
       final inverse = inverseMatrix(worldMatrix(start, n));
       final initial = transformPoint(inverse, pointer.dx, pointer.dy),
           current = transformPoint(inverse, point.dx, point.dy);
@@ -2295,8 +2365,10 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   }
                                 },
                                 child: Semantics(
-                                  label: VenueLayoutStrings.text(context,
-                                      'Layout canvas. Select an object, then use arrow keys to move. Shift moves ten steps. Escape cancels.'),
+                                  label: VenueLayoutStrings.text(
+                                    context,
+                                    'Layout canvas. Select an object, then use arrow keys to move. Shift moves ten steps. Escape cancels.',
+                                  ),
                                   child: LayoutSceneSurface(
                                     key: ValueKey(_templateViewport),
                                     document: c.document,
