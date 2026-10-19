@@ -6,6 +6,37 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 
 void main() {
   testWidgets(
+    'host chrome hides extra footer and retains accessible list action',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutPicker(
+              document: VenueLayoutDocument(),
+              showSelectionControls: false,
+              onSelectionRequested: (_, __) async =>
+                  const LayoutSelectionResult(accepted: true),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Accessible seat list'), findsNothing);
+      expect(find.text('0 seats selected'), findsNothing);
+      final semantics = tester.widgetList<Semantics>(find.byType(Semantics));
+      expect(
+        semantics.any(
+          (s) =>
+              s.properties.customSemanticsActions?.keys.any(
+                (a) => a.label == 'Accessible seat list',
+              ) ??
+              false,
+        ),
+        isTrue,
+      );
+    },
+  );
+  testWidgets(
     'standing restores host quantity and permits zero without a seat hold',
     (tester) async {
       final id = newLayoutId();

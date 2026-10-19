@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'layout_scene_surface.dart';
 
@@ -15,8 +16,12 @@ class VenueLayoutPicker extends StatefulWidget {
     this.capacityPresentation = const {},
     required this.onSelectionRequested,
     this.onQuantityRequested,
+    this.showSelectionControls = true,
   });
   final VenueLayoutDocument document;
+
+  /// Hosts with existing chrome can retain map semantics without an extra footer.
+  final bool showSelectionControls;
   final Map<String, dynamic> resources, seatPresentation, capacityPresentation;
   final Future<LayoutSelectionResult> Function(
     Set<String> nodeIds,
@@ -323,68 +328,84 @@ class _VenueLayoutPickerState extends State<VenueLayoutPicker> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Expanded(
-        child: LayoutSceneSurface(
-          document: widget.document,
-          resources: widget.resources,
-          presentation: {
-            ...widget.seatPresentation,
-            for (final entry in widget.capacityPresentation.entries)
-              if (entry.value is Map)
-                entry.key: {
-                  ...Map<String, dynamic>.from(entry.value),
-                  'capacity':
-                      entry.value['available'] ?? entry.value['capacity'],
+  Widget build(BuildContext context) => Semantics(
+    customSemanticsActions: widget.showSelectionControls
+        ? null
+        : {
+            CustomSemanticsAction(
+              label: VenueLayoutStrings.text(context, 'Accessible seat list'),
+            ): _list,
+          },
+    child: Column(
+      children: [
+        Expanded(
+          child: LayoutSceneSurface(
+            document: widget.document,
+            resources: widget.resources,
+            presentation: {
+              ...widget.seatPresentation,
+              for (final entry in widget.capacityPresentation.entries)
+                if (entry.value is Map)
+                  entry.key: {
+                    ...Map<String, dynamic>.from(entry.value),
+                    'capacity':
+                        entry.value['available'] ?? entry.value['capacity'],
+                  },
+              for (final id in {
+                ...widget.seatPresentation.keys,
+                ..._selected,
+                ..._pending,
+              })
+                id: {
+                  ..._presentation(id),
+                  'selected': _selected.contains(id),
+                  'pending': _pending.contains(id),
                 },
-            for (final id in {
-              ...widget.seatPresentation.keys,
-              ..._selected,
-              ..._pending,
-            })
-              id: {
-                ..._presentation(id),
-                'selected': _selected.contains(id),
-                'pending': _pending.contains(id),
-              },
-          },
-          onTap: (p) {
-            final id = hitTest(widget.document, p.dx, p.dy);
-            if (id != null) _choose(id);
-          },
-        ),
-      ),
-      if (_pending.isNotEmpty)
-        LinearProgressIndicator(
-          semanticsLabel: VenueLayoutStrings.text(
-            context,
-            'Confirming selection',
+            },
+            onTap: (p) {
+              final id = hitTest(widget.document, p.dx, p.dy);
+              if (id != null) _choose(id);
+            },
           ),
         ),
-      if (_message != null)
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Semantics(liveRegion: true, child: LayoutText(_message!)),
-        ),
-      SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Wrap(
-            spacing: 16,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              LayoutText('${_selected.length} seats selected'),
-              OutlinedButton.icon(
-                onPressed: _list,
-                icon: const Icon(Icons.list),
-                label: const LayoutText('Accessible seat list'),
+        if (widget.showSelectionControls && _pending.isNotEmpty)
+          LinearProgressIndicator(
+            semanticsLabel: VenueLayoutStrings.text(
+              context,
+              'Confirming selection',
+            ),
+          ),
+        if (_message != null && !widget.showSelectionControls)
+          Semantics(
+            liveRegion: true,
+            label: VenueLayoutStrings.text(context, _message!),
+            child: const SizedBox.shrink(),
+          ),
+        if (_message != null && widget.showSelectionControls)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Semantics(liveRegion: true, child: LayoutText(_message!)),
+          ),
+        if (widget.showSelectionControls)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Wrap(
+                spacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  LayoutText('${_selected.length} seats selected'),
+                  OutlinedButton.icon(
+                    onPressed: _list,
+                    icon: const Icon(Icons.list),
+                    label: const LayoutText('Accessible seat list'),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
-    ],
+      ],
+    ),
   );
 }
