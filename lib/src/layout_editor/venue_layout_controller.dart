@@ -944,8 +944,87 @@ class VenueLayoutController extends ChangeNotifier {
       nodes: _document.nodes.map((n) => n.id == node.id ? node : n).toList(),
     ),
   );
+
+  /// Keep authored table labels readable using the same font advances and
+  /// line-height as the portable renderer. Chair dimensions are independent.
+  ({double width, double height}) constrainTableDimensions(
+    LayoutNode node,
+    double width,
+    double height,
+  ) {
+    if (node.kind != 'table' ||
+        !width.isFinite ||
+        !height.isFinite ||
+        width <= 0 ||
+        height <= 0) {
+      return (width: width, height: height);
+    }
+    const padding = 16.0;
+    final style = {
+      ..._document.defaultTextStyle,
+      ...effectiveNodeProperties(_document, node),
+    };
+    final size = (style['size'] as num? ?? 24).toDouble();
+    final lineHeight = size * (style['lineHeight'] as num? ?? 1.2);
+    final font = (_resources['fonts'] as Map?)?[style['fontId']] as Map?;
+    final glyphs = font?['glyphs'] as Map? ?? const {};
+    final units = (font?['unitsPerEm'] as num? ?? 1000).toDouble();
+    final lines = node.label
+        .split('\n')
+        .map(
+          (line) => [
+            for (final rune in line.runes)
+              (glyphs[String.fromCharCode(rune)] as Map?)?['advance'] is num
+                  ? ((glyphs[String.fromCharCode(rune)] as Map)['advance']
+                                as num)
+                            .toDouble() *
+                        size /
+                        units
+                  : size * .6,
+          ],
+        )
+        .toList();
+    final widestGlyph = lines.expand((line) => line).fold(0.0, math.max);
+    final minimumWidth = math.max(32.0, widestGlyph + padding);
+    final keepRatio = (width / height - node.width / node.height).abs() < .0001;
+    if (keepRatio) {
+      final textWidth = lines
+          .map((line) => line.fold(0.0, (sum, w) => sum + w))
+          .fold(0.0, math.max);
+      final factor = math.max(
+        1.0,
+        math.max(
+          math.max(minimumWidth, textWidth + padding) / width,
+          math.max(32.0, lines.length * lineHeight + padding) / height,
+        ),
+      );
+      return (width: width * factor, height: height * factor);
+    }
+    width = math.max(width, minimumWidth);
+    var count = 0;
+    for (final line in lines) {
+      count++;
+      var used = 0.0;
+      for (final advance in line) {
+        if (used > 0 && used + advance > width - padding) {
+          count++;
+          used = 0;
+        }
+        used += advance;
+      }
+    }
+    return (
+      width: width,
+      height: math.max(height, math.max(32.0, count * lineHeight + padding)),
+    );
+  }
+
   bool resizeObject(String id, double width, double height) {
     try {
+      final node = _document.nodes.firstWhere((n) => n.id == id);
+      final dimensions = constrainTableDimensions(node, width, height);
+      width = dimensions.width;
+      height = dimensions.height;
       return apply(
         isCouchNode(_document.nodes.firstWhere((n) => n.id == id))
             ? resizeCouchBody(

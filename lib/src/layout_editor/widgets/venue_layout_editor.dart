@@ -95,8 +95,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   Map<String, double>? _canvasResizeBounds;
   VenueLayoutDocument? _tableResizeBaseline;
   Map<String, double>? _rowResizeBounds;
-  Offset? _pendingResizePoint;
-  int? _resizeFrameCallback;
+  Offset? _pendingDragPoint;
+  int? _dragFrameCallback;
   final Map<String, VenueLayoutDocument> _previews = {};
   final Map<String, VenueLayoutDocument> _themedPreviews = {};
   String _librarySearch = '';
@@ -208,7 +208,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   @override
   void dispose() {
-    _discardResizePreview();
+    _discardDragPreview();
     _stopPaste();
     _paletteFeedbackState.dispose();
     _focus.dispose();
@@ -799,32 +799,31 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     c.beginGesture();
   }
 
-  void _discardResizePreview() {
-    final callback = _resizeFrameCallback;
-    _resizeFrameCallback = null;
-    _pendingResizePoint = null;
+  void _discardDragPreview() {
+    final callback = _dragFrameCallback;
+    _dragFrameCallback = null;
+    _pendingDragPoint = null;
     if (callback != null) {
       SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
     }
   }
 
-  void _flushResizePreview() {
-    final point = _pendingResizePoint;
-    _discardResizePreview();
+  void _flushDragPreview() {
+    final point = _pendingDragPoint;
+    _discardDragPreview();
     if (point != null && mounted) _applyDragUpdate(point);
   }
 
   void _dragUpdate(Offset point) {
-    if ((_gestureTool?.startsWith('Canvas resize ') ?? false) ||
-        (_gestureTool?.startsWith('Resize') ?? false)) {
+    if (_startDocument != null && _gestureTool != 'Paint surface') {
       // Multiple mouse samples can arrive before one frame is paintable.
       // Apply only the latest sample before that frame's build and paint.
-      _pendingResizePoint = point;
-      _resizeFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((
+      _pendingDragPoint = point;
+      _dragFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((
         _,
       ) {
-        _resizeFrameCallback = null;
-        _flushResizePreview();
+        _dragFrameCallback = null;
+        _flushDragPreview();
       });
       return;
     }
@@ -1189,6 +1188,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           width = height * oldWidth / oldHeight;
         }
       }
+      final dimensions = c.constrainTableDimensions(n, width, height);
+      width = dimensions.width;
+      height = dimensions.height;
       final resizeBase = n.kind == 'table'
           ? (_tableResizeBaseline ??= _automaticTableResize(start, n.id))
           : start;
@@ -1336,7 +1338,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _endGesture() {
-    _flushResizePreview();
+    _flushDragPreview();
     _tableResizeBaseline = null;
     _rowResizeBounds = null;
     _resizeRemovedSeats = 0;
@@ -1426,7 +1428,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _cancelGesture() {
-    _discardResizePreview();
+    _discardDragPreview();
     _tableResizeBaseline = null;
     _rowResizeBounds = null;
     _surfaceBrush = null;
@@ -2073,7 +2075,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _handleStart(String mode, Offset point) {
-    _discardResizePreview();
+    _discardDragPreview();
     _tableResizeBaseline = null;
     _rowResizeBounds = null;
     _resizeRemovedSeats = 0;

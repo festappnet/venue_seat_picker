@@ -1,10 +1,93 @@
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface.dart';
 
 void main() {
+  for (final kind in ['table', 'shape', 'group']) {
+    testWidgets(
+      '$kind move previews coalesce samples and flush release/cancel safely',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1440, 1000));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final table = tableLayout(
+          shape: 'ellipse',
+          x: 500,
+          y: 500,
+          width: 160,
+          height: 160,
+          count: 6,
+        );
+        final shape = LayoutNode(
+          id: newLayoutId(),
+          kind: 'shape',
+          x: 500,
+          y: 500,
+          width: 180,
+          height: 120,
+          properties: {'shape': 'rect'},
+        );
+        final group = LayoutNode(id: newLayoutId(), kind: 'group');
+        final document = kind == 'table'
+            ? table
+            : VenueLayoutDocument(
+                nodes: [
+                  if (kind == 'group') group,
+                  kind == 'group' ? shape.copyWith(parentId: group.id) : shape,
+                ],
+              );
+        final root = kind == 'table'
+            ? table.nodes.firstWhere((n) => n.kind == 'table')
+            : kind == 'group'
+            ? group
+            : shape;
+        final c = VenueLayoutController(document)..select({root.id});
+        addTearDown(c.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: VenueLayoutEditor(controller: c, showGallery: false),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        LayoutSceneSurface surface() => tester.widget(
+          find.byWidgetPredicate(
+            (w) => w is LayoutSceneSurface && w.onDrop != null,
+          ),
+        );
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        surface().onDragStart!(const Offset(500, 500));
+        var updates = 0;
+        c.addListener(() => updates++);
+        for (var i = 1; i <= 100; i++) {
+          surface().onDragUpdate!(Offset(500 + i.toDouble(), 500));
+        }
+        expect(
+          updates,
+          lessThanOrEqualTo(1),
+          reason: 'Do not process an unpaintable backlog of pointer samples',
+        );
+        surface().onDragEnd!();
+        await tester.pump();
+        final initial = selectionBounds(document, {root.id});
+        final moved = selectionBounds(c.document, {root.id});
+        expect(moved['x']! - initial['x']!, closeTo(100, .02));
+        c.undo();
+        expect(c.document, same(document));
+        surface().onDragStart!(const Offset(500, 500));
+        surface().onDragUpdate!(const Offset(650, 500));
+        surface().onDragCancel!();
+        await tester.pump();
+        expect(c.document, same(document));
+        expect(c.canUndo, isFalse);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      },
+    );
+  }
+
   testWidgets(
     'new scout table follows a drag across the dance floor without rollback',
     (tester) async {

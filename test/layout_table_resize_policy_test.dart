@@ -26,6 +26,78 @@ void main() {
         ),
       );
 
+  testWidgets(
+    'table shrinking respects the rendered label in drag and numeric dimensions',
+    (tester) async {
+      final source = tableLayout(
+        shape: 'roundedRect',
+        width: 180,
+        height: 80,
+        count: 6,
+      );
+      final table = source.nodes.firstWhere((n) => n.kind == 'table');
+      final original = source.copyWith(
+        nodes: [
+          for (final n in source.nodes)
+            n.id == table.id
+                ? n.copyWith(
+                    label: 'S1',
+                    properties: {...n.properties, 'size': 40, 'lineHeight': 1},
+                  )
+                : n,
+        ],
+      );
+      final resources = <String, dynamic>{
+        'protocol': 1,
+        'fonts': {
+          'fixture:sans': {
+            'id': 'fixture:sans',
+            'hash': List.filled(64, 'a').join(),
+            'unitsPerEm': 1000,
+            'ascent': 800,
+            'descent': -200,
+            'glyphs': {
+              for (final ch in ['S', '1'])
+                ch: {
+                  'advance': 600,
+                  'path': [
+                    ['M', 0, 0],
+                    ['L', 10, 10],
+                  ],
+                },
+            },
+          },
+        },
+      };
+      final c = VenueLayoutController(original, resources: resources)
+        ..select({table.id});
+      await open(tester, c);
+      final edge = Offset(table.x, table.y + table.height / 2);
+      surface(tester).onHandleStart!('Resize s', edge);
+      surface(tester).onDragUpdate!(edge - const Offset(0, 79));
+      surface(tester).onDragEnd!();
+      final resized = c.document.nodes.firstWhere((n) => n.id == table.id);
+      expect(resized.height, greaterThanOrEqualTo(40));
+      expect(
+        compileScene(c.document, resources: c.resources)['issues'],
+        isEmpty,
+      );
+      expect(
+        c.document.nodes
+            .where((n) => n.kind == 'seat')
+            .every((n) => n.width == 40 && n.height == 40),
+        isTrue,
+      );
+      c.undo();
+      expect(c.document, same(original));
+      expect(c.resizeObject(table.id, 1, 1), isTrue);
+      expect(
+        compileScene(c.document, resources: c.resources)['issues'],
+        isEmpty,
+      );
+    },
+  );
+
   testWidgets('resizing a wrapped table preserves chair size and one undo', (
     tester,
   ) async {

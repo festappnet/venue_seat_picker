@@ -42,6 +42,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
   String _search = '';
   String? _selectionContext;
   String? _error;
+  int _shapeControlRevision = 0;
   Map<String, LayoutNode> _nodesById = {};
   VenueLayoutDocument? _indexedDocument, _layerDocument;
   List<LayoutNode> _orderedLayers = const [], _filteredLayers = const [];
@@ -753,6 +754,115 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             }[node.kind] ??
             node.kind;
 
+  String _tableShape(LayoutNode node) => node.properties['shape'] == 'polygon'
+      ? 'polygon'
+      : const [
+          'round',
+          'circle',
+          'ellipse',
+          'oval',
+        ].contains(node.properties['shape'])
+      ? 'round'
+      : 'rectangle';
+
+  void _changeTableShape(LayoutNode node, String shape) {
+    if (shape == _tableShape(node)) return;
+    final before = c.document;
+    final seats = before.nodes
+        .where((n) => n.kind == 'seat' && n.parentId == node.id)
+        .map((n) => n.id)
+        .toSet();
+    final properties = Map<String, dynamic>.from(node.properties)
+      ..remove('points')
+      ..remove('holes');
+    properties['shape'] = shape == 'rectangle' ? 'roundedRect' : shape;
+    if (shape == 'polygon') {
+      final hull = localHull(node);
+      // A round surface needs a manageable number of editable corners.
+      properties['points'] = hull.length == 64
+          ? [for (var i = 0; i < hull.length; i += 8) hull[i]]
+          : hull;
+    }
+    final diameter = math.max(node.width, node.height);
+    final nextNode = node.copyWith(
+      width: shape == 'round' ? diameter : node.width,
+      height: shape == 'round' ? diameter : node.height,
+      properties: properties,
+    );
+    if (tableCapacity(nextNode) < seats.length) {
+      throw StateError(
+        'The selected shape cannot fit the existing chairs. Increase the table size first.',
+      );
+    }
+    final next = reflowTable(
+      before.copyWith(
+        nodes: [for (final n in before.nodes) n.id == node.id ? nextNode : n],
+      ),
+      node.id,
+      seats.length,
+      protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
+    );
+    final retained = next.nodes
+        .where((n) => n.kind == 'seat' && n.parentId == node.id)
+        .map((n) => n.id)
+        .toSet();
+    if (!setEquals(seats, retained)) {
+      throw StateError(
+        'The selected shape cannot fit the existing chairs. Increase the table size first.',
+      );
+    }
+    c.apply(next, label: 'Change table shape');
+  }
+
+  Widget _tableShapeControls(LayoutNode node) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String>(
+          key: ValueKey(
+            'table-shape-${node.id}-${_tableShape(node)}-$_shapeControlRevision',
+          ),
+          initialValue: _tableShape(node),
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: VenueLayoutStrings.text(
+              context,
+              isBarNode(node) ? 'Surface shape' : 'Table shape',
+            ),
+            border: const OutlineInputBorder(),
+          ),
+          items: [
+            for (final entry in {
+              'rectangle': 'Rectangle',
+              if (!isBarNode(node)) 'round': 'Round',
+              'polygon': 'Custom outline',
+            }.entries)
+              DropdownMenuItem(
+                value: entry.key,
+                child: LayoutText(entry.value),
+              ),
+          ],
+          onChanged: c.readOnly || c.saving || node.locked
+              ? null
+              : (shape) {
+                  if (shape != null) {
+                    _shapeControlRevision++;
+                    _run(() => _changeTableShape(node, shape));
+                  }
+                },
+        ),
+        if (_tableShape(node) == 'polygon')
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: LayoutText(
+              'Pull an edge handle to extend the surface. Drag corners to reshape it.',
+            ),
+          ),
+      ],
+    ),
+  );
+
   Widget _node(LayoutNode n) {
     final facingRotation = tableSeatFacingRotation(n, _nodesById[n.parentId]);
     final p = effectiveNodeProperties(c.document, n);
@@ -918,41 +1028,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             child: const LayoutText('Detach from assembly'),
           ),
 
-        if (n.kind == 'table') ...[
-          const SizedBox(height: 8),
-          const LayoutText('Surface footprint'),
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final shape in ['rectangle', 'L', 'U'])
-                OutlinedButton(
-                  onPressed: c.readOnly || c.saving
-                      ? null
-                      : () => _run(
-                          () => c.apply(
-                            reshapeTableSurface(
-                              c.document,
-                              n.id,
-                              shape,
-                              protectedSeatIds:
-                                  c.protectedSeatIds?.call() ?? const {},
-                            ),
-                            label: 'Reshape surface',
-                          ),
-                        ),
-                  child: LayoutText(
-                    shape == 'rectangle' ? 'Edit outline' : shape,
-                  ),
-                ),
-            ],
-          ),
-          const Padding(
-            padding: EdgeInsets.only(top: 6, bottom: 16),
-            child: LayoutText(
-              'Pull an edge handle to extend the surface. Drag corners to reshape it.',
-            ),
-          ),
-        ],
+        if (n.kind == 'table') _tableShapeControls(n),
         if (n.kind == 'shape' && p['shape'] == 'polygon')
           Wrap(
             spacing: 8,
@@ -1004,27 +1080,6 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                             ? () => _run(() => c.setSeatCount(n.id, count + 1))
                             : null,
                         icon: const Icon(Icons.add_circle_outline),
-                      ),
-                      TextButton(
-                        onPressed: (c.readOnly || c.saving)
-                            ? null
-                            : () {
-                                final base = c.document;
-                                _preview(
-                                  'Preview table seats',
-                                  (v) => reflowTable(
-                                    base,
-                                    n.id,
-                                    v['Seats']!.toInt(),
-                                    protectedSeatIds:
-                                        c.protectedSeatIds?.call() ?? const {},
-                                  ),
-                                  {'Seats': count.toDouble()},
-                                  detail:
-                                      'Existing seats keep their identities. Apply is one undo step.',
-                                );
-                              },
-                        child: const LayoutText('Preview count'),
                       ),
                     ],
                   ),
