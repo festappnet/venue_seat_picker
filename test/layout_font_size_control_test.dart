@@ -51,13 +51,15 @@ void main() {
       final before = c.document;
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        '40.64',
+        '41',
       );
       final slider = find.byType(Slider);
       final gesture = await tester.startGesture(tester.getCenter(slider));
       await gesture.moveBy(const Offset(25, 0));
       await tester.pump();
       expect(c.document.nodes.single.properties['size'], isNot(40.64));
+      final size = c.document.nodes.single.properties['size'] as num;
+      expect(size, size.round());
       expect(c.canUndo, isFalse);
       await gesture.moveBy(const Offset(20, 0));
       await tester.pump();
@@ -78,6 +80,19 @@ void main() {
       expect(c.canUndo, isFalse);
     },
   );
+  testWidgets('typed font size rounds to whole units', (tester) async {
+    final c = await mount(tester, 24);
+    await tester.enterText(find.byType(TextField), '32,8');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(c.document.nodes.single.properties['size'], 33);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '33',
+    );
+    c.undo();
+    expect(c.document.nodes.single.properties['size'], 24);
+  });
   testWidgets('cancelled slider restores preview and creates no undo', (
     tester,
   ) async {
@@ -215,8 +230,9 @@ void main() {
         target.id,
       }, captureLayoutAppearance(doc, group.id));
       final changed = result.nodes.firstWhere((n) => n.id == target.id);
-      for (final key in ['fontId', 'size', 'bold', 'italic'])
+      for (final key in ['fontId', 'size', 'bold', 'italic']) {
         expect(changed.properties[key], source.properties[key]);
+      }
       expect(changed.label, target.label);
       expect(changed.x, target.x);
       expect(

@@ -472,7 +472,7 @@ class _GlobalStyleDialogState extends State<_GlobalStyleDialog> {
                         min: layoutLimits['fontSizeMin']!.toDouble(),
                         max: layoutLimits['fontSizeMax']!.toDouble(),
                         sliderMax: 96,
-                        step: .1,
+                        step: 1,
                         enabled: _enabled,
                         preview: (value) =>
                             setState(() => _appearanceDraft['size'] = value),
@@ -655,7 +655,11 @@ class _GlobalStyleNumber extends StatefulWidget {
 }
 
 class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
-  late final _text = TextEditingController(text: '${widget.value}');
+  late final _text = TextEditingController(text: _display(widget.value));
+  bool _edited = false;
+  String _display(double value) => widget.step >= 1
+      ? value.round().toString()
+      : value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
   late final _focus = FocusNode()..addListener(_blur);
   String? _error;
   double? _submitted;
@@ -674,12 +678,12 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
   }
 
   void _commit() {
-    if (!widget.enabled) return;
-    final value = double.tryParse(_text.text.replaceAll(',', '.'));
-    if (value == null ||
-        !value.isFinite ||
-        value < widget.min ||
-        value > widget.max) {
+    if (!widget.enabled || !_edited) return;
+    final parsed = double.tryParse(_text.text.replaceAll(',', '.'));
+    if (parsed == null ||
+        !parsed.isFinite ||
+        parsed < widget.min ||
+        parsed > widget.max) {
       if (mounted) {
         setState(
           () => _error = widget.max == 1
@@ -692,6 +696,9 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
       return;
     }
     if (mounted) setState(() => _error = null);
+    final value = _snap(parsed);
+    _edited = false;
+    _text.text = _display(value);
     if (value != widget.value && value != _submitted) {
       _submitted = value;
       widget.save(value);
@@ -702,7 +709,8 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
   void didUpdateWidget(_GlobalStyleNumber oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value) {
-      _text.text = '${widget.value}';
+      _text.text = _display(widget.value);
+      _edited = false;
       _submitted = null;
       _error = null;
     }
@@ -723,7 +731,10 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
       min: widget.min,
       max: widget.max,
       step: widget.step,
-      onChanged: _commit,
+      onChanged: () {
+        _edited = true;
+        _commit();
+      },
       child: TextField(
         controller: _text,
         focusNode: _focus,
@@ -743,6 +754,7 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
           ),
         ),
         onChanged: (_) {
+          _edited = true;
           _submitted = null;
           if (_error != null) setState(() => _error = null);
         },

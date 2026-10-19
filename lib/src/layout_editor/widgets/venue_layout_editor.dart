@@ -896,7 +896,11 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   ) {
     final seats = {
       for (final n in baseline.nodes)
-        if (n.kind == 'seat' && n.parentId == tableId && !n.locked) n.id,
+        if (n.kind == 'seat' &&
+            n.parentId == tableId &&
+            !n.locked &&
+            n.properties['manual'] == true)
+          n.id,
     };
     if (!baseline.nodes.any(
           (n) => seats.contains(n.id) && n.properties['manual'] == true,

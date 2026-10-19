@@ -384,17 +384,23 @@ class VenueLayoutController extends ChangeNotifier {
         if (overrides.isNotEmpty) props['appearanceOverrides'] = overrides;
         return props;
       }
+
       dynamic textValue(VenueLayoutDocument doc, LayoutNode n, String key) =>
-          effectiveNodeProperties(doc, n)[key] ?? doc.defaultTextStyle[key] ??
+          effectiveNodeProperties(doc, n)[key] ??
+          doc.defaultTextStyle[key] ??
           (key == 'bold' || key == 'italic' ? false : null);
-      final onlyTypographyFreeze = unlocked != null &&
+      final onlyTypographyFreeze =
+          unlocked != null &&
           !sameLayoutValue(_document.appearance, next.appearance) &&
           sameLayoutNode(
             node.copyWith(properties: withoutTypography(node)),
             unlocked.copyWith(properties: withoutTypography(unlocked)),
           ) &&
-          typography.every((key) =>
-              textValue(_document, node, key) == textValue(next, unlocked, key));
+          typography.every(
+            (key) =>
+                textValue(_document, node, key) ==
+                textValue(next, unlocked, key),
+          );
       if (!onlyUnlock && !onlyLayerReindex && !onlyTypographyFreeze) {
         error = 'Locked object: ${node.label.isEmpty ? node.kind : node.label}';
         notifyListeners();
@@ -552,7 +558,7 @@ class VenueLayoutController extends ChangeNotifier {
   }) {
     if (_gesture == null) beginGesture();
     if (_gesture == null) return false;
-    final next = moveLayoutWithinCanvas(baseline, ids, dx: dx, dy: dy);
+    final next = translateLayoutWithinCanvas(baseline, ids, dx: dx, dy: dy);
     if (identical(next, baseline) && (dx != 0 || dy != 0)) return false;
     return _apply(next, reflowTables: false);
   }
@@ -944,9 +950,10 @@ class VenueLayoutController extends ChangeNotifier {
 
   void moveSelection(double dx, double dy) {
     try {
-      apply(
-        moveLayoutWithinCanvas(_document, _selection, dx: dx, dy: dy),
+      _apply(
+        translateLayoutWithinCanvas(_document, _selection, dx: dx, dy: dy),
         label: 'Move',
+        reflowTables: false,
       );
     } catch (e) {
       error = e is StateError ? e.message : e.toString();

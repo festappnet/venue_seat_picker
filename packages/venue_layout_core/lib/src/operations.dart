@@ -1418,11 +1418,28 @@ VenueLayoutDocument transformNodes(
 /// Translates an assembly inside the fixed canvas, reflowing automatic table
 /// chairs where possible. Derive every preview from the gesture baseline.
 /// Physical furniture and chairs constrain placement; decorative labels do not.
+/// Move the complete assembly rigidly. Seating repair belongs to explicit
+/// layout operations, never to pointer translation.
+VenueLayoutDocument translateLayoutWithinCanvas(
+  VenueLayoutDocument d,
+  Set<String> ids, {
+  double dx = 0,
+  double dy = 0,
+}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy, reflowSeating: false);
+
 VenueLayoutDocument moveLayoutWithinCanvas(
   VenueLayoutDocument d,
   Set<String> ids, {
   double dx = 0,
   double dy = 0,
+}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy, reflowSeating: true);
+
+VenueLayoutDocument _moveLayoutWithinCanvas(
+  VenueLayoutDocument d,
+  Set<String> ids, {
+  double dx = 0,
+  double dy = 0,
+  required bool reflowSeating,
 }) {
   if (!dx.isFinite || !dy.isFinite) {
     throw ArgumentError('Translation must be finite');
@@ -1487,7 +1504,7 @@ VenueLayoutDocument moveLayoutWithinCanvas(
   // baseline intact rather than dropping chairs or resizing the canvas.
   if (initial == null) return d;
   var x = initial[0], y = initial[1];
-  for (var attempt = 0; attempt < 8; attempt++) {
+  for (var attempt = 0; reflowSeating && attempt < 8; attempt++) {
     final translated = transformNodes(d, ids, dx: x, dy: y);
     final spatial = tables.isEmpty ? null : LayoutSpatialIndex(translated);
     // A colliding tabletop cannot be repaired by moving its chairs. Reject it

@@ -160,6 +160,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Catalog table'), findsOneWidget);
       final control = find.byKey(const ValueKey('table-font-size'));
+      final sizeInput = find.descendant(
+        of: control,
+        matching: find.byType(TextField),
+      );
+      expect(tester.widget<TextField>(sizeInput).controller!.text, '24');
       final slider = find.descendant(
         of: control,
         matching: find.byType(Slider),
@@ -184,6 +189,13 @@ void main() {
       await tester.pumpAndSettle();
       expect((c.document.appearance['table'] as Map)['bold'], true);
       expect((c.document.appearance['table'] as Map)['italic'], true);
+      await tester.ensureVisible(sizeInput);
+      await tester.enterText(sizeInput, '35,7');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect((c.document.appearance['table'] as Map)['size'], 36);
+      expect(tester.widget<TextField>(sizeInput).controller!.text, '36');
+
       expect(tester.takeException(), isNull);
     },
   );

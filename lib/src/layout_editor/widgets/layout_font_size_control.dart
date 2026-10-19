@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'layout_style.dart';
 
-/// A continuous preview is one history operation; typed values remain exact.
+/// A live preview is one history operation; font sizes use whole units.
 class LayoutFontSizeControl extends StatefulWidget {
   const LayoutFontSizeControl({
     super.key,
@@ -26,12 +26,12 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
   double? _dragMin, _dragMax;
   String? _error;
   bool _cancelled = false;
+  bool _edited = false;
   bool get _enabled =>
       !widget.controller.readOnly &&
       !widget.controller.saving &&
       !widget.node.locked;
-  String _display(double value) =>
-      value.toString().replaceFirst(RegExp(r'\.0$'), '');
+  String _display(double value) => value.round().toString();
   double get _min => _dragMin ?? math.min(8, widget.value).toDouble();
   double get _max =>
       _dragMax ??
@@ -53,7 +53,10 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
   @override
   void didUpdateWidget(LayoutFontSizeControl oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value) _text.text = _display(widget.value);
+    if (oldWidget.value != widget.value) {
+      _text.text = _display(widget.value);
+      _edited = false;
+    }
   }
 
   LayoutNode _sized(LayoutNode node, double value) => node.copyWith(
@@ -71,7 +74,7 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
 
   void _change(double value) {
     if (!_enabled || _cancelled) return;
-    final rounded = (value * 10).round() / 10;
+    final rounded = value.roundToDouble();
     final baseline = _baseline;
     if (baseline == null) {
       widget.controller.updateNode(_sized(widget.node, rounded));
@@ -112,7 +115,7 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
   }
 
   void _submit() {
-    if (!_enabled) return;
+    if (!_enabled || !_edited) return;
     final value = double.tryParse(_text.text.replaceAll(',', '.'));
     if (value == null ||
         !value.isFinite ||
@@ -125,8 +128,11 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
       return;
     }
     setState(() => _error = null);
-    if (value != widget.value) {
-      widget.controller.updateNode(_sized(widget.node, value));
+    final rounded = value.roundToDouble();
+    _edited = false;
+    _text.text = _display(rounded);
+    if (rounded != widget.value) {
+      widget.controller.updateNode(_sized(widget.node, rounded));
     }
   }
 
@@ -187,6 +193,7 @@ class _LayoutFontSizeControlState extends State<LayoutFontSizeControl> {
               isDense: true,
               border: const OutlineInputBorder(),
             ),
+            onChanged: (_) => _edited = true,
             onSubmitted: (_) => _submit(),
             onTapOutside: (_) {
               _submit();

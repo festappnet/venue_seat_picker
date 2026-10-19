@@ -237,13 +237,42 @@ class _LayoutInspectorState extends State<LayoutInspector> {
   );
   Widget _number(String label, num value, ValueChanged<double> save) => _field(
     label,
-    value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), ''),
+    const {
+          'Opacity',
+          'Outline width',
+          'Line height',
+          'Curvature',
+        }.contains(label)
+        ? value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '')
+        : value.round().toString(),
     (v) {
-      final parsed = double.tryParse(v);
+      final parsed = double.tryParse(v.replaceAll(',', '.'));
       if (parsed == null || !parsed.isFinite) {
         throw const FormatException('Enter a valid number.');
       }
-      save(parsed);
+      if (const {
+            'Number of rows',
+            'Seats per row',
+            'Blocks',
+            'Seats on couch',
+            'Number of teeth',
+            'Standing capacity',
+          }.contains(label) &&
+          parsed != parsed.roundToDouble()) {
+        throw FormatException(
+          VenueLayoutStrings.text(context, 'Enter a positive whole number.'),
+        );
+      }
+      save(
+        const {
+              'Opacity',
+              'Outline width',
+              'Line height',
+              'Curvature',
+            }.contains(label)
+            ? (parsed * 100).round() / 100
+            : parsed.roundToDouble(),
+      );
     },
     numeric: true,
   );
@@ -318,7 +347,9 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: TextFormField(
-                        initialValue: values[key].toString(),
+                        initialValue: values[key]!
+                            .toStringAsFixed(2)
+                            .replaceFirst(RegExp(r'\.?0+$'), ''),
                         decoration: InputDecoration(
                           labelText: VenueLayoutStrings.text(context, key),
                           border: const OutlineInputBorder(),
