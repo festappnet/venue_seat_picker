@@ -44,7 +44,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
   VenueLayoutDocument? _indexedDocument, _layerDocument;
   List<LayoutNode> _orderedLayers = const [], _filteredLayers = const [];
   String? _layerSearch;
-  bool _layersExpanded = true;
+  bool _layersExpanded = false;
   Widget? _layerRows;
   Set<String> _layerSelection = const {};
 
@@ -1787,7 +1787,6 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       _selectionContext = selectionContext;
       _error = null;
       _search = '';
-      _layersExpanded = true;
     }
     final layers = _layersExpanded ? _layers() : const <LayoutNode>[];
 

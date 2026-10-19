@@ -19,6 +19,77 @@ class _MeasuredController extends VenueLayoutController {
 
 void main() {
   testWidgets(
+    'layers build on demand and keep expansion across selection changes',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(600, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final nodes = List.generate(
+        240,
+        (i) => LayoutNode(
+          id: newLayoutId(),
+          kind: 'seat',
+          label: 'Seat $i',
+          x: (i % 20) * 40 + 20,
+          y: (i ~/ 20) * 40 + 20,
+          width: 24,
+          height: 24,
+        ),
+      );
+      final c = VenueLayoutController(
+        VenueLayoutDocument.empty().copyWith(nodes: nodes),
+      );
+      addTearDown(c.dispose);
+      c.select({nodes.first.id});
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: c,
+              builder: (_, _) => LayoutInspector(
+                controller: c,
+                cornerPivot: false,
+                onPivotChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      final rows = find.byWidgetPredicate(
+        (widget) => widget is ListTile && widget.dense == true,
+      );
+      final search = find.widgetWithText(TextField, 'Find object');
+      expect(rows, findsNothing);
+      expect(search, findsNothing);
+      c.select({nodes[1].id});
+      await tester.pumpAndSettle();
+      expect(rows, findsNothing);
+
+      await tester.ensureVisible(find.text('Layers'));
+      await tester.tap(find.text('Layers'));
+      await tester.pumpAndSettle();
+      expect(rows, findsNWidgets(200));
+      c.select({nodes[2].id});
+      await tester.pumpAndSettle();
+      expect(rows, findsNWidgets(200));
+      await tester.ensureVisible(search);
+      await tester.enterText(search, 'Seat 239');
+      await tester.pump();
+      expect(rows, findsOneWidget);
+      expect(find.widgetWithText(ListTile, 'Seat 239'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Layers'));
+      await tester.tap(find.text('Layers'));
+      await tester.pumpAndSettle();
+      expect(rows, findsNothing);
+      c.select({nodes[3].id});
+      await tester.pumpAndSettle();
+      expect(rows, findsNothing);
+      expect(search, findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     '5000-seat inspector keeps selection and layer search on repeated notifications',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1200, 900));
@@ -106,6 +177,9 @@ void main() {
       );
       c.cancelGesture();
       await tester.pump();
+      await tester.ensureVisible(find.text('Layers'));
+      await tester.tap(find.text('Layers'));
+      await tester.pumpAndSettle();
       final search = find.widgetWithText(TextField, 'Find object');
       await tester.ensureVisible(search);
       await tester.enterText(search, 'Seat 4999');
@@ -173,6 +247,9 @@ void main() {
           ),
         ),
       );
+      await tester.ensureVisible(find.text('Layers'));
+      await tester.tap(find.text('Layers'));
+      await tester.pumpAndSettle();
       ListTile tile(String name) =>
           tester.widget<ListTile>(find.widgetWithText(ListTile, name));
       expect(tile('Child').contentPadding, const EdgeInsets.only(left: 12));

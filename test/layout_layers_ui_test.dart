@@ -154,6 +154,9 @@ void main() {
         ),
       ),
     );
+    await tester.ensureVisible(find.text('Layers'));
+    await tester.tap(find.text('Layers'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('Bring to front'));
     await tester.tap(find.byTooltip('Bring to front'));
     await tester.pump();
