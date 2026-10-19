@@ -55,7 +55,8 @@ void main() {
       expect(result.nodes[3].properties['zigzagTeeth'], 8);
       expect(result.nodes[3].properties['fill'], '#00000000');
       final copied = captureLayoutAppearance(result, table.id);
-      expect(copied.object['fill'], '#F0E4D2FF');
+      expect(result.nodes[0].toJson(), table.toJson());
+      expect(copied.object, captureLayoutAppearance(doc, table.id).object);
       expect(copied.seats!['fill'], '#D9B788FF');
     },
   );
@@ -121,6 +122,101 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('wrapper plan style switch ignores noneditable overrides', (
+    tester,
+  ) async {
+    final group = LayoutNode(
+      id: newLayoutId(),
+      kind: 'group',
+      x: 1200,
+      y: 800,
+      properties: {
+        'fill': '#ABCDEFff',
+        'appearanceOverrides': ['fill'],
+      },
+    );
+    final table = LayoutNode(
+      id: newLayoutId(),
+      parentId: group.id,
+      kind: 'table',
+      width: 190,
+      height: 110,
+      properties: {
+        'fill': '#F0E4D2FF',
+        'appearanceOverrides': ['fill'],
+      },
+    );
+    final seat = LayoutNode(
+      id: newLayoutId(),
+      parentId: table.id,
+      kind: 'seat',
+      x: 0,
+      y: -90,
+      width: 40,
+      height: 40,
+    );
+    final locked = LayoutNode(
+      id: newLayoutId(),
+      parentId: table.id,
+      kind: 'seat',
+      x: 60,
+      y: -90,
+      width: 40,
+      height: 40,
+      locked: true,
+      properties: {
+        'fill': '#123456FF',
+        'appearanceOverrides': ['fill'],
+      },
+    );
+    var original = VenueLayoutDocument.empty().copyWith(
+      nodes: [group, table, seat, locked],
+    );
+    original = setLayoutAppearance(original, 'table', {'fill': '#112233FF'});
+    original = setLayoutAppearance(original, 'seat', {'fill': '#445566FF'});
+    original = applyLayoutAppearance(original, {
+      group.id,
+    }, layoutAppearancePresets['Warm']!);
+    final c = VenueLayoutController(original)..select({group.id});
+    await open(tester, c);
+    await tester.ensureVisible(find.text('Object appearance'));
+    await tester.tap(find.text('Object appearance'));
+    await tester.pumpAndSettle();
+    final toggle = find.widgetWithText(SwitchListTile, 'Use plan style');
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(c.error, isNull);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(
+      effectiveNodeProperties(c.document, c.document.nodes[1])['fill'],
+      '#F0E4D2FF',
+    );
+    expect(c.document.nodes[1].toJson(), table.toJson());
+    expect(
+      effectiveNodeProperties(c.document, c.document.nodes[2])['fill'],
+      '#445566FF',
+    );
+    expect(c.document.nodes.first.toJson(), group.toJson());
+    expect(c.document.nodes.last.toJson(), locked.toJson());
+    final inherited = c.document.toJson();
+    final warm = find.byKey(const ValueKey('layout-style-Warm'));
+    await tester.ensureVisible(warm);
+    await tester.tap(warm);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    expect(
+      effectiveNodeProperties(c.document, c.document.nodes[2])['fill'],
+      '#D9B788FF',
+    );
+    expect(c.document.nodes.last.toJson(), locked.toJson());
+    c.undo();
+    expect(c.document.toJson(), inherited);
+    c.undo();
+    expect(c.document.toJson(), original.toJson());
+  });
 
   Finder canvas() => find.byWidgetPredicate(
     (w) => w is LayoutSceneSurface && w.onContextMenu != null,

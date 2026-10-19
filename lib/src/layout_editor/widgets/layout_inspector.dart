@@ -879,7 +879,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     final facingRotation = tableSeatFacingRotation(n, _nodesById[n.parentId]);
     final p = effectiveNodeProperties(c.document, n);
     final openPath = const ['line', 'polyline', 'arrow'].contains(p['shape']);
-    final styleIds = layoutSubtree(c.document, {n.id});
+    final styleIds = layoutAppearanceTargets(c.document, {n.id});
     final followsPlan = c.document.nodes
         .where((node) => styleIds.contains(node.id))
         .every(
@@ -1302,7 +1302,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                     : 'Local appearance overrides',
               ),
               value: followsPlan,
-              onChanged: c.readOnly || c.saving
+              onChanged: c.readOnly || c.saving || styleIds.isEmpty
                   ? null
                   : (value) => c.apply(
                       followPlanAppearance(c.document, {n.id}, value),

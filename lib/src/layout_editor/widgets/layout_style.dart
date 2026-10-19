@@ -208,14 +208,26 @@ Map<String, dynamic> localAppearanceProperties(
     }.toList(),
 };
 
-VenueLayoutDocument followPlanAppearance(
+/// Drawable nodes that appearance controls can modify, excluding locked subtrees.
+Set<String> layoutAppearanceTargets(
   VenueLayoutDocument document,
   Set<String> roots,
-  bool follow,
 ) {
-  final targets = layoutSubtree(document, roots);
+  final subtree = layoutSubtree(document, roots);
   final byId = {for (final n in document.nodes) n.id: n};
+  // The controller also protects ancestors of locked nodes, since edits to an
+  // assembly may affect those descendants. Match that acceptance contract.
+  final protectedAncestors = <String>{};
+  for (final node in document.nodes.where((node) => node.locked)) {
+    LayoutNode? current = node;
+    final seen = <String>{};
+    while (current != null && seen.add(current.id)) {
+      protectedAncestors.add(current.id);
+      current = byId[current.parentId];
+    }
+  }
   bool locked(LayoutNode node) {
+    if (protectedAncestors.contains(node.id)) return true;
     LayoutNode? current = node;
     final seen = <String>{};
     while (current != null && seen.add(current.id)) {
@@ -225,10 +237,24 @@ VenueLayoutDocument followPlanAppearance(
     return false;
   }
 
+  return {
+    for (final node in document.nodes)
+      if (subtree.contains(node.id) && node.kind != 'group' && !locked(node))
+        node.id,
+  };
+}
+
+VenueLayoutDocument followPlanAppearance(
+  VenueLayoutDocument document,
+  Set<String> roots,
+  bool follow,
+) {
+  final targets = layoutAppearanceTargets(document, roots);
+  final byId = {for (final n in document.nodes) n.id: n};
   return document.copyWith(
     nodes: [
       for (final n in document.nodes)
-        if (targets.contains(n.id) && n.kind != 'group' && !locked(n))
+        if (targets.contains(n.id))
           n.copyWith(
             properties: follow
                 ? ({...n.properties}..remove('appearanceOverrides'))
@@ -265,22 +291,11 @@ VenueLayoutDocument applyLayoutAppearance(
   Set<String> ids,
   LayoutAppearance appearance,
 ) {
-  final byId = {for (final n in document.nodes) n.id: n};
-  final targets = layoutSubtree(document, ids);
-  bool locked(LayoutNode node) {
-    LayoutNode? current = node;
-    final visited = <String>{};
-    while (current != null && visited.add(current.id)) {
-      if (current.locked) return true;
-      current = byId[current.parentId];
-    }
-    return false;
-  }
-
+  final targets = layoutAppearanceTargets(document, ids);
   return document.copyWith(
     nodes: [
       for (final node in document.nodes)
-        if (targets.contains(node.id) && node.kind != 'group' && !locked(node))
+        if (targets.contains(node.id))
           node.copyWith(
             properties: localAppearanceProperties(node, {
               for (final entry
