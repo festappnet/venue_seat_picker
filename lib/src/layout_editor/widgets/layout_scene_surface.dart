@@ -469,9 +469,15 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         );
       }
 
-      final resizeSelection = widget.document.nodes
+      final selectedNodes = widget.document.nodes
           .where((node) => widget.selected.contains(node.id))
-          .firstOrNull;
+          .map(
+            (node) => widget.showSeatSelectionChecks
+                ? node
+                : tabletopSelectionNode(widget.document, node),
+          )
+          .toList();
+      final resizeSelection = selectedNodes.firstOrNull;
       final resizeBounds = resizeSelection?.kind == 'group'
           ? selectionBounds(widget.document, {resizeSelection!.id})
           : {
@@ -690,10 +696,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           );
         },
       );
-      final seatLinks = tableSeatLinks(widget.document, widget.selected);
-      final selectedNodes = widget.document.nodes
-          .where((n) => widget.selected.contains(n.id))
-          .toList();
+      final seatLinks = tableSeatLinks(
+        widget.document,
+        selectedNodes.map((node) => node.id).toSet(),
+      );
       Map<String, double> localBounds(LayoutNode node) {
         if (node.properties['assembly'] != 'rows') {
           return {
@@ -1132,7 +1138,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       'polyline',
                       'arrow',
                     ].contains(selectedNodes.single.properties['shape']) &&
-                    !(selectedNodes.single.kind == 'table' &&
+                    !(isBarNode(selectedNodes.single) &&
+                        widget.selected.contains(selectedNodes.single.id) &&
                         selectedNodes.single.properties['shape'] ==
                             'polygon') &&
                     !const [
@@ -1172,7 +1179,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   screenOffset: const Offset(0, -24),
                   cursor: SystemMouseCursors.grab,
                 ),
-                if (!isZigzagNode(selectedNodes.single) &&
+                if (widget.selected.contains(selectedNodes.single.id) &&
+                    (selectedNodes.single.kind != 'table' ||
+                        isBarNode(selectedNodes.single)) &&
+                    !isZigzagNode(selectedNodes.single) &&
                     const [
                       'polyline',
                       'polygon',
@@ -1205,7 +1215,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       Icons.add,
                       cursor: SystemMouseCursors.precise,
                     ),
-                if (!isZigzagNode(selectedNodes.single) &&
+                if (widget.selected.contains(selectedNodes.single.id) &&
+                    (selectedNodes.single.kind != 'table' ||
+                        isBarNode(selectedNodes.single)) &&
+                    !isZigzagNode(selectedNodes.single) &&
                     _vertexPoints(selectedNodes.single) != null)
                   for (
                     var i = 0;

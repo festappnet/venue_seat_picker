@@ -106,4 +106,220 @@ void main() {
       expect(find.byTooltip('Rotate handle'), findsOneWidget);
     },
   );
+  testWidgets(
+    'native table wrapper uses tabletop handles and stable resize while moving its assembly',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final base = tableLayout(
+        shape: 'roundedRect',
+        count: 6,
+        x: 400,
+        y: 300,
+        width: 200,
+        height: 120,
+      );
+      final table = base.nodes.firstWhere((node) => node.kind == 'table');
+      final wrapper = LayoutNode(
+        id: newLayoutId(),
+        kind: 'group',
+        x: 40,
+        y: 60,
+      );
+      final original = base.copyWith(
+        nodes: [
+          wrapper,
+          for (final node in base.nodes)
+            node.id == table.id ? node.copyWith(parentId: wrapper.id) : node,
+        ],
+      );
+      final controller = VenueLayoutController(original)..select({wrapper.id});
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(controller: controller, showGallery: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      LayoutSceneSurface surface() => tester.widget<LayoutSceneSurface>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is LayoutSceneSurface && widget.onHandleStart != null,
+        ),
+      );
+      final painter = tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<LayoutScenePainter>()
+          .firstWhere((painter) => painter.selected.contains(wrapper.id));
+      final actualTable = original.nodes.firstWhere(
+        (node) => node.id == table.id,
+      );
+      final matrix = worldMatrix(original, actualTable);
+      final tabletop = boundsOfPoints(worldHull(actualTable, matrix));
+      expect(painter.selected, {wrapper.id});
+      expect(boundsOfPoints(painter.selectionHulls.single), tabletop);
+      expect(painter.seatLinks, hasLength(6));
+      for (final link in painter.seatLinks) {
+        expect((link.seatPoint - link.tablePoint).distance, lessThan(45));
+      }
+      final paintOrigin = tester.getTopLeft(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CustomPaint && identical(widget.painter, painter),
+        ),
+      );
+      for (final entry in <String, Offset>{
+        'Resize e handle': Offset(table.width / 2, 0),
+        'Resize w handle': Offset(-table.width / 2, 0),
+        'Resize n handle': Offset(0, -table.height / 2),
+        'Resize s handle': Offset(0, table.height / 2),
+      }.entries) {
+        final world = transformPoint(matrix, entry.value.dx, entry.value.dy);
+        final screen =
+            paintOrigin +
+            MatrixUtils.transformPoint(
+              painter.camera!.value,
+              Offset(world[0], world[1]) * painter.scale + painter.offset,
+            );
+        expect(
+          (tester.getCenter(find.byTooltip(entry.key)) - screen).distance,
+          lessThan(.1),
+        );
+      }
+      final center = Offset(matrix[4], matrix[5]);
+      await tester.tap(find.widgetWithText(FilterChip, 'Snap'));
+      await tester.pump();
+      surface().onDragStart!(center);
+      surface().onDragUpdate!(center + const Offset(24, 16));
+      surface().onDragEnd!();
+      expect(controller.selection, {wrapper.id});
+      for (final node in base.nodes) {
+        final before = worldMatrix(
+          original,
+          original.nodes.firstWhere((n) => n.id == node.id),
+        );
+        final after = worldMatrix(
+          controller.document,
+          controller.document.nodes.firstWhere((n) => n.id == node.id),
+        );
+        expect(after[4] - before[4], closeTo(24, .01));
+        expect(after[5] - before[5], closeTo(16, .01));
+      }
+      controller.undo();
+      await tester.pump();
+      final east = Offset(
+        tabletop['x']! + tabletop['width']!,
+        tabletop['y']! + tabletop['height']! / 2,
+      );
+      surface().onHandleStart!('Resize e', east);
+      surface().onDragUpdate!(east + const Offset(1, 0));
+      await tester.pump();
+      final resized = controller.document.nodes.firstWhere(
+        (node) => node.id == table.id,
+      );
+      expect(resized.width, closeTo(table.width + 1, .01));
+      expect(resized.height, table.height);
+      final resizedBounds = boundsOfPoints(
+        worldHull(resized, worldMatrix(controller.document, resized)),
+      );
+      expect(resizedBounds['x'], closeTo(tabletop['x']!, .01));
+      surface().onDragEnd!();
+      expect(controller.selection, {wrapper.id});
+      for (final seat in base.nodes.where((node) => node.kind == 'seat')) {
+        final after = controller.document.nodes.firstWhere(
+          (node) => node.id == seat.id,
+        );
+        expect(after.width, seat.width);
+        expect(after.height, seat.height);
+      }
+      controller.undo();
+      expect(controller.document, same(original));
+      expect(controller.canUndo, isFalse);
+    },
+  );
+
+  test(
+    'ordinary multi-object groups retain their complete selection bounds',
+    () {
+      final group = LayoutNode(id: newLayoutId(), kind: 'group');
+      final document = VenueLayoutDocument(
+        nodes: [
+          group,
+          LayoutNode(id: newLayoutId(), kind: 'table', parentId: group.id),
+          LayoutNode(
+            id: newLayoutId(),
+            kind: 'shape',
+            parentId: group.id,
+            x: 300,
+          ),
+        ],
+      );
+      expect(tabletopSelectionNode(document, group), same(group));
+    },
+  );
+  testWidgets(
+    'existing polygon tables get only normal bounds handles while bars keep outline editing',
+    (tester) async {
+      for (final bar in [false, true]) {
+        final table = LayoutNode(
+          id: newLayoutId(),
+          kind: 'table',
+          x: 400,
+          y: 300,
+          width: 200,
+          height: 120,
+          properties: {
+            'shape': 'polygon',
+            if (bar) 'furniture': 'bar',
+            if (bar) 'guestSide': 'bottom',
+            'points': [
+              [-100.0, -60.0],
+              [100.0, -60.0],
+              [100.0, 60.0],
+              [-100.0, 60.0],
+            ],
+          },
+        );
+        final document = VenueLayoutDocument(nodes: [table]);
+        final before = document.toJson();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SizedBox(
+              width: 900,
+              height: 700,
+              child: LayoutSceneSurface(
+                document: document,
+                selected: {table.id},
+                showSeatSelectionChecks: false,
+                onHandleStart: (_, _) {},
+                animate: false,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byTooltip('Resize handle'),
+          bar ? findsNothing : findsOneWidget,
+        );
+        expect(
+          find.byTooltip('Resize e handle'),
+          bar ? findsNothing : findsOneWidget,
+        );
+        expect(
+          find.byTooltip('Vertex 0 handle'),
+          bar ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.byTooltip('Extend surface'),
+          bar ? findsNWidgets(4) : findsNothing,
+        );
+        expect(find.byTooltip('Rotate handle'), findsOneWidget);
+        expect(document.toJson(), before);
+      }
+    },
+  );
 }

@@ -1,6 +1,20 @@
 import 'dart:ui';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
+/// A commercial wrapper moves as one object, but its edit bounds belong to
+/// the physical tabletop. Genuine multi-object groups keep their own bounds.
+LayoutNode tabletopSelectionNode(VenueLayoutDocument doc, LayoutNode selected) {
+  if (selected.kind != 'group' || selected.properties['assembly'] != null) {
+    return selected;
+  }
+  final children = doc.nodes
+      .where((node) => node.parentId == selected.id)
+      .toList();
+  return children.length == 1 && children.single.kind == 'table'
+      ? children.single
+      : selected;
+}
+
 /// Editor-only relationships. These never become selected nodes or resize bounds.
 class TableSeatLink {
   const TableSeatLink(this.seatId, this.tablePoint, this.seatPoint);
