@@ -1042,22 +1042,16 @@ class _LayoutInspectorState extends State<LayoutInspector> {
 
         if (n.kind == 'table') _tableShapeControls(n),
         if (n.kind == 'shape' && p['shape'] == 'polygon')
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final bar in [false, true])
-                OutlinedButton(
-                  onPressed: c.readOnly || c.saving
-                      ? null
-                      : () => _run(
-                          () => c.apply(
-                            surfaceFromPolygon(c.document, n.id, bar: bar),
-                            label: 'Create surface',
-                          ),
-                        ),
-                  child: LayoutText(bar ? 'Use as bar' : 'Use as table'),
-                ),
-            ],
+          OutlinedButton(
+            onPressed: c.readOnly || c.saving
+                ? null
+                : () => _run(
+                    () => c.apply(
+                      surfaceFromPolygon(c.document, n.id, bar: true),
+                      label: 'Create surface',
+                    ),
+                  ),
+            child: const LayoutText('Use as bar'),
           ),
         if (n.kind == 'table' && !isBarNode(n)) ...[
           Builder(

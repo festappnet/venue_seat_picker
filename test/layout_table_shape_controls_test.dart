@@ -39,6 +39,47 @@ void main() {
   }
 
   testWidgets(
+    'only basic tables can be inserted and drawn shapes only convert to bars',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final polygon = LayoutNode(
+        id: newLayoutId(),
+        kind: 'shape',
+        width: 200,
+        height: 200,
+        properties: {
+          'shape': 'polygon',
+          'points': [
+            [-100, -100],
+            [100, -100],
+            [100, 100],
+            [-100, 100],
+          ],
+        },
+      );
+      final c = VenueLayoutController(VenueLayoutDocument(nodes: [polygon]))
+        ..select({polygon.id});
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(controller: c, showGallery: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Paint table'), findsNothing);
+      expect(find.text('Paint bar'), findsOneWidget);
+      expect(find.text('Use as table'), findsNothing);
+      expect(find.text('Use as bar'), findsOneWidget);
+      expect(find.text('Table'), findsWidgets);
+      expect(find.text('Round table'), findsWidgets);
+      expect(c.dirty, isFalse);
+    },
+  );
+
+  testWidgets(
     'table shapes switch both ways without changing seat identities',
     (tester) async {
       final original = tableLayout(

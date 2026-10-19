@@ -1712,14 +1712,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           'Standing',
           'Couch',
           'Bar',
-          'Draw table',
           'Draw bar',
         ])
-          k: k == 'Draw table'
-              ? 'Paint table'
-              : k == 'Draw bar'
-              ? 'Paint bar'
-              : k,
+          k: k == 'Draw bar' ? 'Paint bar' : k,
       },
       'Transport': {
         for (final k in ['Bus', 'Double-decker bus', 'Compartments']) k: k,
