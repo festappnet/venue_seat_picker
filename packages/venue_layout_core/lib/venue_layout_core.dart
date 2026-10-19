@@ -15,3 +15,5 @@ export 'src/zigzag.dart';
 export 'src/material_families.dart';
 
 export 'src/grid_surface.dart';
+
+export 'src/table_side_placement.dart';

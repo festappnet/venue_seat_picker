@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+import 'operations.dart' show layoutSubtree, reconcileSurfaceEdit;
 import 'geometry.dart';
 import 'model.dart';
 
@@ -16,7 +18,93 @@ class GridSurfaceBrush {
     this.clip,
     this.originX = 0,
     this.originY = 0,
-  });
+    Iterable<(int, int)> seedCells = const [],
+  }) {
+    if (!step.isFinite ||
+        step <= 0 ||
+        !originX.isFinite ||
+        !originY.isFinite ||
+        diameter < 1 ||
+        diameter > 32)
+      throw ArgumentError('Invalid brush');
+    for (final cell in seedCells) {
+      stampCell(cell.$1, cell.$2);
+    }
+  }
+
+  /// Restores a surface in local coordinates without drawing connecting strokes.
+  factory GridSurfaceBrush.fromNode(
+    LayoutNode node, {
+    double? width,
+    double? height,
+    bool snap = false,
+  }) {
+    final step = isBarNode(node)
+        ? barSurfaceModuleSize
+        : tableSurfaceModuleSize;
+    final w = width ?? node.width, h = height ?? node.height;
+    if (node.kind != 'table' ||
+        node.properties['shape'] != 'polygon' ||
+        !w.isFinite ||
+        !h.isFinite ||
+        w <= 0 ||
+        h <= 0) {
+      throw ArgumentError('Expected a custom table surface');
+    }
+    final targetW = math.max(step, (w / step).round() * step);
+    final targetH = math.max(step, (h / step).round() * step);
+    final originX = -targetW / 2, originY = -targetH / 2;
+    List<List<double>> ring(List points) => [
+      for (final raw in points)
+        (() {
+          final p = raw as List;
+          final gx = ((p[0] as num) / node.width + .5) * targetW / step;
+          final gy = ((p[1] as num) / node.height + .5) * targetH / step;
+          if (!snap &&
+              ((gx - gx.round()).abs() > .001 ||
+                  (gy - gy.round()).abs() > .001 ||
+                  (w - targetW).abs() > .001 ||
+                  (h - targetH).abs() > .001)) {
+            throw StateError('Choose a grid-aligned custom outline first.');
+          }
+          return [originX + gx.round() * step, originY + gy.round() * step];
+        })(),
+    ];
+    final sourceHull = localHull(node);
+    if (!snap) {
+      for (var i = 0; i < sourceHull.length; i++) {
+        final a = sourceHull[i], b = sourceHull[(i + 1) % sourceHull.length];
+        if ((a[0] - b[0]).abs() > .001 && (a[1] - b[1]).abs() > .001) {
+          throw StateError('Choose a grid-aligned custom outline first.');
+        }
+      }
+    }
+    final outer = ring(sourceHull);
+    final holes = [
+      for (final hole in node.properties['holes'] as List? ?? const [])
+        ring(hole as List),
+    ];
+    final columns = (targetW / step).round(), rows = (targetH / step).round();
+    if (columns * rows > 16384)
+      throw StateError('Surface brush limit reached.');
+    final brush = GridSurfaceBrush(
+      step: step,
+      originX: originX,
+      originY: originY,
+    );
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < columns; x++) {
+        final px = originX + (x + .5) * step, py = originY + (y + .5) * step;
+        if (pointInPolygon(outer, px, py) &&
+            !holes.any((hole) => pointInPolygon(hole, px, py))) {
+          brush.stampCell(x, y);
+        }
+      }
+    }
+    // Validate connectivity and holes before this seed can replace a document.
+    brush.node(id: node.id, bar: isBarNode(node));
+    return brush;
+  }
   final double step, originX, originY;
   final int diameter;
   final Map<String, dynamic>? clip;
@@ -24,7 +112,32 @@ class GridSurfaceBrush {
   final _edges = <(int, int), Set<(int, int)>>{};
   (int, int)? _last;
   int get cellCount => _cells.length;
-  bool paint(double x, double y) {
+  Set<(int, int)> get cells => Set.unmodifiable(_cells);
+  void resetStroke() => _last = null;
+
+  /// Adds/removes exactly one module without stroke interpolation.
+  bool stampCell(int x, int y, {bool erase = false}) {
+    final cell = (x, y);
+    if (_cells.contains(cell) == !erase) return false;
+    if (!erase && _cells.length >= 16384)
+      throw StateError('Surface brush limit reached.');
+    if (erase) {
+      _cells.remove(cell);
+      edge((x + 1, y), (x, y));
+      edge((x + 1, y + 1), (x + 1, y));
+      edge((x, y + 1), (x + 1, y + 1));
+      edge((x, y), (x, y + 1));
+    } else {
+      _cells.add(cell);
+      edge((x, y), (x + 1, y));
+      edge((x + 1, y), (x + 1, y + 1));
+      edge((x + 1, y + 1), (x, y + 1));
+      edge((x, y + 1), (x, y));
+    }
+    return true;
+  }
+
+  bool paint(double x, double y, {bool erase = false}) {
     if (!originX.isFinite ||
         !originY.isFinite ||
         !x.isFinite ||
@@ -64,16 +177,7 @@ class GridSurfaceBrush {
                   originY + (yy + 1) * step >
                       (clip!['y'] as num) + (clip!['height'] as num)))
             continue;
-          final cell = (xx, yy);
-          if (_cells.contains(cell)) continue;
-          if (_cells.length >= 16384)
-            throw StateError('Surface brush limit reached.');
-          _cells.add(cell);
-          changed = true;
-          edge((xx, yy), (xx + 1, yy));
-          edge((xx + 1, yy), (xx + 1, yy + 1));
-          edge((xx + 1, yy + 1), (xx, yy + 1));
-          edge((xx, yy + 1), (xx, yy));
+          changed = stampCell(xx, yy, erase: erase) || changed;
         }
     }
 
@@ -201,4 +305,157 @@ class GridSurfaceBrush {
       },
     );
   }
+}
+
+/// Snaps a custom outline to the same physical modules used by painting.
+LayoutNode snapTableSurfaceToGrid(
+  LayoutNode node, {
+  double? width,
+  double? height,
+  String? preset,
+}) {
+  if (preset != null) {
+    if (preset != 'L') throw ArgumentError('Unknown grid surface preset');
+    final step = isBarNode(node)
+        ? barSurfaceModuleSize
+        : tableSurfaceModuleSize;
+    final columns = math.max(2, ((width ?? node.width) / step).ceil());
+    final rows = math.max(2, ((height ?? node.height) / step).ceil());
+    final brush = GridSurfaceBrush(
+      step: step,
+      originX: -columns * step / 2,
+      originY: -rows * step / 2,
+    );
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < columns; x++) {
+        if (x == 0 || y == rows - 1) brush.stampCell(x, y);
+      }
+    }
+    return gridSurfaceReplacement(node, brush);
+  }
+  final brush = GridSurfaceBrush.fromNode(
+    node,
+    width: width,
+    height: height,
+    snap: true,
+  );
+  return gridSurfaceReplacement(node, brush);
+}
+
+/// Preserves identity, transforms, commercial metadata and appearance.
+LayoutNode gridSurfaceReplacement(LayoutNode original, GridSurfaceBrush brush) {
+  final shape = brush.node(id: original.id, bar: isBarNode(original));
+  final angle = original.rotation * math.pi / 180;
+  return original.copyWith(
+    x: original.x + shape.x * math.cos(angle) - shape.y * math.sin(angle),
+    y: original.y + shape.x * math.sin(angle) + shape.y * math.cos(angle),
+    width: shape.width,
+    height: shape.height,
+    properties: {
+      ...({...original.properties}..remove('holes')),
+      'shape': 'polygon',
+      'points': shape.properties['points'],
+      if (shape.properties.containsKey('holes'))
+        'holes': shape.properties['holes'],
+    },
+  );
+}
+
+LayoutNode _editableGridSurface(VenueLayoutDocument document, String id) {
+  final subtree = layoutSubtree(document, {id});
+  final byId = {for (final n in document.nodes) n.id: n};
+  for (final target in subtree) {
+    LayoutNode? node = byId[target];
+    final seen = <String>{};
+    while (node != null && seen.add(node.id)) {
+      if (node.locked)
+        throw StateError(
+          'Locked object ${node.label.isEmpty ? node.id : node.label}',
+        );
+      node = byId[node.parentId];
+    }
+  }
+  return document.nodes.firstWhere((n) => n.id == id);
+}
+
+VenueLayoutDocument resizeGridTableSurface(
+  VenueLayoutDocument document,
+  String id,
+  double width,
+  double height, {
+  Set<String> protectedSeatIds = const {},
+}) {
+  final node = _editableGridSurface(document, id);
+  final next = snapTableSurfaceToGrid(node, width: width, height: height);
+  return reconcileSurfaceEdit(
+    document,
+    document.copyWith(
+      nodes: [for (final n in document.nodes) n.id == id ? next : n],
+    ),
+    id,
+    protectedSeatIds: protectedSeatIds,
+  );
+}
+
+/// Extends or removes a module-wide strip at a boundary, using painting's cells.
+VenueLayoutDocument extendGridTableSurface(
+  VenueLayoutDocument document,
+  String id,
+  int edgeIndex,
+  double x,
+  double y, {
+  int? cellIndex,
+  Set<String> protectedSeatIds = const {},
+}) {
+  final node = _editableGridSurface(document, id);
+  final brush = GridSurfaceBrush.fromNode(node);
+  final hull = localHull(node);
+  RangeError.checkValidIndex(edgeIndex, hull);
+  final a = hull[edgeIndex], b = hull[(edgeIndex + 1) % hull.length];
+  final dx = b[0] - a[0], dy = b[1] - a[1];
+  if (dx.abs() > .001 && dy.abs() > .001)
+    throw StateError('Use a grid-aligned edge.');
+  final length = math.sqrt(dx * dx + dy * dy);
+  if (length < .001) return document;
+  final nx = dy / length, ny = -dx / length;
+  final midX = (a[0] + b[0]) / 2, midY = (a[1] + b[1]) / 2;
+  final depth = (((x - midX) * nx + (y - midY) * ny) / brush.step).round();
+  if (depth == 0) return document;
+  // Pin the tangent to one cell of the original edge; pointer drift cannot skew it.
+  if (cellIndex != null &&
+      (cellIndex < 0 || cellIndex >= (length / brush.step).round())) {
+    throw RangeError('Invalid boundary cell');
+  }
+  final tangentX = cellIndex != null
+      ? a[0] + dx / length * (cellIndex + .5) * brush.step
+      : dx == 0
+      ? midX
+      : brush.originX +
+            (((midX - brush.originX) / brush.step - .00001).floor() + .5) *
+                brush.step;
+  final tangentY = cellIndex != null
+      ? a[1] + dy / length * (cellIndex + .5) * brush.step
+      : dy == 0
+      ? midY
+      : brush.originY +
+            (((midY - brush.originY) / brush.step - .00001).floor() + .5) *
+                brush.step;
+  if (depth.abs() > 16384) throw StateError('Surface brush limit reached.');
+  for (var i = 0; i < depth.abs(); i++) {
+    final distance = (i + .5) * brush.step * depth.sign;
+    final cx = ((tangentX + nx * distance - brush.originX) / brush.step)
+        .floor();
+    final cy = ((tangentY + ny * distance - brush.originY) / brush.step)
+        .floor();
+    brush.stampCell(cx, cy, erase: depth < 0);
+  }
+  final next = gridSurfaceReplacement(node, brush);
+  return reconcileSurfaceEdit(
+    document,
+    document.copyWith(
+      nodes: [for (final n in document.nodes) n.id == id ? next : n],
+    ),
+    id,
+    protectedSeatIds: protectedSeatIds,
+  );
 }

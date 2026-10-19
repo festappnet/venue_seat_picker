@@ -421,13 +421,20 @@ class VenueLayoutController extends ChangeNotifier {
   bool apply(VenueLayoutDocument next, {String label = 'Edit'}) =>
       _apply(next, label: label);
 
+  bool moveChairToTableSide(String seatId, String side) => _apply(
+    moveTableSeatToSide(_document, seatId, side),
+    label: 'Change chair side',
+    retainManualChairs: false,
+  );
+
   bool _apply(
     VenueLayoutDocument next, {
     String label = 'Edit',
     bool reflowTables = true,
+    bool retainManualChairs = true,
   }) {
     if (readOnly || saving) return false;
-    next = _retainManualChairPositions(next);
+    if (retainManualChairs) next = _retainManualChairPositions(next);
     final issues = validateDocument(next);
     if (issues.isNotEmpty) {
       error = _issueMessage(issues.first);

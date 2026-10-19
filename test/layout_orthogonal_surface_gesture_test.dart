@@ -19,7 +19,7 @@ void main() {
                   x: 600,
                   y: 400,
                   width: 300,
-                  height: 120,
+                  height: 200,
                 );
           final originalTable = document.nodes.firstWhere(
             (n) => n.kind == 'table',
@@ -31,7 +31,7 @@ void main() {
             properties: {
               ...originalTable.properties,
               'shape': 'polygon',
-              'points': surfacePresetPoints('rectangle', 300, 120),
+              'points': surfacePresetPoints('rectangle', 300, bar ? 120 : 200),
             },
           );
           document = document.copyWith(
@@ -69,14 +69,14 @@ void main() {
           }
 
           // Both coordinates change: only the outward normal should affect shape.
-          surface().onHandleStart!('Extend edge 1', world(midpoint));
-          surface().onDragUpdate!(world(midpoint + const Offset(80, 35)));
+          surface().onHandleStart!('Extend edge 1 cell 0', world(midpoint));
+          surface().onDragUpdate!(world(midpoint + Offset(bar ? 60 : 100, 35)));
           surface().onDragEnd!();
           await tester.pump();
           expect(c.error, isNull);
           expect(c.selection, {wrapped ? wrapper.id : table.id});
           final changed = c.document.nodes.firstWhere((n) => n.id == table.id);
-          expect(changed.width, greaterThan(table.width));
+          expect(changed.width, table.width + (bar ? 60 : 100));
           final points = localHull(changed);
           for (var i = 0; i < points.length; i++) {
             final p = points[i], q = points[(i + 1) % points.length];
@@ -105,8 +105,10 @@ void main() {
           expect(c.document.toJson(), document.toJson());
           expect(c.canUndo, isFalse);
           await tester.pump();
-          surface().onHandleStart!('Extend edge 1', world(midpoint));
-          surface().onDragUpdate!(world(midpoint + const Offset(-25, 35)));
+          surface().onHandleStart!('Extend edge 1 cell 0', world(midpoint));
+          surface().onDragUpdate!(
+            world(midpoint + Offset(bar ? -60 : -100, 35)),
+          );
           surface().onDragEnd!();
           await tester.pump();
           expect(c.error, isNull);

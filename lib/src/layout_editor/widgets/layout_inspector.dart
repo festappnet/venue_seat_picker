@@ -239,6 +239,19 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     numeric: true,
   );
   void _resizeDimension(LayoutNode node, double value, {required bool width}) {
+    if (node.kind == 'table' && node.properties['shape'] == 'polygon') {
+      c.apply(
+        resizeGridTableSurface(
+          c.document,
+          node.id,
+          width ? value : node.width,
+          width ? node.height : value,
+          protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
+        ),
+        label: 'Resize surface',
+      );
+      return;
+    }
     final keepRound =
         node.kind == 'table' &&
         const [
@@ -771,16 +784,15 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       ..remove('points')
       ..remove('holes');
     properties['shape'] = shape == 'rectangle' ? 'roundedRect' : shape;
-    if (shape == 'polygon') {
-      // Start with an orthogonal footprint; edge gestures extend its arms.
-      properties['points'] = surfacePresetPoints('L', node.width, node.height);
-    }
     final diameter = math.max(node.width, node.height);
-    final nextNode = node.copyWith(
+    var nextNode = node.copyWith(
       width: shape == 'round' ? diameter : node.width,
       height: shape == 'round' ? diameter : node.height,
       properties: properties,
     );
+    if (shape == 'polygon') {
+      nextNode = snapTableSurfaceToGrid(nextNode, preset: 'L');
+    }
     if (tableCapacity(nextNode) < seats.length) {
       throw StateError(
         'The selected shape cannot fit the existing chairs. Increase the table size first.',
@@ -853,6 +865,39 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     ),
   );
 
+  Widget _chairSide(LayoutNode seat) {
+    final table = tableForSeat(c.document, seat);
+    final side = tableSideForSeat(c.document, seat);
+    if (table == null || side == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DropdownButtonFormField<String>(
+        key: ValueKey('chair-side-${seat.id}-$side'),
+        initialValue: side,
+        decoration: InputDecoration(
+          labelText: VenueLayoutStrings.text(context, 'Table side'),
+          border: const OutlineInputBorder(),
+        ),
+        items: [
+          for (final entry in const {
+            'top': 'Top side',
+            'right': 'Right side',
+            'bottom': 'Bottom side',
+            'left': 'Left side',
+          }.entries)
+            DropdownMenuItem(value: entry.key, child: LayoutText(entry.value)),
+        ],
+        onChanged: c.readOnly || c.saving || seat.locked || table.locked
+            ? null
+            : (side) {
+                if (side != null) {
+                  _run(() => c.moveChairToTableSide(seat.id, side));
+                }
+              },
+      ),
+    );
+  }
+
   Widget _textAppearance(LayoutNode n) {
     final p = {
       ...c.document.defaultTextStyle,
@@ -889,23 +934,20 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           p['size'] as num? ?? 24,
           (v) => _property(n, 'size', v),
         ),
-        Wrap(
-          spacing: 8,
+        Row(
           children: [
-            FilterChip(
-              label: const LayoutText('Bold'),
-              selected: p['bold'] == true,
-              onSelected: (c.readOnly || c.saving)
-                  ? null
-                  : (v) => _property(n, 'bold', v),
-            ),
-            FilterChip(
-              label: const LayoutText('Italic'),
-              selected: p['italic'] == true,
-              onSelected: (c.readOnly || c.saving)
-                  ? null
-                  : (v) => _property(n, 'italic', v),
-            ),
+            for (final style in const [
+              ('bold', 'Bold', Icons.format_bold),
+              ('italic', 'Italic', Icons.format_italic),
+            ])
+              IconButton.filledTonal(
+                tooltip: VenueLayoutStrings.text(context, style.$2),
+                isSelected: p[style.$1] == true,
+                icon: Icon(style.$3),
+                onPressed: c.readOnly || c.saving
+                    ? null
+                    : () => _property(n, style.$1, p[style.$1] != true),
+              ),
           ],
         ),
       ],
@@ -1064,6 +1106,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
         ],
         if (['bus', 'compartments'].contains(p['assembly']))
           _transportControls(n),
+        if (n.kind == 'seat') _chairSide(n),
         if (n.kind == 'seat' && n.parentId != null)
           TextButton(
             onPressed: (c.readOnly || c.saving)

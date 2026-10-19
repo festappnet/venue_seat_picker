@@ -3,6 +3,7 @@ import 'model.dart';
 import 'geometry.dart';
 import 'node_outline.dart' show tableSeatFacingRotation;
 import 'table_seating.dart';
+import 'table_side_placement.dart';
 export 'table_seating.dart';
 import 'zigzag.dart';
 import 'surface_geometry.dart';
@@ -225,6 +226,7 @@ VenueLayoutDocument reflowTable(
   bool constrainToCanvas = false,
   Set<String> protectedSeatIds = const {},
 }) {
+  d = reflowPreferredTableSides(d, tableId);
   final originalTable = d.nodes.firstWhere((n) => n.id == tableId);
   final seating = TableSeating.fromDocument(d, originalTable);
   final table = originalTable.copyWith(

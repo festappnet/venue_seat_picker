@@ -215,6 +215,10 @@ const _cs = <String, String>{
   'Bar stool': 'Barová stolička',
   'Bar and stools': 'Bar a barová místa',
   'Guest side': 'Strana pro hosty',
+  'Table side': 'Strana stolu',
+  'Change chair side': 'Změnit stranu židle',
+  'Not enough room on the selected table side':
+      'Na vybrané straně stolu není dost místa.',
   'Top side': 'Horní',
   'Right side': 'Pravá',
   'Bottom side': 'Dolní',

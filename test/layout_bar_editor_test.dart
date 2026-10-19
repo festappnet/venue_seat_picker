@@ -109,7 +109,7 @@ void main() {
       final bar = c.document.nodes.singleWhere(isBarNode);
       expect(barSeatCount(c.document, bar.id), 0);
       expect(find.text('Add one seat'), findsNothing);
-      expect(find.byTooltip('Extend surface'), findsNWidgets(4));
+      expect(find.byTooltip('Extend surface'), findsNWidgets(12));
       final before = c.document.toJson();
       surface().onHandleStart!(
         'Extend edge 1',
@@ -120,7 +120,15 @@ void main() {
       await tester.pump();
       expect(c.document.nodes.single.id, bar.id);
       expect(c.document.nodes.single.width, greaterThan(bar.width));
-      expect((c.document.nodes.single.properties['points'] as List).length, 8);
+      expect(
+        c.document.nodes.single.width,
+        bar.width + 2 * barSurfaceModuleSize,
+      );
+      expect(c.document.nodes.single.height, bar.height);
+      expect(
+        GridSurfaceBrush.fromNode(c.document.nodes.single).cellCount,
+        GridSurfaceBrush.fromNode(bar).cellCount + 2,
+      );
       c.undo();
       await tester.pump();
       expect(c.document.toJson(), before);

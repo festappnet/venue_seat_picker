@@ -220,6 +220,70 @@ void main() {
     },
   );
 
+  for (final bar in [false, true]) {
+    testWidgets(
+      '${bar ? 'bar' : 'table'} custom conversion and numeric resize use fixed modules',
+      (tester) async {
+        final table = LayoutNode(
+          id: newLayoutId(),
+          kind: 'table',
+          label: 'Surface',
+          x: 500,
+          y: 400,
+          width: 190,
+          height: 110,
+          properties: {
+            'shape': 'roundedRect',
+            if (bar) 'furniture': 'bar',
+            if (bar) 'guestSide': 'bottom',
+          },
+        );
+        final original = VenueLayoutDocument.empty().copyWith(nodes: [table]);
+        final controller = VenueLayoutController(original)..select({table.id});
+        await open(tester, controller);
+        await choose(tester, 'Custom outline');
+        final converted = controller.document.nodes.single;
+        final step = bar ? barSurfaceModuleSize : tableSurfaceModuleSize;
+        void expectGrid(LayoutNode surface) {
+          expect(surface.width % step, closeTo(0, 1e-8));
+          expect(surface.height % step, closeTo(0, 1e-8));
+          final points = localHull(surface);
+          for (final point in points) {
+            expect((point[0] + surface.width / 2) % step, closeTo(0, 1e-8));
+            expect((point[1] + surface.height / 2) % step, closeTo(0, 1e-8));
+          }
+        }
+
+        expect(converted.properties['shape'], 'polygon');
+        expect(localHull(converted).length, 6);
+        expectGrid(converted);
+        final expected = resizeGridTableSurface(
+          controller.document,
+          table.id,
+          converted.width + step * 1.3,
+          converted.height,
+        );
+        await tester.ensureVisible(find.text('Geometry'));
+        await tester.tap(find.text('Geometry'));
+        await tester.pumpAndSettle();
+        final width = find.widgetWithText(TextField, 'Width');
+        await tester.ensureVisible(width);
+        await tester.enterText(width, '${converted.width + step * 1.3}');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        expect(
+          controller.document.nodes.single.toJson(),
+          expected.nodes.single.toJson(),
+        );
+        expectGrid(controller.document.nodes.single);
+        controller.undo();
+        controller.undo();
+        expect(controller.document, same(original));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets(
     'a smaller-capacity shape cannot silently remove protected seats',
     (tester) async {

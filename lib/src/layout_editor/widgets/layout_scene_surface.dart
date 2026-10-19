@@ -126,9 +126,17 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         points == null) {
       return false;
     }
+    final step = isBarNode(node)
+        ? barSurfaceModuleSize
+        : tableSurfaceModuleSize;
+    bool aligned(double value) =>
+        (value / step - (value / step).round()).abs() < 1e-5;
+    if (!aligned(node.width) || !aligned(node.height)) return false;
     for (var i = 0; i < points.length; i++) {
       final a = points[i], b = points[(i + 1) % points.length];
-      if ((a[0] - b[0]).abs() > 1e-6 && (a[1] - b[1]).abs() > 1e-6) {
+      if (!aligned(a[0] + node.width / 2) ||
+          !aligned(a[1] + node.height / 2) ||
+          ((a[0] - b[0]).abs() > 1e-6 && (a[1] - b[1]).abs() > 1e-6)) {
         return false;
       }
     }
@@ -1210,23 +1218,51 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                 : 1);
                     i++
                   )
-                    handle(
-                      selectedNodes.single.kind == 'table'
-                          ? 'Extend edge $i'
-                          : 'Insert vertex $i',
-                      (() {
-                        final points = _vertexPoints(selectedNodes.single)!;
-                        final a = points[i],
-                            b = points[(i + 1) % points.length];
-                        return transformPoint(
-                          worldMatrix(widget.document, selectedNodes.single),
-                          (a[0] + b[0]) / 2,
-                          (a[1] + b[1]) / 2,
-                        );
-                      })(),
-                      Icons.add,
-                      cursor: SystemMouseCursors.precise,
-                    ),
+                    for (
+                      var cell = 0;
+                      cell <
+                          (selectedNodes.single.kind == 'table'
+                              ? (() {
+                                  final points = _vertexPoints(
+                                    selectedNodes.single,
+                                  )!;
+                                  final a = points[i],
+                                      b = points[(i + 1) % points.length];
+                                  final step = isBarNode(selectedNodes.single)
+                                      ? barSurfaceModuleSize
+                                      : tableSurfaceModuleSize;
+                                  return ((a[0] - b[0]).abs() +
+                                          (a[1] - b[1]).abs()) ~/
+                                      step;
+                                })()
+                              : 1);
+                      cell++
+                    )
+                      handle(
+                        selectedNodes.single.kind == 'table'
+                            ? 'Extend edge $i cell $cell'
+                            : 'Insert vertex $i',
+                        (() {
+                          final points = _vertexPoints(selectedNodes.single)!;
+                          final a = points[i],
+                              b = points[(i + 1) % points.length];
+                          final step = isBarNode(selectedNodes.single)
+                              ? barSurfaceModuleSize
+                              : tableSurfaceModuleSize;
+                          final length =
+                              (a[0] - b[0]).abs() + (a[1] - b[1]).abs();
+                          final t = selectedNodes.single.kind == 'table'
+                              ? (cell + .5) * step / length
+                              : .5;
+                          return transformPoint(
+                            worldMatrix(widget.document, selectedNodes.single),
+                            a[0] + (b[0] - a[0]) * t,
+                            a[1] + (b[1] - a[1]) * t,
+                          );
+                        })(),
+                        Icons.add,
+                        cursor: SystemMouseCursors.precise,
+                      ),
                 if (widget.selected.contains(selectedNodes.single.id) &&
                     selectedNodes.single.kind != 'table' &&
                     !isZigzagNode(selectedNodes.single) &&

@@ -319,22 +319,24 @@ void main() {
     'tables and bars have orthogonal edge controls without free vertex dragging',
     (tester) async {
       for (final bar in [false, true]) {
+        final width = bar ? 180.0 : 200.0;
+        final height = bar ? 120.0 : 200.0;
         final table = LayoutNode(
           id: newLayoutId(),
           kind: 'table',
           x: 400,
           y: 300,
-          width: 200,
-          height: 120,
+          width: width,
+          height: height,
           properties: {
             'shape': 'polygon',
             if (bar) 'furniture': 'bar',
             if (bar) 'guestSide': 'bottom',
             'points': [
-              [-100.0, -60.0],
-              [100.0, -60.0],
-              [100.0, 60.0],
-              [-100.0, 60.0],
+              [-width / 2, -height / 2],
+              [width / 2, -height / 2],
+              [width / 2, height / 2],
+              [-width / 2, height / 2],
             ],
           },
         );
@@ -359,7 +361,7 @@ void main() {
         expect(find.byTooltip('Resize handle'), findsOneWidget);
         expect(find.byTooltip('Resize e handle'), findsOneWidget);
         expect(find.byTooltip('Vertex 0 handle'), findsNothing);
-        expect(find.byTooltip('Extend surface'), findsNWidgets(4));
+        expect(find.byTooltip('Extend surface'), findsNWidgets(bar ? 10 : 8));
         expect(find.byTooltip('Rotate handle'), findsOneWidget);
         expect(document.toJson(), before);
       }

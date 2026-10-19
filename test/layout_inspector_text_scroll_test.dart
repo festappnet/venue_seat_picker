@@ -121,7 +121,7 @@ void main() {
         await tester.enterText(size, '32');
         await tester.testTextInput.receiveAction(TextInputAction.done);
         await tester.pumpAndSettle();
-        final bold = find.widgetWithText(FilterChip, 'Bold');
+        final bold = find.byTooltip('Bold');
         await tester.ensureVisible(bold);
         await tester.tap(bold);
         await tester.pumpAndSettle();
@@ -132,6 +132,24 @@ void main() {
           [updated.x, updated.y, updated.width, updated.height, updated.label],
           [target.x, target.y, target.width, target.height, target.label],
         );
+        final italic = find.byTooltip('Italic');
+        await tester.tap(italic);
+        await tester.pumpAndSettle();
+        expect(
+          c.document.nodes
+              .firstWhere((n) => n.id == target.id)
+              .properties['italic'],
+          isTrue,
+        );
+        await tester.tap(bold);
+        await tester.pumpAndSettle();
+        final combination = c.document.nodes
+            .firstWhere((n) => n.id == target.id)
+            .properties;
+        expect(combination['bold'], isFalse);
+        expect(combination['italic'], isTrue);
+        c.undo();
+        c.undo();
         c.undo();
         c.undo();
         expect(c.document.toJson(), doc.toJson());

@@ -519,7 +519,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             ? {'furniture': 'bar', 'guestSide': 'bottom'}
             : {},
       ).copyWith(kind: 'table', x: point.dx, y: point.dy);
-      return VenueLayoutDocument(nodes: [node]);
+      return VenueLayoutDocument(
+        nodes: [snapTableSurfaceToGrid(node, preset: 'L')],
+      );
     }
     if (kind.startsWith('preset:')) {
       final preset = c.document.presets.firstWhere(
@@ -571,7 +573,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       return bar.copyWith(
         nodes: [
           for (final n in bar.nodes)
-            isBarNode(n) ? n.copyWith(label: 'Bar') : n,
+            isBarNode(n) ? snapTableSurfaceToGrid(n).copyWith(label: 'Bar') : n,
         ],
       );
     }
@@ -1042,23 +1044,15 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         point.dx,
         point.dy,
       );
-      final edge = int.parse(gesture.substring(12));
-      final hull = localHull(node);
-      final a = hull[edge], b = hull[(edge + 1) % hull.length];
-      final dx = b[0] - a[0], dy = b[1] - a[1];
-      final lengthSquared = dx * dx + dy * dy;
-      if (lengthSquared == 0 || (dx.abs() > .001 && dy.abs() > .001)) return;
-      final midX = (a[0] + b[0]) / 2, midY = (a[1] + b[1]) / 2;
-      // Ignore motion along the edge: arms must grow/shrink perpendicular to it.
-      final normalScale =
-          ((local[0] - midX) * -dy + (local[1] - midY) * dx) / lengthSquared;
+      final edgeParts = gesture.substring(12).split(' cell ');
       c.preview(
-        extendTableSurface(
+        extendGridTableSurface(
           start,
           node.id,
-          edge,
-          midX - dy * normalScale,
-          midY + dx * normalScale,
+          int.parse(edgeParts.first),
+          local[0],
+          local[1],
+          cellIndex: edgeParts.length == 2 ? int.parse(edgeParts.last) : null,
           protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
         ),
       );
@@ -1213,6 +1207,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           ? resizeRowAssembly(start, n.id, width, height)
           : n.kind == 'furniture' && n.properties['furniture'] == 'couch'
           ? resizeCouchBody(start, n.id, width, height)
+          : n.kind == 'table' && n.properties['shape'] == 'polygon'
+          ? resizeGridTableSurface(
+              resizeBase,
+              n.id,
+              width,
+              height,
+              protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
+            )
           : resizeNode(
               resizeBase,
               n.id,
