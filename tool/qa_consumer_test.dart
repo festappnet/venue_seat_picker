@@ -254,7 +254,7 @@ void main() {
                 body: VenueLayoutPicker(
                   document: document,
                   seatPresentation: presentation,
-                  onSelectionRequested: (_, __) => pending.future,
+                  onSelectionRequested: (_, _) => pending.future,
                 ),
               );
             },

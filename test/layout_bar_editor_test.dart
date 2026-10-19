@@ -75,8 +75,9 @@ void main() {
         const Offset(300, 450),
         const Offset(500, 300),
         const Offset(800, 450),
-      ])
+      ]) {
         expect(hitTest(c.document, point.dx, point.dy), bar.id);
+      }
       expect(hitTest(c.document, 500, 450), isNull);
       expect(validateDocument(c.document), isEmpty);
       c.undo();
