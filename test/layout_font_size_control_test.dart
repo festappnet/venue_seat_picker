@@ -224,6 +224,13 @@ void main() {
         12,
       );
       expect(result.defaultTextStyle, doc.defaultTextStyle);
+      final normal = applyLayoutAppearance(doc, {
+        group.id,
+      }, captureLayoutAppearance(doc, target.id));
+      final normalTable = normal.nodes.firstWhere((n) => n.id == source.id);
+      expect(normalTable.properties['bold'], isFalse);
+      expect(normalTable.properties['italic'], isFalse);
+      expect(normalTable.properties['size'], doc.defaultTextStyle['size']);
     },
   );
 }

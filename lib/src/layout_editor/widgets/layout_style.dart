@@ -184,6 +184,10 @@ LayoutAppearance captureLayoutAppearance(
     },
     'color': document.defaultTextStyle['color'] ?? '#222222FF',
     if (n.kind == 'text') 'opacity': 1,
+    if (n.kind != 'seat' && n.kind != 'group') ...{
+      'bold': document.defaultTextStyle['bold'] ?? false,
+      'italic': document.defaultTextStyle['italic'] ?? false,
+    },
     if (n.kind != 'seat' && n.kind != 'group')
       for (final key in _labelTypographyKeys)
         if (document.defaultTextStyle.containsKey(key))
