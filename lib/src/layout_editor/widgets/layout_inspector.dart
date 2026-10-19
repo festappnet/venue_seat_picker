@@ -295,35 +295,30 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                   for (final key in values.keys)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: EditorNumberScroll(
-                        step: key == 'Opacity' ? .05 : 1,
-                        min: key == 'Opacity' ? 0 : null,
-                        max: key == 'Opacity' ? 1 : null,
-                        child: TextFormField(
-                          initialValue: values[key].toString(),
-                          decoration: InputDecoration(
-                            labelText: VenueLayoutStrings.text(context, key),
-                            border: const OutlineInputBorder(),
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                            signed: true,
-                          ),
-                          onChanged: (text) {
-                            final value = double.tryParse(text);
-                            if (value == null || !value.isFinite) {
-                              update(() => error = 'Enter a valid $key.');
-                              return;
-                            }
-                            values[key] = value;
-                            try {
-                              c.preview(generate(values));
-                              update(() => error = c.error);
-                            } catch (e) {
-                              update(() => error = '$e');
-                            }
-                          },
+                      child: TextFormField(
+                        initialValue: values[key].toString(),
+                        decoration: InputDecoration(
+                          labelText: VenueLayoutStrings.text(context, key),
+                          border: const OutlineInputBorder(),
                         ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                          signed: true,
+                        ),
+                        onChanged: (text) {
+                          final value = double.tryParse(text);
+                          if (value == null || !value.isFinite) {
+                            update(() => error = 'Enter a valid $key.');
+                            return;
+                          }
+                          values[key] = value;
+                          try {
+                            c.preview(generate(values));
+                            update(() => error = c.error);
+                          } catch (e) {
+                            update(() => error = '$e');
+                          }
+                        },
                       ),
                     ),
                   if (error != null)
@@ -777,11 +772,8 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       ..remove('holes');
     properties['shape'] = shape == 'rectangle' ? 'roundedRect' : shape;
     if (shape == 'polygon') {
-      final hull = localHull(node);
-      // A round surface needs a manageable number of editable corners.
-      properties['points'] = hull.length == 64
-          ? [for (var i = 0; i < hull.length; i += 8) hull[i]]
-          : hull;
+      // Start with an orthogonal footprint; edge gestures extend its arms.
+      properties['points'] = surfacePresetPoints('L', node.width, node.height);
     }
     final diameter = math.max(node.width, node.height);
     final nextNode = node.copyWith(
@@ -823,12 +815,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           key: ValueKey(
             'table-shape-${node.id}-${_tableShape(node)}-$_shapeControlRevision',
           ),
-          initialValue: !isBarNode(node) && _tableShape(node) == 'polygon'
-              ? null
-              : _tableShape(node),
-          hint: !isBarNode(node) && _tableShape(node) == 'polygon'
-              ? const LayoutText('Current outline')
-              : null,
+          initialValue: _tableShape(node),
           isExpanded: true,
           decoration: InputDecoration(
             labelText: VenueLayoutStrings.text(
@@ -836,19 +823,12 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               isBarNode(node) ? 'Surface shape' : 'Table shape',
             ),
             border: const OutlineInputBorder(),
-            helperText: !isBarNode(node) && _tableShape(node) == 'polygon'
-                ? VenueLayoutStrings.text(
-                    context,
-                    'The current outline is preserved until you choose a new shape.',
-                  )
-                : null,
-            helperMaxLines: 3,
           ),
           items: [
             for (final entry in {
               'rectangle': 'Rectangle',
               if (!isBarNode(node)) 'round': 'Round',
-              if (isBarNode(node)) 'polygon': 'Custom outline',
+              'polygon': 'Custom outline',
             }.entries)
               DropdownMenuItem(
                 value: entry.key,
@@ -864,16 +844,73 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                   }
                 },
         ),
-        if (isBarNode(node) && _tableShape(node) == 'polygon')
+        if (_tableShape(node) == 'polygon')
           const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: LayoutText(
-              'Pull an edge handle to extend the surface. Drag corners to reshape it.',
-            ),
+            child: LayoutText('Pull an edge handle to extend the surface.'),
           ),
       ],
     ),
   );
+
+  Widget _textAppearance(LayoutNode n) {
+    final p = {
+      ...c.document.defaultTextStyle,
+      ...effectiveNodeProperties(c.document, n),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        EditorFontPicker(
+          value: p['fontId'] as String?,
+          label: 'Font',
+          enabled: !(c.readOnly || c.saving),
+          translate: (text) => VenueLayoutStrings.text(context, text),
+          options: [
+            for (final entry in (c.resources['fonts'] as Map? ?? {}).entries)
+              EditorFontOption(
+                id: '${entry.key}',
+                family: '${entry.value['family'] ?? 'Font'}',
+              ),
+          ],
+          onSelected: (id) async {
+            final properties = Map<String, dynamic>.from(n.properties);
+            if (id == null) {
+              properties.remove('fontId');
+            } else {
+              properties['fontId'] = id;
+            }
+            c.updateNode(n.copyWith(properties: properties));
+          },
+        ),
+        const SizedBox(height: 12),
+        _number(
+          'Font size',
+          p['size'] as num? ?? 24,
+          (v) => _property(n, 'size', v),
+        ),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilterChip(
+              label: const LayoutText('Bold'),
+              selected: p['bold'] == true,
+              onSelected: (c.readOnly || c.saving)
+                  ? null
+                  : (v) => _property(n, 'bold', v),
+            ),
+            FilterChip(
+              label: const LayoutText('Italic'),
+              selected: p['italic'] == true,
+              onSelected: (c.readOnly || c.saving)
+                  ? null
+                  : (v) => _property(n, 'italic', v),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   Widget _node(LayoutNode n) {
     final facingRotation = tableSeatFacingRotation(n, _nodesById[n.parentId]);
@@ -1094,6 +1131,24 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             },
           ),
         ],
+        if (n.kind == 'text' ||
+            (n.label.isNotEmpty &&
+                n.kind != 'seat' &&
+                n.kind != 'group' &&
+                !isBarNode(n) &&
+                n.properties['furniture'] != 'couch'))
+          _textAppearance(n),
+        if (n.kind == 'group')
+          for (final table in c.document.nodes.where(
+            (child) =>
+                child.parentId == n.id &&
+                child.kind == 'table' &&
+                !isBarNode(child),
+          ))
+            KeyedSubtree(
+              key: ValueKey('table-text-${table.id}'),
+              child: _textAppearance(table),
+            ),
         if (n.kind == 'text') ...[
           _field(
             'Text',
@@ -1101,57 +1156,10 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             (v) => _property(n, 'text', v),
             multiline: true,
           ),
-          EditorFontPicker(
-            value: p['fontId'] as String?,
-            label: 'Font',
-            enabled: !(c.readOnly || c.saving),
-            translate: (text) => VenueLayoutStrings.text(context, text),
-            options: [
-              for (final entry in (c.resources['fonts'] as Map? ?? {}).entries)
-                EditorFontOption(
-                  id: '${entry.key}',
-                  family: '${entry.value['family'] ?? 'Font'}',
-                ),
-            ],
-            onSelected: (id) async {
-              final properties = Map<String, dynamic>.from(n.properties);
-              if (id == null) {
-                properties.remove('fontId');
-              } else {
-                properties['fontId'] = id;
-              }
-              c.updateNode(n.copyWith(properties: properties));
-            },
-          ),
-          const SizedBox(height: 12),
-          _number(
-            'Font size',
-            p['size'] as num? ?? 24,
-            (v) => _property(n, 'size', v),
-          ),
           _number(
             'Line height',
             p['lineHeight'] as num? ?? 1.2,
             (v) => _property(n, 'lineHeight', v),
-          ),
-          Wrap(
-            spacing: 8,
-            children: [
-              FilterChip(
-                label: const LayoutText('Bold'),
-                selected: p['bold'] == true,
-                onSelected: (c.readOnly || c.saving)
-                    ? null
-                    : (v) => _property(n, 'bold', v),
-              ),
-              FilterChip(
-                label: const LayoutText('Italic'),
-                selected: p['italic'] == true,
-                onSelected: (c.readOnly || c.saving)
-                    ? null
-                    : (v) => _property(n, 'italic', v),
-              ),
-            ],
           ),
           DropdownButtonFormField<String>(
             initialValue: '${p['align'] ?? 'left'}',
@@ -2277,78 +2285,38 @@ class _PropertyFieldState extends State<_PropertyField> {
   }
 
   @override
-  Widget build(BuildContext context) => EditorNumberScroll(
-    enabled: widget.enabled && widget.numeric,
-    min:
-        const [
-          'Position X',
-          'Position Y',
-          'Rotation °',
-          'Curvature',
-        ].contains(widget.label)
-        ? null
-        : widget.label == 'Line height'
-        ? .8
-        : const [
-            'Width',
-            'Height',
-            'Chair width',
-            'Chair depth',
-            'Font size',
-            'Number of teeth',
-            'Number of rows',
-            'Seats per row',
-            'Blocks',
-            'Seats on couch',
-          ].contains(widget.label)
-        ? 1
-        : 0,
-    max: widget.label == 'Opacity'
-        ? 1
-        : widget.label == 'Line height'
-        ? 3
-        : widget.label == 'Number of teeth'
-        ? 255
-        : null,
-    step: widget.label == 'Opacity'
-        ? .05
-        : widget.label == 'Line height'
-        ? .1
-        : 1,
-    onChanged: _save,
-    child: TextField(
-      controller: _text,
-      focusNode: _focus,
-      enabled: widget.enabled,
-      minLines: widget.multiline ? 2 : 1,
-      maxLines: widget.multiline ? 6 : 1,
-      decoration: InputDecoration(
-        labelText: VenueLayoutStrings.text(context, widget.label),
-        border: const OutlineInputBorder(),
-        isDense: true,
-        prefixIcon: widget.label.contains('#RRGGBBAA')
-            ? IconButton(
-                tooltip: VenueLayoutStrings.text(context, 'Choose color'),
-                onPressed: widget.enabled ? _chooseColor : null,
-                icon: EditorColorSwatch(
-                  value: EditorColorValue.fromRgba(widget.value),
-                ),
-              )
-            : null,
-        suffixIcon: IconButton(
-          tooltip: VenueLayoutStrings.text(context, 'Apply ${widget.label}'),
-          onPressed: widget.enabled ? _save : null,
-          icon: const Icon(Icons.check),
-        ),
+  Widget build(BuildContext context) => TextField(
+    controller: _text,
+    focusNode: _focus,
+    enabled: widget.enabled,
+    minLines: widget.multiline ? 2 : 1,
+    maxLines: widget.multiline ? 6 : 1,
+    decoration: InputDecoration(
+      labelText: VenueLayoutStrings.text(context, widget.label),
+      border: const OutlineInputBorder(),
+      isDense: true,
+      prefixIcon: widget.label.contains('#RRGGBBAA')
+          ? IconButton(
+              tooltip: VenueLayoutStrings.text(context, 'Choose color'),
+              onPressed: widget.enabled ? _chooseColor : null,
+              icon: EditorColorSwatch(
+                value: EditorColorValue.fromRgba(widget.value),
+              ),
+            )
+          : null,
+      suffixIcon: IconButton(
+        tooltip: VenueLayoutStrings.text(context, 'Apply ${widget.label}'),
+        onPressed: widget.enabled ? _save : null,
+        icon: const Icon(Icons.check),
       ),
-      onTapOutside: (_) {
-        if (_text.value.composing.isValid) {
-          _text.value = _text.value.copyWith(composing: TextRange.empty);
-        }
-        _save();
-        _focus.unfocus();
-      },
-      onSubmitted: (_) => _save(),
     ),
+    onTapOutside: (_) {
+      if (_text.value.composing.isValid) {
+        _text.value = _text.value.copyWith(composing: TextRange.empty);
+      }
+      _save();
+      _focus.unfocus();
+    },
+    onSubmitted: (_) => _save(),
   );
 }

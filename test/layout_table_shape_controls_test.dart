@@ -39,7 +39,7 @@ void main() {
   }
 
   testWidgets(
-    'only basic tables can be inserted and drawn shapes only convert to bars',
+    'tables and bars can be painted and drawn shapes convert to bars',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -69,7 +69,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Paint table'), findsNothing);
+      expect(find.text('Paint table'), findsOneWidget);
       expect(find.text('Paint bar'), findsOneWidget);
       expect(find.text('Use as table'), findsNothing);
       expect(find.text('Use as bar'), findsOneWidget);
@@ -105,6 +105,7 @@ void main() {
       expect(shapeControl.items!.map((item) => item.value), [
         'rectangle',
         'round',
+        'polygon',
       ]);
       final advanced = find.text('Advanced object properties');
       await tester.ensureVisible(advanced);
@@ -117,6 +118,7 @@ void main() {
       expect(find.byTooltip('Remove one seat'), findsOneWidget);
       for (final entry in {
         'Rectangle': 'roundedRect',
+        'Custom outline': 'polygon',
         'Round': 'round',
       }.entries) {
         await choose(tester, entry.key);
@@ -126,6 +128,16 @@ void main() {
               .properties['shape'],
           entry.value,
         );
+        if (entry.value == 'polygon') {
+          final points = localHull(
+            controller.document.nodes.firstWhere((node) => node.id == table.id),
+          );
+          expect(points.length, 6);
+          for (var i = 0; i < points.length; i++) {
+            final a = points[i], b = points[(i + 1) % points.length];
+            expect(a[0] == b[0] || a[1] == b[1], isTrue);
+          }
+        }
         expect(
           controller.document.nodes
               .where((node) => node.kind == 'seat')
@@ -146,6 +158,7 @@ void main() {
           isTrue,
         );
       }
+      controller.undo();
       controller.undo();
       controller.undo();
       expect(controller.document, same(original));
@@ -175,7 +188,7 @@ void main() {
       final control = tester.widget<DropdownButtonFormField<String>>(
         find.byType(DropdownButtonFormField<String>).first,
       );
-      expect(control.initialValue, isNull);
+      expect(control.initialValue, 'polygon');
       expect(
         tester
             .widget<DropdownButton<String>>(
@@ -183,9 +196,9 @@ void main() {
             )
             .items!
             .map((item) => item.value),
-        ['rectangle', 'round'],
+        ['rectangle', 'round', 'polygon'],
       );
-      expect(find.text('Current outline'), findsOneWidget);
+      expect(find.text('Custom outline'), findsOneWidget);
       expect(controller.document, same(original));
       expect(controller.canUndo, isFalse);
       await choose(tester, 'Round');

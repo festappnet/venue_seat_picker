@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'layout_scene_surface.dart';
+import 'layout_template_card.dart';
+import 'layout_table_selection.dart';
 import 'layout_palette_drag_feedback.dart';
 import 'layout_palette_thumbnail.dart';
 import 'layout_inspector.dart';
@@ -1031,19 +1033,32 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         );
       }
     } else if (gesture.startsWith('Extend edge ') && c.selection.length == 1) {
-      final node = start.nodes.firstWhere((n) => c.selection.contains(n.id));
+      final selected = start.nodes.firstWhere(
+        (n) => c.selection.contains(n.id),
+      );
+      final node = tabletopSelectionNode(start, selected);
       final local = transformPoint(
         inverseMatrix(worldMatrix(start, node)),
         point.dx,
         point.dy,
       );
+      final edge = int.parse(gesture.substring(12));
+      final hull = localHull(node);
+      final a = hull[edge], b = hull[(edge + 1) % hull.length];
+      final dx = b[0] - a[0], dy = b[1] - a[1];
+      final lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared == 0 || (dx.abs() > .001 && dy.abs() > .001)) return;
+      final midX = (a[0] + b[0]) / 2, midY = (a[1] + b[1]) / 2;
+      // Ignore motion along the edge: arms must grow/shrink perpendicular to it.
+      final normalScale =
+          ((local[0] - midX) * -dy + (local[1] - midY) * dx) / lengthSquared;
       c.preview(
         extendTableSurface(
           start,
           node.id,
-          int.parse(gesture.substring(12)),
-          local[0],
-          local[1],
+          edge,
+          midX - dy * normalScale,
+          midY + dx * normalScale,
           protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
         ),
       );
@@ -1468,8 +1483,29 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     _focus.requestFocus();
   }
 
+  KeyEventResult _historyKey(KeyEvent event) {
+    if (event is! KeyDownEvent || _editingText || !_canEdit) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (!keyboard.isControlPressed && !keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+      keyboard.isShiftPressed ? c.redo() : c.undo();
+    } else if (event.logicalKey == LogicalKeyboardKey.keyY) {
+      c.redo();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent || _editingText) return KeyEventResult.ignored;
+    if (_historyKey(event) == KeyEventResult.handled) {
+      return KeyEventResult.handled;
+    }
     if (widget.onNodeActivated != null &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.space) &&
@@ -1512,10 +1548,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       _clearSelection();
     } else if (!modifier && k == LogicalKeyboardKey.keyG) {
       setState(() => _showGrid = !_showGrid);
-    } else if (modifier && k == LogicalKeyboardKey.keyZ) {
-      keyboard.isShiftPressed ? c.redo() : c.undo();
-    } else if (modifier && k == LogicalKeyboardKey.keyY) {
-      c.redo();
     } else if (modifier && k == LogicalKeyboardKey.keyC) {
       c.copySelectionToClipboard();
     } else if (modifier && k == LogicalKeyboardKey.keyV) {
@@ -1586,38 +1618,15 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                     itemCount: VenueLayoutTemplates.all.length,
                     itemBuilder: (context, index) {
                       final template = VenueLayoutTemplates.all[index];
-                      return OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.all(12),
-                          alignment: Alignment.topLeft,
-                        ),
+                      return LayoutTemplateCard(
+                        key: ValueKey('layout-template-${template.id}'),
+                        template: template,
                         onPressed: () => Navigator.pop(context, template),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: IgnorePointer(
-                                child: LayoutSceneSurface(
-                                  showControls: false,
-                                  animate: false,
-                                  document: template.create(),
-                                  resources: c.resources,
-                                ),
-                              ),
-                            ),
-                            LayoutText(
-                              template.title,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            LayoutText(
-                              '${template.seatCount} seats · ${template.standingCapacity} standing',
-                            ),
-                            LayoutText(
-                              template.description,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        preview: LayoutSceneSurface(
+                          showControls: false,
+                          animate: false,
+                          document: template.create(),
+                          resources: c.resources,
                         ),
                       );
                     },
@@ -1712,9 +1721,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           'Standing',
           'Couch',
           'Bar',
+          'Draw table',
           'Draw bar',
         ])
-          k: k == 'Draw bar' ? 'Paint bar' : k,
+          k: k == 'Draw bar'
+              ? 'Paint bar'
+              : k == 'Draw table'
+              ? 'Paint table'
+              : k,
       },
       'Transport': {
         for (final k in ['Bus', 'Double-decker bus', 'Compartments']) k: k,
@@ -2490,6 +2504,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         return Focus(
           canRequestFocus: false,
           onKeyEvent: (_, event) {
+            if (_historyKey(event) == KeyEventResult.handled) {
+              return KeyEventResult.handled;
+            }
             if (event is KeyDownEvent &&
                 event.logicalKey == LogicalKeyboardKey.escape &&
                 !_editingText) {

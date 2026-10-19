@@ -119,6 +119,22 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         : null;
   }
 
+  bool _orthogonalSurface(LayoutNode node) {
+    final points = _vertexPoints(node);
+    if (node.kind != 'table' ||
+        node.properties['shape'] != 'polygon' ||
+        points == null) {
+      return false;
+    }
+    for (var i = 0; i < points.length; i++) {
+      final a = points[i], b = points[(i + 1) % points.length];
+      if ((a[0] - b[0]).abs() > 1e-6 && (a[1] - b[1]).abs() > 1e-6) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   final _camera = TransformationController();
   String? _hoverMessage, _hoverNodeId;
   Offset _hoverPosition = Offset.zero;
@@ -471,11 +487,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
 
       final selectedNodes = widget.document.nodes
           .where((node) => widget.selected.contains(node.id))
-          .map(
-            (node) => widget.showSeatSelectionChecks
-                ? node
-                : tabletopSelectionNode(widget.document, node),
-          )
+          .map((node) => tabletopSelectionNode(widget.document, node))
           .toList();
       final resizeSelection = selectedNodes.firstOrNull;
       final resizeBounds = resizeSelection?.kind == 'group'
@@ -698,7 +710,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
       );
       final seatLinks = tableSeatLinks(
         widget.document,
-        selectedNodes.map((node) => node.id).toSet(),
+        widget.showSeatSelectionChecks
+            ? widget.selected
+            : selectedNodes.map((node) => node.id).toSet(),
       );
       Map<String, double> localBounds(LayoutNode node) {
         if (node.properties['assembly'] != 'rows') {
@@ -950,6 +964,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                       ];
                                     })(),
                               ],
+                              emphasizeSelection:
+                                  widget.showSeatSelectionChecks,
                               selectionHulls: [
                                 for (final node in widget.document.nodes.where(
                                   (n) => widget.highlightedIds.contains(n.id),
@@ -1138,10 +1154,6 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       'polyline',
                       'arrow',
                     ].contains(selectedNodes.single.properties['shape']) &&
-                    !(isBarNode(selectedNodes.single) &&
-                        widget.selected.contains(selectedNodes.single.id) &&
-                        selectedNodes.single.properties['shape'] ==
-                            'polygon') &&
                     !const [
                       'bus',
                       'compartments',
@@ -1179,9 +1191,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   screenOffset: const Offset(0, -24),
                   cursor: SystemMouseCursors.grab,
                 ),
-                if (widget.selected.contains(selectedNodes.single.id) &&
-                    (selectedNodes.single.kind != 'table' ||
-                        isBarNode(selectedNodes.single)) &&
+                if ((selectedNodes.single.kind == 'table'
+                        ? _orthogonalSurface(selectedNodes.single)
+                        : widget.selected.contains(selectedNodes.single.id)) &&
                     !isZigzagNode(selectedNodes.single) &&
                     const [
                       'polyline',
@@ -1216,8 +1228,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       cursor: SystemMouseCursors.precise,
                     ),
                 if (widget.selected.contains(selectedNodes.single.id) &&
-                    (selectedNodes.single.kind != 'table' ||
-                        isBarNode(selectedNodes.single)) &&
+                    selectedNodes.single.kind != 'table' &&
                     !isZigzagNode(selectedNodes.single) &&
                     _vertexPoints(selectedNodes.single) != null)
                   for (
@@ -1414,6 +1425,7 @@ class LayoutScenePainter extends CustomPainter {
     this.fromScene,
     this.seatLinks = const [],
     this.selectionHulls = const [],
+    this.emphasizeSelection = false,
     this.warningHulls = const [],
     this.snapGuides = const [],
     this.transientForegroundIds = const {},
@@ -1426,6 +1438,7 @@ class LayoutScenePainter extends CustomPainter {
   final Set<String> transientForegroundIds;
   final double scale;
   final bool showGrid;
+  final bool emphasizeSelection;
   final double gridStep;
   final Offset gridOrigin;
   final Offset offset;
@@ -1748,6 +1761,22 @@ class LayoutScenePainter extends CustomPainter {
         path.lineTo(p[0], p[1]);
       }
       path.close();
+      if (emphasizeSelection && !warningHulls.contains(hull)) {
+        canvas.drawPath(
+          path,
+          Paint()..color = selectionColor.withValues(alpha: .16),
+        );
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 6 / zoom,
+        );
+        outline.strokeWidth = 3 / zoom;
+      } else {
+        outline.strokeWidth = 1.5 / zoom;
+      }
       canvas.drawPath(path, outline);
     }
   }
@@ -1761,6 +1790,7 @@ class LayoutScenePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant LayoutScenePainter oldDelegate) =>
+      emphasizeSelection != oldDelegate.emphasizeSelection ||
       !identical(scene, oldDelegate.scene) ||
       !identical(resources, oldDelegate.resources) ||
       camera != oldDelegate.camera ||

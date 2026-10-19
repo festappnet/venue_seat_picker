@@ -57,6 +57,61 @@ void main() {
     },
   );
   testWidgets(
+    'reservation selection highlights the tabletop instead of its chair assembly',
+    (tester) async {
+      final base = tableLayout(
+        shape: 'rect',
+        count: 6,
+        x: 400,
+        y: 300,
+        width: 200,
+        height: 120,
+      );
+      final table = base.nodes.firstWhere((node) => node.kind == 'table');
+      final wrapper = LayoutNode(id: newLayoutId(), kind: 'group');
+      final doc = base.copyWith(
+        nodes: [
+          wrapper,
+          for (final node in base.nodes)
+            node.id == table.id ? node.copyWith(parentId: wrapper.id) : node,
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 900,
+            height: 700,
+            child: LayoutSceneSurface(
+              document: doc,
+              selected: {wrapper.id},
+              animate: false,
+            ),
+          ),
+        ),
+      );
+      final painter = tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<LayoutScenePainter>()
+          .single;
+      expect(painter.selected, {wrapper.id});
+      expect(
+        boundsOfPoints(painter.selectionHulls.single),
+        boundsOfPoints(
+          worldHull(
+            doc.nodes.firstWhere((node) => node.id == table.id),
+            worldMatrix(
+              doc,
+              doc.nodes.firstWhere((node) => node.id == table.id),
+            ),
+          ),
+        ),
+      );
+      expect(painter.emphasizeSelection, isTrue);
+      expect(find.byTooltip('Resize handle'), findsNothing);
+    },
+  );
+  testWidgets(
     'linked chair highlights leave selection and all eight handles on the tabletop',
     (tester) async {
       final doc = tableLayout(
@@ -261,7 +316,7 @@ void main() {
     },
   );
   testWidgets(
-    'existing polygon tables get only normal bounds handles while bars keep outline editing',
+    'tables and bars have orthogonal edge controls without free vertex dragging',
     (tester) async {
       for (final bar in [false, true]) {
         final table = LayoutNode(
@@ -301,22 +356,10 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(
-          find.byTooltip('Resize handle'),
-          bar ? findsNothing : findsOneWidget,
-        );
-        expect(
-          find.byTooltip('Resize e handle'),
-          bar ? findsNothing : findsOneWidget,
-        );
-        expect(
-          find.byTooltip('Vertex 0 handle'),
-          bar ? findsOneWidget : findsNothing,
-        );
-        expect(
-          find.byTooltip('Extend surface'),
-          bar ? findsNWidgets(4) : findsNothing,
-        );
+        expect(find.byTooltip('Resize handle'), findsOneWidget);
+        expect(find.byTooltip('Resize e handle'), findsOneWidget);
+        expect(find.byTooltip('Vertex 0 handle'), findsNothing);
+        expect(find.byTooltip('Extend surface'), findsNWidgets(4));
         expect(find.byTooltip('Rotate handle'), findsOneWidget);
         expect(document.toJson(), before);
       }

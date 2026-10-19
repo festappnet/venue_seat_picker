@@ -613,6 +613,8 @@ const _cs = <String, String>{
   'Edit outline': 'Upravit obrys',
   'Extend surface': 'Vytáhnout rameno',
   'Reshape surface': 'Upravit půdorys',
+  'Pull an edge handle to extend the surface.':
+      'Tažením úchytu na hraně prodloužíš nebo zkrátíš rameno.',
   'Pull an edge handle to extend the surface. Drag corners to reshape it.':
       'Tažením úchytu na hraně vytáhneš nové rameno. Rohy upravíš tažením bodů.',
   'Use as table': 'Použít jako stůl',
