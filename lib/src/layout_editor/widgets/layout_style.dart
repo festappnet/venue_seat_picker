@@ -155,11 +155,25 @@ const _textKeys = [
   'lineHeight',
   'opacity',
 ];
+const _labelTypographyKeys = ['fontId', 'size', 'bold', 'italic'];
+List<String> _appearanceKeys(LayoutNode node) => node.kind == 'text'
+    ? _textKeys
+    : [
+        ..._visualKeys,
+        if (node.kind != 'seat' && node.kind != 'group')
+          ..._labelTypographyKeys,
+      ];
 LayoutAppearance captureLayoutAppearance(
   VenueLayoutDocument document,
   String id,
 ) {
-  final root = document.nodes.firstWhere((n) => n.id == id);
+  var root = document.nodes.firstWhere((n) => n.id == id);
+  if (root.kind == 'group') {
+    final tables = document.nodes
+        .where((n) => n.parentId == root.id && n.kind == 'table')
+        .toList();
+    if (tables.length == 1) root = tables.single;
+  }
   Map<String, dynamic> capture(LayoutNode n) => {
     if (n.kind != 'text') ...{
       'fill': layoutNodeFill(document, n),
@@ -170,7 +184,11 @@ LayoutAppearance captureLayoutAppearance(
     },
     'color': document.defaultTextStyle['color'] ?? '#222222FF',
     if (n.kind == 'text') 'opacity': 1,
-    for (final key in n.kind == 'text' ? _textKeys : _visualKeys)
+    if (n.kind != 'seat' && n.kind != 'group')
+      for (final key in _labelTypographyKeys)
+        if (document.defaultTextStyle.containsKey(key))
+          key: document.defaultTextStyle[key],
+    for (final key in _appearanceKeys(n))
       if (effectiveNodeProperties(document, n).containsKey(key))
         key: effectiveNodeProperties(document, n)[key],
   };
@@ -303,9 +321,7 @@ VenueLayoutDocument applyLayoutAppearance(
                           ? appearance.seats ?? appearance.object
                           : appearance.object)
                       .entries)
-                if ((node.kind == 'text' ? _textKeys : _visualKeys).contains(
-                      entry.key,
-                    ) &&
+                if (_appearanceKeys(node).contains(entry.key) &&
                     // Open paths retain their transparent fill and exact geometry.
                     !(entry.key == 'fill' &&
                         [

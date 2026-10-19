@@ -9,6 +9,7 @@ import 'layout_scene_surface.dart';
 import 'layout_style.dart';
 import 'layout_global_style.dart';
 import 'layout_floor_style.dart';
+import 'layout_font_size_control.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 
 class LayoutInspector extends StatefulWidget {
@@ -18,6 +19,7 @@ class LayoutInspector extends StatefulWidget {
     required this.cornerPivot,
     required this.onPivotChanged,
     this.hostBuilder,
+    this.onRenameNode,
     this.canvasSelected = false,
     this.onImportBackground,
     this.onClearSelection,
@@ -26,6 +28,7 @@ class LayoutInspector extends StatefulWidget {
     this.readOnlyLabelNodeIds = const {},
   });
   final VenueLayoutController controller;
+  final void Function(LayoutNode, String)? onRenameNode;
   final Set<String> readOnlyLabelNodeIds;
   final bool cornerPivot;
   final bool canvasSelected;
@@ -903,54 +906,63 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       ...c.document.defaultTextStyle,
       ...effectiveNodeProperties(c.document, n),
     };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        EditorFontPicker(
-          value: p['fontId'] as String?,
-          label: 'Font',
-          enabled: !(c.readOnly || c.saving),
-          translate: (text) => VenueLayoutStrings.text(context, text),
-          options: [
-            for (final entry in (c.resources['fonts'] as Map? ?? {}).entries)
-              EditorFontOption(
-                id: '${entry.key}',
-                family: '${entry.value['family'] ?? 'Font'}',
-              ),
-          ],
-          onSelected: (id) async {
-            final properties = Map<String, dynamic>.from(n.properties);
-            if (id == null) {
-              properties.remove('fontId');
-            } else {
-              properties['fontId'] = id;
-            }
-            c.updateNode(n.copyWith(properties: properties));
-          },
-        ),
-        const SizedBox(height: 12),
-        _number(
-          'Font size',
-          p['size'] as num? ?? 24,
-          (v) => _property(n, 'size', v),
-        ),
-        Row(
-          children: [
-            for (final style in const [
-              ('bold', 'Bold', Icons.format_bold),
-              ('italic', 'Italic', Icons.format_italic),
-            ])
-              IconButton.filledTonal(
-                tooltip: VenueLayoutStrings.text(context, style.$2),
-                isSelected: p[style.$1] == true,
-                icon: Icon(style.$3),
-                onPressed: c.readOnly || c.saving
-                    ? null
-                    : () => _property(n, style.$1, p[style.$1] != true),
-              ),
-          ],
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          EditorFontPicker(
+            value: p['fontId'] as String?,
+            label: 'Font',
+            enabled: !(c.readOnly || c.saving),
+            translate: (text) => VenueLayoutStrings.text(context, text),
+            options: [
+              for (final entry in (c.resources['fonts'] as Map? ?? {}).entries)
+                EditorFontOption(
+                  id: '${entry.key}',
+                  family: '${entry.value['family'] ?? 'Font'}',
+                ),
+            ],
+            onSelected: (id) async {
+              final properties = Map<String, dynamic>.from(n.properties);
+              if (id == null) {
+                properties.remove('fontId');
+              } else {
+                properties['fontId'] = id;
+              }
+              c.updateNode(n.copyWith(properties: properties));
+            },
+          ),
+          const SizedBox(height: 12),
+          LayoutFontSizeControl(
+            key: ValueKey('font-size-${n.id}'),
+            controller: c,
+            node: n,
+            value: (p['size'] as num? ?? 24).toDouble(),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final style in const [
+                ('bold', 'Bold', Icons.format_bold),
+                ('italic', 'Italic', Icons.format_italic),
+              ])
+                IconButton.filledTonal(
+                  tooltip: VenueLayoutStrings.text(context, style.$2),
+                  isSelected: p[style.$1] == true,
+                  icon: Icon(style.$3),
+                  onPressed: c.readOnly || c.saving
+                      ? null
+                      : () => _property(n, style.$1, p[style.$1] != true),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -988,8 +1000,15 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 12),
-        if (!widget.readOnlyLabelNodeIds.contains(n.id))
-          _field('Name', n.label, (v) => c.updateNode(n.copyWith(label: v))),
+        if (!widget.readOnlyLabelNodeIds.contains(n.id) ||
+            widget.onRenameNode != null)
+          _field('Name', n.label, (v) {
+            if (widget.readOnlyLabelNodeIds.contains(n.id)) {
+              widget.onRenameNode!(n, v);
+            } else {
+              c.updateNode(n.copyWith(label: v));
+            }
+          }),
         if (n.kind == 'table' &&
             c.document.nodes.any(
               (seat) => seat.kind == 'seat' && seat.parentId == n.id,

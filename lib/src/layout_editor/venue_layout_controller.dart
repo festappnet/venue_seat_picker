@@ -556,6 +556,7 @@ class VenueLayoutController extends ChangeNotifier {
   }
 
   void cancelGesture() {
+    if (_disposed) return;
     final point = _gesture;
     if (point != null) {
       _gesture = null;

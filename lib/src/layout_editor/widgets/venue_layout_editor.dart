@@ -21,6 +21,7 @@ class VenueLayoutEditor extends StatefulWidget {
     super.key,
     required this.controller,
     this.inspectorBuilder,
+    this.toolbarPrefix,
     this.toolbarLeading,
     this.toolbarTrailing,
     this.showGallery = true,
@@ -36,12 +37,16 @@ class VenueLayoutEditor extends StatefulWidget {
     this.viewSelectableIds,
     this.viewSelectionTarget,
     this.readOnlyLabelNodeIds = const {},
+    this.onRenameNode,
   });
   final VenueLayoutController controller;
 
   /// Host actions share the editor toolbar. Trailing actions stay visible while
   /// tools scroll horizontally on smaller screens.
   final Widget? toolbarLeading;
+
+  /// Stable host mode controls, preceding the shared pointer tools.
+  final Widget? toolbarPrefix;
   final Widget? toolbarTrailing;
 
   /// Transient host state. Does not enter document, dirty state or history.
@@ -69,6 +74,7 @@ class VenueLayoutEditor extends StatefulWidget {
 
   /// Names owned by a host business workflow rather than geometry editing.
   final Set<String> readOnlyLabelNodeIds;
+  final void Function(LayoutNode node, String name)? onRenameNode;
   final Widget Function(BuildContext, LayoutNode)? inspectorBuilder;
   final bool showGallery;
   final ValueChanged<LayoutTemplate>? onTemplateSelected;
@@ -2457,6 +2463,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       onPivotChanged: (v) => setState(() => _cornerPivot = v),
       hostBuilder: widget.inspectorBuilder,
       readOnlyLabelNodeIds: widget.readOnlyLabelNodeIds,
+      onRenameNode: widget.onRenameNode,
       onImportBackground: widget.onImportBackground,
       onCopyStyle: c.selection.isEmpty ? null : _copyStyle,
       onPasteStyle: _copiedAppearance == null || !_canEdit ? null : _pasteStyle,
@@ -2473,6 +2480,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       },
     }.entries)
       IconButton(
+        key: ValueKey('layout-tool-${entry.key}'),
         tooltip: VenueLayoutStrings.text(context, entry.key),
         isSelected: _tool == entry.key,
         style: IconButton.styleFrom(
@@ -2484,16 +2492,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           _cancelGesture();
           setState(() => _tool = entry.key);
         },
-        icon: !widget.interactionEnabled
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(entry.value, size: 20),
-                  const SizedBox(width: 6),
-                  LayoutText(entry.key),
-                ],
-              )
-            : Icon(entry.value, size: 20),
+        icon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(entry.value, size: 20),
+            const SizedBox(width: 6),
+            LayoutText(entry.key),
+          ],
+        ),
       ),
   ];
 
@@ -2535,6 +2541,10 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
+                              if (widget.toolbarPrefix != null)
+                                widget.toolbarPrefix!,
+                              ..._pointerTools(),
+                              const SizedBox(width: 12),
                               if (widget.toolbarLeading != null)
                                 widget.toolbarLeading!,
                               if (widget.interactionEnabled)
@@ -2566,8 +2576,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   label: const LayoutText('Insert'),
                                 ),
                               const SizedBox(width: 12),
-                              if (!wide || !widget.interactionEnabled)
-                                ..._pointerTools(),
                               const SizedBox(width: 16),
                               if (_canEdit)
                                 Tooltip(
@@ -2718,29 +2726,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                       Material(
                         key: const ValueKey('layout-editor-tool-sidebar'),
                         color: layoutPanelColor(context),
-                        child: SizedBox(
-                          width: _canEdit ? 232 : 64,
-                          child: Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                ),
-                                child: _canEdit
-                                    ? Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: _pointerTools(),
-                                      )
-                                    : Column(children: _pointerTools()),
-                              ),
-                              if (_canEdit) ...[
-                                const Divider(height: 1),
-                                Expanded(child: _palette()),
-                              ],
-                            ],
-                          ),
-                        ),
+                        child: SizedBox(width: 232, child: _palette()),
                       ),
                       const VerticalDivider(width: 1),
                     ],
