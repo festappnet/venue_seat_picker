@@ -607,7 +607,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         for (final node in selectedNodes) node.id: localBounds(node),
       };
       List<double> handlePoint(LayoutNode node, double dx, double dy) {
-        if (node.kind == 'group' ||
+        if ((node.kind == 'group' && node.properties['assembly'] == null) ||
             const [
               'bus',
               'compartments',
@@ -672,6 +672,11 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                         ? SystemMouseCursors.grab
                         : SystemMouseCursors.basic,
                     child: GestureDetector(
+                      // The secondary-click recognizer otherwise advertises a
+                      // primary semantic tap with no handler. Web semantics
+                      // consumes coordinate clicks before selection sees them.
+                      // Object actions remain available through the inspector.
+                      excludeFromSemantics: true,
                       behavior: HitTestBehavior.opaque,
                       onSecondaryTapUp: widget.onContextMenu == null
                           ? null

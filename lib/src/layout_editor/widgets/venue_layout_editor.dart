@@ -857,7 +857,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     } else if (gesture.startsWith('Resize') && c.selection.length == 1) {
       final n = start.nodes.firstWhere((n) => c.selection.contains(n.id));
-      if (n.kind == 'group') {
+      if (n.kind == 'group' && n.properties['assembly'] == null) {
         final bounds = selectionBounds(start, {n.id});
         final direction = gesture == 'Resize' ? 'se' : gesture.substring(7);
         final west = direction.contains('w'), north = direction.contains('n');

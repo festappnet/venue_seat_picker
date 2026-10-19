@@ -1369,7 +1369,10 @@ VenueLayoutDocument transformNodes(
           .toList(),
       matrices = worldMatrices(d),
       points = roots.expand((n) => worldHull(n, matrices[n.id]!)).toList(),
-      bounds = roots.any((n) => n.kind == 'group')
+      bounds =
+          roots.any(
+            (n) => n.kind == 'group' && n.properties['assembly'] == null,
+          )
           ? selectionBounds(d, ids)
           : boundsOfPoints(points),
       cx = bounds['x']! + (cornerPivot ? 0 : bounds['width']! / 2),
