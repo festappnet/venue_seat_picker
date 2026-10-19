@@ -164,3 +164,8 @@ test('assistive seat list remains keyboard accessible without occupying visual s
   assert.deepEqual(await p.evaluate(()=>calls.map(c=>c.ids[0])),[a]);
  } finally {await p.close();}
 });
+
+test('public zoom controls clamp, report bounds and restore fit',async()=>{const p=await setup();try{
+ const result=await p.evaluate(()=>{let state;viewer.update({minZoom:1,maxZoom:5,onCameraChanged:s=>state=s});viewer.fitToScreen();const fit=viewer.svg.getAttribute('viewBox');const initial=state;viewer.zoomBy(1.25);const zoomed=viewer.svg.getAttribute('viewBox');viewer.zoomBy(100);const maximum=state;viewer.zoomBy(.0001);const minimum=state;viewer.fitToScreen();return{fit,zoomed,restored:viewer.svg.getAttribute('viewBox'),initial,maximum,minimum};});
+ assert.notEqual(result.fit,result.zoomed);assert.equal(result.fit,result.restored);assert.equal(result.initial.canZoomOut,false);assert.equal(result.maximum.canZoomIn,false);assert.equal(result.minimum.canZoomOut,false);
+}finally{await p.close();}});

@@ -92,7 +92,17 @@ export function mount(container, options = {}) {
   });
   const detail = document.createElement('div');
   root.append(svg, list, detail, live); container.append(root);
-  const handle = {serial: ++viewerSerial, container, root, svg, list, detail, live, options: {}, pending: new Set(), selected: new Set(), quantities: new Map(), disposed: false, generation: 0, update(next) {return update(handle, next);}, dispose() {dispose(handle);}};
+  const handle = {serial: ++viewerSerial, container, root, svg, list, detail, live, options: {}, pending: new Set(), selected: new Set(), quantities: new Map(), disposed: false, generation: 0, update(next) {return update(handle, next);}, dispose() {dispose(handle);}, zoomBy(factor) {
+    if (handle.disposed) throw new Error('Viewer is disposed');
+    if (!Number.isFinite(factor) || factor <= 0) throw new Error('Zoom factor must be positive');
+    handle.hideTooltip?.();
+    const c = handle.camera, ratio = zoomFactor(handle, c, 1 / factor);
+    handle.camera = {...c, x: c.x + c.width * (1 - ratio) / 2, y: c.y + c.height * (1 - ratio) / 2, width: c.width * ratio, height: c.height * ratio};
+    render(handle, []);
+  }, fitToScreen() {
+    if (handle.disposed) throw new Error('Viewer is disposed');
+    handle.hideTooltip?.(); handle.camera = null; render(handle, []);
+  }};
   handle.click = async event => {
     const inverse = svg.getScreenCTM()?.inverse();
     if (!inverse) return;
@@ -205,6 +215,8 @@ function render(handle, dirtyIds) {
   handle.camera = boundCamera(handle, handle.camera);
   svg.setAttribute('viewBox', `${handle.camera.x} ${handle.camera.y} ${handle.camera.width} ${handle.camera.height}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  const limits = cameraMetrics(handle, handle.camera);
+  options.onCameraChanged?.({canZoomIn: handle.camera.width > limits.minWidth + .001, canZoomOut: handle.camera.width < limits.maxWidth - .001});
   if (!handle.elements) {svg.replaceChildren(element('rect', {x: c.x || 0, y: c.y || 0, width: c.width, height: c.height, fill: color(c.fill)})); handle.elements = new Map();}
   let previousNode = svg.firstElementChild;
   const placeNode = node => {if (node.previousSibling !== previousNode) svg.insertBefore(node, previousNode.nextSibling); previousNode = node;};
@@ -292,7 +304,7 @@ function cameraMetrics(handle, camera) {
   const width = rect.width || canvas.width, height = rect.height || canvas.height;
   const fit = Math.min(width / canvas.width, height / canvas.height);
   const aspect = camera.width / camera.height, fitWidth = Math.min(width, height * aspect) / fit;
-  return {canvas, width, height, minWidth: fitWidth / 20, maxWidth: fitWidth / .9};
+  return {canvas, width, height, minWidth: fitWidth / (handle.options.maxZoom || 20), maxWidth: fitWidth / (handle.options.minZoom || .9)};
 }
 function zoomFactor(handle, camera, factor) {
   const limits = cameraMetrics(handle, camera);
