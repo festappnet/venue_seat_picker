@@ -132,6 +132,17 @@ void main() {
       LayoutSceneSurface surface() =>
           tester.widget(find.byType(LayoutSceneSurface));
       expect(find.text('Standing areas and tables'), findsOneWidget);
+      final region = find
+          .descendant(
+            of: find.byKey(const ValueKey('layout-map-gesture-surface')),
+            matching: find.byType(MouseRegion),
+          )
+          .first;
+      expect(
+        tester.widget<MouseRegion>(region).cursor,
+        SystemMouseCursors.basic,
+      );
+
       surface().onTap!(const Offset(100, 100));
       await tester.pump();
       expect(selected, {group.id});

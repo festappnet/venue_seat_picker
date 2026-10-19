@@ -764,7 +764,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 child: ClipRect(
                   child: MouseRegion(
                     onExit: (_) => _hideHoverTooltip(clearNode: true),
-                    cursor: widget.compactZoomControls
+                    cursor:
+                        widget.compactZoomControls ||
+                            (widget.onSelectDown != null &&
+                                widget.onDragStart == null)
                         ? _pickerCursor
                         : widget.onPointTap != null
                         ? SystemMouseCursors.precise
