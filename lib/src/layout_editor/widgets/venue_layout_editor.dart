@@ -888,8 +888,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         ) &&
         !baseline.attachments.any(
           (a) => seats.contains(a['seatId']) && a['manual'] == true,
-        ))
+        )) {
       return baseline;
+    }
     return baseline.copyWith(
       nodes: [
         for (final n in baseline.nodes)
@@ -1073,8 +1074,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             .toList();
         // A native table wrapper is commercial grouping, not scalable furniture.
         // Resize its real desk through the same seating policy as a normal table.
-        if (children.length == 1 && children.single.kind == 'table')
+        if (children.length == 1 && children.single.kind == 'table') {
           n = children.single;
+        }
       }
       if (n.kind == 'group' && n.properties['assembly'] == null) {
         final bounds = selectionBounds(start, {n.id});
