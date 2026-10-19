@@ -78,6 +78,56 @@ void main() {
   });
 
   testWidgets(
+    'wrapped imported chairs regain a natural perimeter when resizing',
+    (tester) async {
+      final tableDoc = tableLayout(shape: 'roundedRect', count: 6);
+      final table = tableDoc.nodes.firstWhere((n) => n.kind == 'table');
+      final wrapper = LayoutNode(
+        id: newLayoutId(),
+        kind: 'group',
+        width: 1,
+        height: 1,
+      );
+      final original = tableDoc.copyWith(
+        nodes: [
+          wrapper,
+          for (final node in tableDoc.nodes)
+            if (node.id == table.id)
+              node.copyWith(parentId: wrapper.id)
+            else
+              node,
+        ],
+        attachments: [
+          for (final a in tableDoc.attachments) {...a, 'manual': true},
+        ],
+      );
+      final c = VenueLayoutController(original)..select({wrapper.id});
+      await open(tester, c);
+      final bounds = selectionBounds(original, {wrapper.id});
+      final corner = Offset(
+        bounds['x']! + bounds['width']!,
+        bounds['y']! + bounds['height']!,
+      );
+      surface(tester).onHandleStart!('Resize se', corner);
+      surface(tester).onDragUpdate!(corner + const Offset(300, 300));
+      surface(tester).onDragEnd!();
+      expect(c.error, isNull);
+      final resizedTable = c.document.nodes.firstWhere((n) => n.id == table.id);
+      for (final seat in c.document.nodes.where((n) => n.kind == 'seat')) {
+        final dx = seat.x.abs() - resizedTable.width / 2;
+        final dy = seat.y.abs() - resizedTable.height / 2;
+        // Default chair half-size20 plus gap12 must not scale with the desk.
+        expect(dx > dy ? dx : dy, lessThanOrEqualTo(32.01));
+        expect(seat.width, 40);
+        expect(seat.height, 40);
+      }
+      await tester.pump();
+      c.undo();
+      expect(c.document, same(original));
+    },
+  );
+
+  testWidgets(
     'round resize keeps circle; Shift permits ellipse; free surplus seats undo together',
     (tester) async {
       final original = tableLayout(

@@ -144,7 +144,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           ].contains(p['status']);
       return unavailable ? SystemMouseCursors.basic : SystemMouseCursors.click;
     }
-    return widget.pan ? SystemMouseCursors.grab : SystemMouseCursors.basic;
+    return SystemMouseCursors.basic;
   }
 
   void _hideHoverTooltip({bool clearNode = false}) {

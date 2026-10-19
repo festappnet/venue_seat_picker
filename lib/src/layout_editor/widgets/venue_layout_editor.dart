@@ -93,6 +93,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _libraryOpen = false;
   Map<String, dynamic>? _previewSeating;
   Map<String, double>? _canvasResizeBounds;
+  VenueLayoutDocument? _tableResizeBaseline;
+  Map<String, double>? _rowResizeBounds;
   Offset? _pendingResizePoint;
   int? _resizeFrameCallback;
   final Map<String, VenueLayoutDocument> _previews = {};
@@ -873,6 +875,39 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     return transformPoint(inverseMatrix(matrix), point.dx, point.dy);
   }
 
+  VenueLayoutDocument _automaticTableResize(
+    VenueLayoutDocument baseline,
+    String tableId,
+  ) {
+    final seats = {
+      for (final n in baseline.nodes)
+        if (n.kind == 'seat' && n.parentId == tableId && !n.locked) n.id,
+    };
+    if (!baseline.nodes.any(
+          (n) => seats.contains(n.id) && n.properties['manual'] == true,
+        ) &&
+        !baseline.attachments.any(
+          (a) => seats.contains(a['seatId']) && a['manual'] == true,
+        ))
+      return baseline;
+    return baseline.copyWith(
+      nodes: [
+        for (final n in baseline.nodes)
+          if (seats.contains(n.id) && n.properties['manual'] == true)
+            n.copyWith(properties: {...n.properties, 'manual': false})
+          else
+            n,
+      ],
+      attachments: [
+        for (final a in baseline.attachments)
+          if (seats.contains(a['seatId']) && a['manual'] == true)
+            {...a, 'manual': false}
+          else
+            a,
+      ],
+    );
+  }
+
   void _dragUpdateUnsafe(Offset point) {
     if (_marquee != null) {
       setState(() => _marqueeEnd = point);
@@ -1031,7 +1066,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         ),
       );
     } else if (gesture.startsWith('Resize') && c.selection.length == 1) {
-      final n = start.nodes.firstWhere((n) => c.selection.contains(n.id));
+      var n = start.nodes.firstWhere((n) => c.selection.contains(n.id));
+      if (n.kind == 'group' && n.properties['assembly'] == null) {
+        final children = start.nodes
+            .where((child) => child.parentId == n.id)
+            .toList();
+        // A native table wrapper is commercial grouping, not scalable furniture.
+        // Resize its real desk through the same seating policy as a normal table.
+        if (children.length == 1 && children.single.kind == 'table')
+          n = children.single;
+      }
       if (n.kind == 'group' && n.properties['assembly'] == null) {
         final bounds = selectionBounds(start, {n.id});
         final direction = gesture == 'Resize' ? 'se' : gesture.substring(7);
@@ -1117,7 +1161,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           ? 1.0
           : 0.0;
       final isRows = n.properties['assembly'] == 'rows';
-      final oldBounds = isRows ? rowAssemblyBounds(start, n.id) : null;
+      final oldBounds = isRows
+          ? (_rowResizeBounds ??= rowAssemblyBounds(start, n.id))
+          : null;
       final oldWidth = oldBounds?['width'] ?? n.width;
       final oldHeight = oldBounds?['height'] ?? n.height;
       var width = math.max(1.0, oldWidth + (current[0] - initial[0]) * sx);
@@ -1141,12 +1187,15 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           width = height * oldWidth / oldHeight;
         }
       }
+      final resizeBase = n.kind == 'table'
+          ? (_tableResizeBaseline ??= _automaticTableResize(start, n.id))
+          : start;
       final resized = isRows
           ? resizeRowAssembly(start, n.id, width, height)
           : n.kind == 'furniture' && n.properties['furniture'] == 'couch'
           ? resizeCouchBody(start, n.id, width, height)
           : resizeNode(
-              start,
+              resizeBase,
               n.id,
               width,
               height,
@@ -1181,16 +1230,18 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 actualBounds!['y']! +
                 (sy < 0 ? oldHeight - actualBounds['height']! : 0.0)
           : (height - n.height) * sy / 2;
-      c.preview(
-        moveLayoutWithinCanvas(
-          transformNodes(
-            resized,
-            {n.id},
-            dx: matrix[0] * shiftX + matrix[2] * shiftY,
-            dy: matrix[1] * shiftX + matrix[3] * shiftY,
-          ),
+      // This move already resolves chair placement and canvas constraints.
+      // Avoid running the same table packer again in the controller.
+      c.previewMove(
+        transformNodes(
+          resized,
           {n.id},
+          dx: matrix[0] * shiftX + matrix[2] * shiftY,
+          dy: matrix[1] * shiftX + matrix[3] * shiftY,
         ),
+        {n.id},
+        dx: 0,
+        dy: 0,
       );
     } else if (gesture == 'Rotate') {
       final nodes = start.nodes.where((n) => c.selection.contains(n.id));
@@ -1284,6 +1335,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _endGesture() {
     _flushResizePreview();
+    _tableResizeBaseline = null;
+    _rowResizeBounds = null;
     _resizeRemovedSeats = 0;
     _selectionBeforeDown = null;
     if (_startDocument != null &&
@@ -1372,6 +1425,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _cancelGesture() {
     _discardResizePreview();
+    _tableResizeBaseline = null;
+    _rowResizeBounds = null;
     _surfaceBrush = null;
     _resizeRemovedSeats = 0;
     _drawId = null;
@@ -2017,6 +2072,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _handleStart(String mode, Offset point) {
     _discardResizePreview();
+    _tableResizeBaseline = null;
+    _rowResizeBounds = null;
     _resizeRemovedSeats = 0;
     _focus.requestFocus();
     _gestureTool = mode;

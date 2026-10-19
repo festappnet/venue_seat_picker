@@ -46,7 +46,7 @@ void main() {
           matching: find.byType(MouseRegion),
         )
         .first;
-    expect(tester.widget<MouseRegion>(region).cursor, SystemMouseCursors.grab);
+    expect(tester.widget<MouseRegion>(region).cursor, SystemMouseCursors.basic);
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     await mouse.moveTo(const Offset(400, 300));
