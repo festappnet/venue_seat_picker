@@ -132,6 +132,14 @@ void main() {
       LayoutSceneSurface surface() =>
           tester.widget(find.byType(LayoutSceneSurface));
       expect(find.text('Standing areas and tables'), findsOneWidget);
+      await tester.tap(find.byTooltip('Pan'));
+      await tester.pump();
+      expect(surface().onTap, isNull);
+      expect(c.document, same(original));
+      await tester.tap(find.byTooltip('Select'));
+      await tester.pump();
+      expect(surface().onTap, isNotNull);
+
       final region = find
           .descendant(
             of: find.byKey(const ValueKey('layout-map-gesture-surface')),

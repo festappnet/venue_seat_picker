@@ -22,6 +22,49 @@ class _Fonts implements LayoutFontProvider {
 }
 
 void main() {
+  test(
+    'imported subunit canvas edges are valid while genuine overflow stays invalid',
+    () {
+      final table = LayoutNode(
+        id: newLayoutId(),
+        kind: 'table',
+        x: 9.79,
+        y: 50,
+        width: 20,
+        height: 20,
+      );
+      final outline = LayoutNode(
+        id: newLayoutId(),
+        kind: 'shape',
+        x: 50,
+        y: 50,
+        width: 100.42,
+        height: 100,
+        properties: {'shape': 'rect', 'fill': '#00000000'},
+      );
+      final doc = VenueLayoutDocument.empty().copyWith(
+        canvas: {
+          'x': 0,
+          'y': 0,
+          'width': 100,
+          'height': 100,
+          'fill': '#FFFFFFFF',
+        },
+        nodes: [outline, table],
+      );
+      final c = VenueLayoutController(doc);
+      expect(c.placementIssues, isEmpty);
+      c.updateNode(table.copyWith(x: 8));
+      expect(c.error, contains('inside the canvas'));
+      final outside = VenueLayoutController(
+        doc.copyWith(nodes: [table.copyWith(x: 8)]),
+      );
+      expect(outside.placementIssues.single.code, 'outside_canvas');
+      c.dispose();
+      outside.dispose();
+    },
+  );
+
   test('gestures keep fixed canvas and cancel restores draft', () {
     final doc = tableLayout(shape: 'roundedRect', count: 6);
     final c = VenueLayoutController(doc);

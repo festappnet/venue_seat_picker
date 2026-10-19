@@ -121,6 +121,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   GlobalKey<TooltipState> _hoverTooltipKey = GlobalKey<TooltipState>();
 
   MouseCursor get _pickerCursor {
+    if (widget.pan && widget.onTap == null) return SystemMouseCursors.grab;
     final id = _hoverNodeId;
     if (id != null &&
         widget.document.nodes.any(

@@ -2471,7 +2471,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           _cancelGesture();
           setState(() => _tool = entry.key);
         },
-        icon: Icon(entry.value, size: 20),
+        icon: !widget.interactionEnabled
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(entry.value, size: 20),
+                  const SizedBox(width: 6),
+                  LayoutText(entry.key),
+                ],
+              )
+            : Icon(entry.value, size: 20),
       ),
   ];
 
@@ -2541,7 +2550,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   label: const LayoutText('Insert'),
                                 ),
                               const SizedBox(width: 12),
-                              if (!wide) ..._pointerTools(),
+                              if (!wide || !widget.interactionEnabled)
+                                ..._pointerTools(),
                               const SizedBox(width: 16),
                               if (_canEdit)
                                 Tooltip(
@@ -2688,7 +2698,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (wide) ...[
+                    if (wide && _canEdit) ...[
                       Material(
                         key: const ValueKey('layout-editor-tool-sidebar'),
                         color: layoutPanelColor(context),
@@ -2816,15 +2826,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         (!_canEdit || _tool != 'Select')
                                         ? null
                                         : _contextMenu,
-                                    onTap:
-                                        [
-                                          'Line',
-                                          'Arrow',
-                                          'Polyline',
-                                          'Polygon',
-                                          'Draw table',
-                                          'Draw bar',
-                                        ].contains(_tool)
+                                    onTap: !_canEdit && _tool == 'Pan'
+                                        ? null
+                                        : [
+                                            'Line',
+                                            'Arrow',
+                                            'Polyline',
+                                            'Polygon',
+                                            'Draw table',
+                                            'Draw bar',
+                                          ].contains(_tool)
                                         ? null
                                         : _tap,
                                     onPointTap:

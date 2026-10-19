@@ -31,6 +31,9 @@ class LayoutPlacementIssue {
   final Set<String> nodeIds;
 }
 
+// Imported SVG edges may straddle the canvas by a fraction of a layout unit.
+const _canvasEdgeTolerance = .5;
+
 double _canvasOverflow(
   VenueLayoutDocument document,
   LayoutNode node,
@@ -136,10 +139,10 @@ class VenueLayoutController extends ChangeNotifier {
       if (node.kind == 'group') continue;
       if (worldHull(node, matrices[node.id]!).any(
         (p) =>
-            p[0] < left - .02 ||
-            p[0] > right + .02 ||
-            p[1] < top - .02 ||
-            p[1] > bottom + .02,
+            p[0] < left - _canvasEdgeTolerance ||
+            p[0] > right + _canvasEdgeTolerance ||
+            p[1] < top - _canvasEdgeTolerance ||
+            p[1] > bottom + _canvasEdgeTolerance,
       )) {
         result.add(LayoutPlacementIssue('outside_canvas', {node.id}));
       }
@@ -306,7 +309,7 @@ class VenueLayoutController extends ChangeNotifier {
     for (final node in next.nodes) {
       if (node.kind == 'group') continue;
       final overflow = _canvasOverflow(next, node, nextWorld[node.id]!);
-      if (overflow <= .02) continue;
+      if (overflow <= _canvasEdgeTolerance) continue;
       final prior = priorById[node.id];
       // Old drafts can be repaired progressively, but no new or worsened
       // placement may leave the canvas, including rotation/resize/insert.
