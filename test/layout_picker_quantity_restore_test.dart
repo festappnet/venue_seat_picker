@@ -1,10 +1,57 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface.dart';
 
 void main() {
+  testWidgets('first pointer click after hover keeps the map gesture alive', (
+    tester,
+  ) async {
+    final id = newLayoutId();
+    var calls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VenueLayoutPicker(
+            document: VenueLayoutDocument(
+              nodes: [
+                LayoutNode(
+                  id: id,
+                  kind: 'seat',
+                  x: 1200,
+                  y: 800,
+                  width: 100,
+                  height: 100,
+                ),
+              ],
+            ),
+            showSelectionControls: false,
+            seatPresentation: {
+              id: {'tooltip': 'Seat A\nPrice: 100'},
+            },
+            onSelectionRequested: (_, _) async {
+              calls++;
+              return const LayoutSelectionResult(accepted: true);
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(const Offset(400, 300));
+    await tester.pumpAndSettle();
+    expect(find.text('Seat A\nPrice: 100'), findsOneWidget);
+    await mouse.down(const Offset(400, 300));
+    await tester.pump();
+    await mouse.up();
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    await mouse.removePointer();
+  });
   testWidgets(
     'host chrome hides extra footer and retains accessible list action',
     (tester) async {

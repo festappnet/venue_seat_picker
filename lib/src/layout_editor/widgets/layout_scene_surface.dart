@@ -629,6 +629,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   ),
                 ),
               Positioned.fill(
+                key: const ValueKey('layout-map-gesture-surface'),
                 child: ClipRect(
                   child: MouseRegion(
                     onExit: (_) => _hideHoverTooltip(),
