@@ -29,6 +29,7 @@ class LayoutSceneSurface extends StatefulWidget {
     this.resources = const {},
     this.presentation = const {},
     this.selected = const {},
+    this.showSeatSelectionChecks = true,
     this.highlightedIds = const {},
     this.selectableIds,
     this.canvasSelected = false,
@@ -67,6 +68,9 @@ class LayoutSceneSurface extends StatefulWidget {
   final VenueLayoutDocument document;
   final Map<String, dynamic> resources, presentation;
   final Set<String> selected, highlightedIds;
+
+  /// Commercial selections use checked seats; geometry selections use bounds.
+  final bool showSeatSelectionChecks;
   final Set<String>? selectableIds;
   final Set<String> transientForegroundIds, warningIds;
   final List<Map<String, dynamic>> snapGuides;
@@ -417,7 +421,18 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         return (_camera.toScene(p) - offset) / scale + Offset(x, y);
       }
 
-      final presentation = widget.onSelectDown == null
+      final presentation = !widget.showSeatSelectionChecks
+          ? {
+              ...widget.presentation,
+              for (final node in widget.document.nodes)
+                if (node.kind == 'seat' &&
+                    (widget.presentation[node.id] as Map?)?['selected'] == true)
+                  node.id: {
+                    ...widget.presentation[node.id] as Map,
+                    'selected': false,
+                  },
+            }
+          : widget.onSelectDown == null
           ? widget.presentation
           : {
               ...widget.presentation,
@@ -952,7 +967,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                     ];
                                   })(),
                                 for (final node in selectedNodes.where(
-                                  (node) => node.kind != 'seat',
+                                  (node) =>
+                                      node.kind != 'seat' ||
+                                      !widget.showSeatSelectionChecks,
                                 ))
                                   if (node.kind == 'group')
                                     (() {
@@ -1106,7 +1123,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 ),
               if (widget.onHandleStart != null &&
                   selectedNodes.length == 1 &&
-                  selectedNodes.single.kind != 'seat' &&
+                  (selectedNodes.single.kind != 'seat' ||
+                      !widget.showSeatSelectionChecks) &&
                   unlocked(selectedNodes.single)) ...[
                 // Edge targets precede corner targets so corners win overlaps.
                 if (!const [

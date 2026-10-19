@@ -2779,6 +2779,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                       ...widget.seatPresentation,
                                       ...widget.capacityPresentation,
                                     },
+                                    showSeatSelectionChecks:
+                                        !widget.interactionEnabled,
                                     selected: widget.interactionEnabled
                                         ? c.selection
                                         : _viewSelection,

@@ -66,11 +66,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.byTooltip('Resize handle'),
-        findsNothing,
-        reason:
-            'Seat selection must not be covered by furniture transform handles',
+        findsOneWidget,
+        reason: 'Editing a chair uses the normal geometry transform handles',
       );
-      expect(find.byTooltip('Rotate handle'), findsNothing);
+      expect(find.byTooltip('Rotate handle'), findsOneWidget);
       final painter = tester
           .widgetList<CustomPaint>(find.byType(CustomPaint))
           .map((widget) => widget.painter)
@@ -83,9 +82,11 @@ void main() {
               item['kind'] == 'state' &&
               item['stroke'] == '#FFFFFFFF',
         ),
-        isTrue,
-        reason: 'Selected seats retain the original white check marker',
+        isFalse,
+        reason: 'Geometry selection must not render a commercial check marker',
       );
+      expect(painter.selectionHulls, isNotEmpty);
+      expect(surface(tester).showSeatSelectionChecks, isFalse);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
       surface(tester).onDragStart!(at);
       surface(tester).onDragUpdate!(at + const Offset(23, 11));
@@ -117,6 +118,65 @@ void main() {
       }
     },
   );
+
+  testWidgets('mode changes keep commercial checks out of geometry selection', (
+    tester,
+  ) async {
+    final document = tableLayout(
+      shape: 'round',
+      width: 180,
+      height: 180,
+      count: 4,
+    );
+    final seat = document.nodes.firstWhere((node) => node.kind == 'seat');
+    final controller = VenueLayoutController(document)..select({seat.id});
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    Future<void> render({required bool editing}) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(
+              controller: controller,
+              showGallery: false,
+              interactionEnabled: editing,
+              viewSelection: {seat.id},
+              onViewSelectionChanged: (_) {},
+              seatPresentation: {
+                seat.id: {'selected': true},
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    bool hasCheck() => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((widget) => widget.painter)
+        .whereType<LayoutScenePainter>()
+        .where((painter) => painter.selected.contains(seat.id))
+        .any(
+          (painter) => (painter.scene['items'] as List).any(
+            (item) =>
+                item['nodeId'] == seat.id &&
+                item['kind'] == 'state' &&
+                item['stroke'] == '#FFFFFFFF',
+          ),
+        );
+    await render(editing: false);
+    expect(surface(tester).showSeatSelectionChecks, isTrue);
+    expect(hasCheck(), isTrue);
+    expect(find.byTooltip('Resize handle'), findsNothing);
+    await render(editing: true);
+    expect(surface(tester).showSeatSelectionChecks, isFalse);
+    expect(hasCheck(), isFalse);
+    expect(find.byTooltip('Resize handle'), findsOneWidget);
+    await render(editing: false);
+    expect(hasCheck(), isTrue);
+  });
 
   testWidgets('couch seat hit preserves furniture assembly selection', (
     tester,
