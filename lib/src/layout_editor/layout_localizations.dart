@@ -730,7 +730,9 @@ const _cs = <String, String>{
   'Ten 2+2 rows and five rear seats': 'Deset řad 2 + 2 a pět zadních sedadel',
   'Two carriages, four six-seat compartments each':
       'Dva vozy, každý se čtyřmi šestimístnými kupé',
-  'Fit plan': 'Přizpůsobit zobrazení',
+  'Fit plan': 'Celý plánek',
+  'Zoom in': 'Přiblížit',
+  'Zoom out': 'Oddálit',
   'Properties and layers': 'Vlastnosti a vrstvy',
   'Canvas': 'Plátno',
   'Background image': 'Podklad',

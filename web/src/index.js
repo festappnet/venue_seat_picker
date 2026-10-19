@@ -113,7 +113,7 @@ export function mount(container, options = {}) {
   };
   svg.addEventListener('click', handle.click);
   installCamera(handle);
-  installTooltip(handle);
+  installTooltip(handle, options);
   try {update(handle, options);} catch(error) {dispose(handle);throw error;}
   if (typeof ResizeObserver !== 'undefined') {
     handle.resizeObserver = new ResizeObserver(() => {if (!handle.disposed) render(handle, []);});
@@ -252,7 +252,7 @@ function render(handle, dirtyIds) {
   for (const [id, entry] of handle.elements) if (!wanted.has(id)) {entry.node.remove(); handle.elements.delete(id);}
   renderList(handle);
 }
-function installTooltip(handle) {
+function installTooltip(handle, options) {
   const tooltip = document.createElement('aside');
   tooltip.className = 'venue-layout-tooltip';
   tooltip.id = `venue-layout-tooltip-${handle.serial}`;
@@ -265,6 +265,7 @@ function installTooltip(handle) {
     color: '#fff', font: '13px/1.4 system-ui, sans-serif', whiteSpace: 'pre-line',
     overflowWrap: 'anywhere', boxShadow: '0 2px 8px #0004', margin: '0',
   });
+  Object.assign(tooltip.style, options.tooltipStyle || {});
   // Stay inside the viewer's dialog/top layer; never inject HTML from hosts.
   handle.root.append(tooltip);
   handle.tooltip = tooltip;
@@ -285,9 +286,10 @@ function installTooltip(handle) {
     const bounds = tooltip.getBoundingClientRect();
     const width = globalThis.innerWidth || document.documentElement.clientWidth;
     const height = globalThis.innerHeight || document.documentElement.clientHeight;
-    tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 14, width - bounds.width - 8))}px`;
-    tooltip.style.top = `${Math.max(8, event.clientY + 18 + bounds.height > height - 8
-      ? event.clientY - bounds.height - 12 : event.clientY + 18)}px`;
+    const offset = handle.options.tooltipOffset ?? 15;
+    tooltip.style.left = `${Math.max(8, event.clientX + offset + bounds.width > width ? event.clientX - bounds.width - offset : event.clientX + offset)}px`;
+    tooltip.style.top = `${Math.max(8, event.clientY + offset + bounds.height > height
+      ? event.clientY - bounds.height - offset : event.clientY + offset)}px`;
   };
   handle.tooltipKey = event => {if (event.key === 'Escape') handle.hideTooltip();};
   handle.svg.addEventListener('pointermove', handle.hover);

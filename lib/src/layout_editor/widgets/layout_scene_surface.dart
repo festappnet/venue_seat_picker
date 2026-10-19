@@ -46,6 +46,7 @@ class LayoutSceneSurface extends StatefulWidget {
     this.onDragCancel,
     this.pan = true,
     this.showControls = true,
+    this.compactZoomControls = false,
     this.showGrid = false,
     this.gridStep = 8,
     this.gridOrigin = Offset.zero,
@@ -73,6 +74,7 @@ class LayoutSceneSurface extends StatefulWidget {
   final List<Offset> pathPoints;
   final VoidCallback? onDragEnd, onDragCancel;
   final bool pan, showControls, animate;
+  final bool compactZoomControls;
   final bool showGrid;
   final double gridStep;
   final Offset gridOrigin;
@@ -123,7 +125,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   void _showHoverTooltip(Offset global, Offset world) {
     final id = hitTest(widget.document, world.dx, world.dy);
     final presentation = id == null ? null : widget.presentation[id];
-    final message = presentation is Map ? presentation['tooltip'] as String? : null;
+    final message = presentation is Map
+        ? presentation['tooltip'] as String?
+        : null;
     if (message == _hoverMessage) return;
     final box = context.findRenderObject() as RenderBox?;
     setState(() {
@@ -211,7 +215,12 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   void _moveCamera(Offset focal, Offset delta, double scaleChange) {
     final current = _cameraScale(_camera.value);
     final fit = _fitCameraZoom;
-    final factor = (current * scaleChange).clamp(fit * .9, fit * 20) / current;
+    final factor =
+        (current * scaleChange).clamp(
+          fit * (widget.compactZoomControls ? 1 : .9),
+          fit * (widget.compactZoomControls ? 5 : 20),
+        ) /
+        current;
     _camera.value = _boundCamera(
       Matrix4.translationValues(focal.dx, focal.dy, 0)
         ..multiply(Matrix4.diagonal3Values(factor, factor, 1))
@@ -610,12 +619,14 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 Positioned(
                   left: _hoverPosition.dx,
                   top: _hoverPosition.dy,
-                  child: IgnorePointer(child: Tooltip(
-                    key: _hoverTooltipKey,
-                    message: _hoverMessage!,
-                    triggerMode: TooltipTriggerMode.manual,
-                    child: const SizedBox(width: 1, height: 1),
-                  )),
+                  child: IgnorePointer(
+                    child: Tooltip(
+                      key: _hoverTooltipKey,
+                      message: _hoverMessage!,
+                      triggerMode: TooltipTriggerMode.manual,
+                      child: const SizedBox(width: 1, height: 1),
+                    ),
+                  ),
                 ),
               Positioned.fill(
                 child: ClipRect(
@@ -1093,16 +1104,95 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 ),
               if (widget.showControls)
                 Positioned(
-                  right: 8,
-                  bottom: 8,
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => setState(() {
-                      _frame = null;
-                      _camera.value = Matrix4.identity();
-                    }),
-                    icon: const Icon(Icons.fit_screen),
-                    label: const LayoutText('Fit plan'),
-                  ),
+                  right: widget.compactZoomControls ? 16 : 8,
+                  bottom: widget.compactZoomControls ? 16 : 8,
+                  child: widget.compactZoomControls
+                      ? AnimatedBuilder(
+                          animation: _camera,
+                          builder: (context, _) {
+                            final zoom = _cameraScale(_camera.value),
+                                fit = _fitCameraZoom;
+                            Widget button(
+                              String label,
+                              IconData icon,
+                              VoidCallback? action,
+                            ) => SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: IconButton(
+                                tooltip: VenueLayoutStrings.text(
+                                  context,
+                                  label,
+                                ),
+                                iconSize: 20,
+                                padding: EdgeInsets.zero,
+                                onPressed: action,
+                                icon: Icon(icon),
+                              ),
+                            );
+                            return Material(
+                              color: Theme.of(context).colorScheme.surface,
+                              elevation: 4,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    button(
+                                      'Zoom in',
+                                      Icons.add,
+                                      zoom < fit * 5 - .001
+                                          ? () => _moveCamera(
+                                              Offset(
+                                                size.width / 2,
+                                                size.height / 2,
+                                              ),
+                                              Offset.zero,
+                                              1.25,
+                                            )
+                                          : null,
+                                    ),
+                                    button(
+                                      'Zoom out',
+                                      Icons.remove,
+                                      zoom > fit + .001
+                                          ? () => _moveCamera(
+                                              Offset(
+                                                size.width / 2,
+                                                size.height / 2,
+                                              ),
+                                              Offset.zero,
+                                              1 / 1.25,
+                                            )
+                                          : null,
+                                    ),
+                                    const SizedBox(
+                                      width: 44,
+                                      child: Divider(height: 3),
+                                    ),
+                                    button(
+                                      'Fit plan',
+                                      Icons.fullscreen,
+                                      () => setState(() {
+                                        _frame = null;
+                                        _camera.value = Matrix4.identity();
+                                      }),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : FilledButton.tonalIcon(
+                          onPressed: () => setState(() {
+                            _frame = null;
+                            _camera.value = Matrix4.identity();
+                          }),
+                          icon: const Icon(Icons.fit_screen),
+                          label: const LayoutText('Fit plan'),
+                        ),
                 ),
               if (widget.showControls && issues.isNotEmpty)
                 Positioned(

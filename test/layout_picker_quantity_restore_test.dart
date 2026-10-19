@@ -23,6 +23,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Accessible seat list'), findsNothing);
       expect(find.text('0 seats selected'), findsNothing);
+      expect(find.byTooltip('Zoom in'), findsOneWidget);
+      expect(find.byTooltip('Zoom out'), findsOneWidget);
+      expect(find.byTooltip('Fit plan'), findsOneWidget);
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Fit plan'));
+      await tester.pumpAndSettle();
       final semantics = tester.widgetList<Semantics>(find.byType(Semantics));
       expect(
         semantics.any(

@@ -341,6 +341,7 @@ class _VenueLayoutPickerState extends State<VenueLayoutPicker> {
         Expanded(
           child: LayoutSceneSurface(
             document: widget.document,
+            compactZoomControls: !widget.showSelectionControls,
             resources: widget.resources,
             presentation: {
               ...widget.seatPresentation,

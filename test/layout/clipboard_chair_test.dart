@@ -69,7 +69,7 @@ void main() {
     'paste is bounded and invalid/read-only clipboard cannot mutate the draft',
     () async {
       final original =
-          tableLayout(shape: 'roundedRect', count: 6, x: 700, y: 450).copyWith(
+          tableLayout(shape: 'roundedRect', count: 6, x: 650, y: 450).copyWith(
             canvas: {
               'x': 0,
               'y': 0,
@@ -79,6 +79,10 @@ void main() {
             },
           );
       final c = VenueLayoutController(original);
+      expect(
+        c.placementIssues.where((i) => i.code == 'outside_canvas'),
+        isEmpty,
+      );
       addTearDown(c.dispose);
       c.select({original.nodes.firstWhere((n) => n.kind == 'table').id});
       await c.copySelectionToClipboard();
