@@ -114,12 +114,41 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   }
 
   final _camera = TransformationController();
-  String? _hoverMessage;
+  String? _hoverMessage, _hoverNodeId;
   Offset _hoverPosition = Offset.zero;
   GlobalKey<TooltipState> _hoverTooltipKey = GlobalKey<TooltipState>();
 
-  void _hideHoverTooltip() {
-    if (_hoverMessage != null) setState(() => _hoverMessage = null);
+  MouseCursor get _pickerCursor {
+    final id = _hoverNodeId;
+    if (id != null &&
+        widget.document.nodes.any(
+          (n) => n.id == id && (n.kind == 'seat' || n.kind == 'capacityArea'),
+        )) {
+      final raw = widget.presentation[id];
+      final p = raw is Map ? raw : const {};
+      final unavailable =
+          p['selectable'] == false ||
+          p['pending'] == true ||
+          const [
+            'occupied',
+            'unavailable',
+            'disabled',
+            'reserved',
+            'blocked',
+            'sold',
+          ].contains(p['status']);
+      return unavailable ? SystemMouseCursors.basic : SystemMouseCursors.click;
+    }
+    return widget.pan ? SystemMouseCursors.grab : SystemMouseCursors.basic;
+  }
+
+  void _hideHoverTooltip({bool clearNode = false}) {
+    if (_hoverMessage != null || (clearNode && _hoverNodeId != null)) {
+      setState(() {
+        _hoverMessage = null;
+        if (clearNode) _hoverNodeId = null;
+      });
+    }
   }
 
   void _showHoverTooltip(Offset global, Offset world) {
@@ -128,10 +157,11 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
     final message = presentation is Map
         ? presentation['tooltip'] as String?
         : null;
-    if (message == _hoverMessage) return;
+    if (message == _hoverMessage && id == _hoverNodeId) return;
     final box = context.findRenderObject() as RenderBox?;
     setState(() {
       _hoverMessage = message;
+      _hoverNodeId = id;
       _hoverPosition = box?.globalToLocal(global) ?? Offset.zero;
       _hoverTooltipKey = GlobalKey<TooltipState>();
     });
@@ -632,8 +662,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                 key: const ValueKey('layout-map-gesture-surface'),
                 child: ClipRect(
                   child: MouseRegion(
-                    onExit: (_) => _hideHoverTooltip(),
-                    cursor: widget.onPointTap != null
+                    onExit: (_) => _hideHoverTooltip(clearNode: true),
+                    cursor: widget.compactZoomControls
+                        ? _pickerCursor
+                        : widget.onPointTap != null
                         ? SystemMouseCursors.precise
                         : widget.pan
                         ? SystemMouseCursors.grab

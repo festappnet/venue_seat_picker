@@ -40,11 +40,19 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final region = find
+        .descendant(
+          of: find.byKey(const ValueKey('layout-map-gesture-surface')),
+          matching: find.byType(MouseRegion),
+        )
+        .first;
+    expect(tester.widget<MouseRegion>(region).cursor, SystemMouseCursors.grab);
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     await mouse.moveTo(const Offset(400, 300));
     await tester.pumpAndSettle();
     expect(find.text('Seat A\nPrice: 100'), findsOneWidget);
+    expect(tester.widget<MouseRegion>(region).cursor, SystemMouseCursors.click);
     await mouse.down(const Offset(400, 300));
     await tester.pump();
     await mouse.up();
