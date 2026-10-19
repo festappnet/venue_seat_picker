@@ -111,6 +111,38 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         context?.findAncestorStateOfType<EditableTextState>() != null;
   }
 
+  // The canvas owns live geometry previews. Keep unrelated controls mounted
+  // during a pointer gesture and refresh their values at commit/cancel.
+  final Map<String, (Object, Widget)> _gesturePanels = {};
+
+  Widget _gesturePanel(String name, Widget Function() build) {
+    final ids = c.selection.toList()..sort();
+    final key = (
+      widget,
+      _tool,
+      _librarySearch,
+      _canvasSelected,
+      _cornerPivot,
+      _copiedAppearance,
+      c.readOnly,
+      c.saving,
+      ids.join(','),
+    );
+    final previous = _gesturePanels[name];
+    if (c.gestureActive && previous != null && previous.$1 == key) {
+      return previous.$2;
+    }
+    final child = build();
+    _gesturePanels[name] = (key, child);
+    return child;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _gesturePanels.clear();
+  }
+
   VenueLayoutController get c => widget.controller;
   bool get _canEdit => widget.interactionEnabled && !c.readOnly && !c.saving;
   @override
@@ -157,7 +189,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       if (parent.kind == 'group' &&
           parent.properties['assembly'] == null &&
           c.document.nodes.any(
-            (sibling) => sibling.kind == 'table' && sibling.parentId == parent.id,
+            (sibling) =>
+                sibling.kind == 'table' && sibling.parentId == parent.id,
           )) {
         return id;
       }
@@ -1463,7 +1496,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     );
   }
 
-  Widget _palette() {
+  Widget _palette() => _gesturePanel('palette', _buildPalette);
+
+  Widget _buildPalette() {
     final seating = documentSeating(c.document).properties;
     if (!sameLayoutValue(_previewSeating, seating)) {
       _previewSeating = seating;
@@ -2179,7 +2214,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     }
   }
 
-  Widget _inspector() {
+  Widget _inspector() => _gesturePanel('inspector', _buildInspector);
+
+  Widget _buildInspector() {
     if (!widget.interactionEnabled) {
       final selected = c.document.nodes.where(
         (n) => c.selection.contains(n.id),
