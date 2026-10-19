@@ -2,8 +2,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_inspector.dart';
+import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface.dart';
 
 void main() {
+  testWidgets(
+    'canvas drag retains the inspector across host rebuilds and changes only canvas bounds',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final original = tableLayout(shape: 'rect', count: 8);
+      final c = VenueLayoutController(original);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: c,
+              builder: (_, _) =>
+                  VenueLayoutEditor(controller: c, showGallery: false),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('edit-canvas')));
+      await tester.pumpAndSettle();
+      final inspector = tester.widget<LayoutInspector>(
+        find.byType(LayoutInspector),
+      );
+      LayoutSceneSurface surface() =>
+          tester.widget(find.byType(LayoutSceneSurface));
+      final right =
+          (original.canvas['x'] as num) + (original.canvas['width'] as num);
+      surface().onHandleStart!(
+        'Canvas resize e',
+        Offset(right.toDouble(), 300),
+      );
+      for (var step = 1; step <= 5; step++) {
+        surface().onDragUpdate!(Offset(right + step * 20.0, 300));
+        await tester.pump();
+        expect(
+          tester.widget<LayoutInspector>(find.byType(LayoutInspector)),
+          same(inspector),
+          reason:
+              'A host rebuild must not invalidate unchanged panels on every pointer event',
+        );
+        for (var i = 0; i < original.nodes.length; i++) {
+          expect(c.document.nodes[i], same(original.nodes[i]));
+        }
+      }
+      surface().onDragEnd!();
+      await tester.pump();
+      expect(
+        c.document.canvas['width'],
+        (original.canvas['width'] as num) + 100,
+      );
+      c.undo();
+      expect(c.document, same(original));
+      expect(c.canUndo, isFalse);
+    },
+  );
+
   testWidgets(
     'canvas settings expand a canvas covered by a full-size rectangle',
     (tester) async {

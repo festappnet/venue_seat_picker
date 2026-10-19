@@ -21,6 +21,8 @@ class LayoutSceneCache {
     }
     final previous = _document;
     final documentChanged = !identical(previous, document);
+    final canvasChanged =
+        previous != null && !sameLayoutValue(previous.canvas, document.canvas);
     final nextNodes = documentChanged
         ? {for (final node in document.nodes) node.id: node}
         : _nodes;
@@ -30,7 +32,6 @@ class LayoutSceneCache {
         !identical(_resources, resources) ||
         (documentChanged &&
             (previous.symbolSetVersion != document.symbolSetVersion ||
-                !sameLayoutValue(previous.canvas, document.canvas) ||
                 !sameLayoutValue(previous.background, document.background) ||
                 !sameLayoutValue(previous.appearance, document.appearance) ||
                 !sameLayoutValue(
@@ -86,20 +87,29 @@ class LayoutSceneCache {
           (_children[node.parentId!] ??= []).add(node.id);
         }
       }
-    } else if (affected.isNotEmpty) {
+    } else if (affected.isNotEmpty || canvasChanged) {
       final patch = compileSceneNodes(
         document,
         affected,
+        includeCanvas: canvasChanged,
         resources: resources,
         presentation: presentation,
       );
+      bool canvasItem(dynamic item) =>
+          item['kind'] == 'floor' || item['id'] == 'background';
+      final canvasItems = <dynamic>[];
       final replacements = <String, List<dynamic>>{};
       for (final item in patch['items'] as List) {
+        if (canvasChanged && canvasItem(item)) {
+          canvasItems.add(item);
+          continue;
+        }
         (replacements['${item['nodeId'] ?? item['id']}'] ??= []).add(item);
       }
       final inserted = <String>{};
-      final items = <dynamic>[];
+      final items = <dynamic>[...canvasItems];
       for (final item in _scene!['items'] as List) {
+        if (canvasChanged && canvasItem(item)) continue;
         final id = '${item['nodeId'] ?? item['id']}';
         if (affected.contains(id)) {
           if (inserted.add(id)) items.addAll(replacements[id] ?? const []);

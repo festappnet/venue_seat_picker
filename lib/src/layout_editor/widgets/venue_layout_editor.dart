@@ -90,6 +90,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   String? _gestureTool;
   bool _libraryOpen = false;
   Map<String, dynamic>? _previewSeating;
+  Map<String, double>? _canvasResizeBounds;
   final Map<String, VenueLayoutDocument> _previews = {};
   final Map<String, VenueLayoutDocument> _themedPreviews = {};
   String _librarySearch = '';
@@ -141,7 +142,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   Widget _gesturePanel(String name, Widget Function() build) {
     final ids = c.selection.toList()..sort();
     final key = (
-      widget,
+      widget.controller,
+      widget.interactionEnabled,
+      widget.showGallery,
       _tool,
       _librarySearch,
       _canvasSelected,
@@ -847,7 +850,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       var top = (canvas['y'] as num).toDouble();
       var right = left + (canvas['width'] as num).toDouble();
       var bottom = top + (canvas['height'] as num).toDouble();
-      final content = start.nodes.isEmpty ? null : documentBounds(start);
+      final content = _canvasResizeBounds;
       final minimum = layoutLimits['canvasMin']!.toDouble();
       if (direction.contains('w')) {
         left = math.min(left + delta.dx, right - minimum);
@@ -875,11 +878,17 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       if (direction.contains('e')) right = right.ceilToDouble();
       if (direction.contains('n')) top = top.floorToDouble();
       if (direction.contains('s')) bottom = bottom.ceilToDouble();
+      // The gesture bounds already clamp against the unchanged content.
+      // Keep the same object nodes; controller guards still validate the draft.
       c.preview(
-        resizeCanvas(
-          start.copyWith(canvas: {...canvas, 'x': left, 'y': top}),
-          right - left,
-          bottom - top,
+        start.copyWith(
+          canvas: {
+            ...canvas,
+            'x': left,
+            'y': top,
+            'width': right - left,
+            'height': bottom - top,
+          },
         ),
       );
     } else if (gesture == 'Paint surface') {
@@ -1970,6 +1979,10 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     _gestureTool = mode;
     _startDocument = c.document;
     _startPointer = point;
+    _canvasResizeBounds =
+        mode.startsWith('Canvas resize ') && c.document.nodes.isNotEmpty
+        ? documentBounds(c.document)
+        : null;
     c.beginGesture();
     if (mode.startsWith('Insert vertex ') && c.selection.length == 1) {
       final node = c.document.nodes.firstWhere(
@@ -2547,7 +2560,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   ),
                                   icon: const Icon(Icons.tune),
                                 ),
-                              if (widget.interactionEnabled || c.readOnly || c.dirty)
+                              if (widget.interactionEnabled ||
+                                  c.readOnly ||
+                                  c.dirty)
                                 LayoutText(
                                   c.dirty
                                       ? 'Unsaved changes'

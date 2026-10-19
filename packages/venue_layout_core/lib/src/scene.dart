@@ -241,6 +241,7 @@ ScenePath _centerLabelVertically(ScenePath path) {
 Map<String, dynamic> compileSceneNodes(
   VenueLayoutDocument document,
   Set<String> nodeIds, {
+  bool includeCanvas = false,
   Map<String, dynamic> resources = const {},
   Map<String, dynamic> presentation = const {},
 }) => _compileScene(
@@ -248,6 +249,7 @@ Map<String, dynamic> compileSceneNodes(
   resources: resources,
   presentation: presentation,
   nodeIds: nodeIds,
+  includeCanvas: includeCanvas,
 );
 Map<String, dynamic> compileScene(
   VenueLayoutDocument document, {
@@ -259,6 +261,7 @@ Map<String, dynamic> _compileScene(
   Map<String, dynamic> resources = const {},
   Map<String, dynamic> presentation = const {},
   Set<String>? nodeIds,
+  bool includeCanvas = false,
 }) {
   final cached = _sceneGeometryCache[document] ??= _SceneGeometry(document);
   final issues = cached.issues.toList(), items = <Map<String, dynamic>>[];
@@ -270,11 +273,11 @@ Map<String, dynamic> _compileScene(
       'issues': issues,
     };
   final matrices = cached.matrices;
-  if (nodeIds == null) {
+  if (nodeIds == null || includeCanvas) {
     final floor = floorSceneItem(document);
     if (floor != null) items.add(floor);
   }
-  if (nodeIds == null && document.background != null) {
+  if ((nodeIds == null || includeCanvas) && document.background != null) {
     final b = document.background!;
     final rot = (b['rotation'] as num? ?? 0) * pi / 180,
         s = (b['scale'] as num? ?? 1).toDouble();
@@ -744,7 +747,8 @@ Map<String, dynamic> _compileScene(
         'label': text,
       });
     }
-    if (selected || pending ||
+    if (selected ||
+        pending ||
         (status == 'occupied' && state['stateMarker'] != 'none')) {
       final markerWidth =
           n.width *

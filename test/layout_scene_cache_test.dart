@@ -3,6 +3,44 @@ import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/layout_scene_cache.dart';
 
 void main() {
+  test(
+    'canvas resizing retains object paths and only rebuilds canvas decoration',
+    () {
+      final doc = tableLayout(shape: 'roundedRect').copyWith(
+        canvas: {
+          'x': 0,
+          'y': 0,
+          'width': 2400,
+          'height': 1800,
+          'fill': '#FFFFFFFF',
+          'floorStyle': 'wood',
+        },
+      );
+      final cache = LayoutSceneCache();
+      final first = cache.update(doc);
+      final items = {
+        for (final item in first['items'] as List) item['id']: item,
+      };
+      final resized = resizeCanvas(doc, 2800, 2100);
+      final next = cache.update(resized);
+      expect(next, compileScene(resized));
+      for (final item in next['items'] as List) {
+        if (item['kind'] != 'floor' && item['id'] != 'background') {
+          expect(
+            item,
+            same(items[item['id']]),
+            reason:
+                'Dragging a canvas edge must not recompile unchanged table/seat paths',
+          );
+        }
+      }
+      expect(
+        (next['items'] as List).firstWhere((item) => item['kind'] == 'floor'),
+        isNot(same(items['canvas:floor'])),
+      );
+    },
+  );
+
   VenueLayoutDocument fixture() {
     final table = tableLayout(shape: 'roundedRect');
     return table.copyWith(

@@ -438,13 +438,11 @@ class VenueLayoutController extends ChangeNotifier {
         final priorMatrices = worldMatrices(_document);
         final nextMatrices = worldMatrices(next);
         final priorNodes = {for (final node in _document.nodes) node.id: node};
-        final canvasChanged = !mapEquals(_document.canvas, next.canvas);
         final movedTables = next.nodes
             .where((node) {
               if (node.kind != 'table') return false;
               final prior = priorNodes[node.id];
               return prior == null ||
-                  canvasChanged ||
                   prior.width != node.width ||
                   prior.height != node.height ||
                   !listEquals(priorMatrices[node.id], nextMatrices[node.id]);
