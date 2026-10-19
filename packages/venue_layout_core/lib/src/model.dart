@@ -336,50 +336,68 @@ class VenueLayoutDocument {
     return _toJsonUnchecked();
   }
 
-  Map<String, dynamic> _toJsonUnchecked() => _canonicalMap({
-    'schemaVersion': 1,
-    'symbolSetVersion': symbolSetVersion,
-    'canvas': canvas,
-    'defaultTextStyle': defaultTextStyle,
-    if (appearance.isNotEmpty) 'appearance': appearance,
-    'nodes': (nodes.toList()..sort((a, b) => a.id.compareTo(b.id)))
-        .map((n) => n.toJson())
-        .toList(),
-    'sections': _sortedRecords(sections),
-    'selectionUnits': _sortedRecords(
-      selectionUnits
-          .map(
-            (u) => {
-              ...u,
-              if (u['nodeIds'] is List)
-                'nodeIds': (List<dynamic>.from(u['nodeIds'])
-                  ..sort((a, b) => a.toString().compareTo(b.toString()))),
-            },
-          )
-          .toList(),
-    ),
-    'attachments': _sortedRecords(attachments, key: 'seatId'),
-    'generators': _sortedRecords(generators),
-    'background': background,
-    'presets': _sortedRecords(
-      presets
-          .map(
-            (p) => {
-              ...p,
-              'document': VenueLayoutDocument.fromJson(
-                Map<String, dynamic>.from(p['document']),
-              ).toJson(),
-            },
-          )
-          .toList(),
-    ),
-  });
+  Map<String, dynamic> _toJsonUnchecked({bool includeNodes = true}) =>
+      _canonicalMap({
+        'schemaVersion': 1,
+        'symbolSetVersion': symbolSetVersion,
+        'canvas': canvas,
+        'defaultTextStyle': defaultTextStyle,
+        if (appearance.isNotEmpty) 'appearance': appearance,
+        'nodes':
+            ((includeNodes ? nodes.toList() : <LayoutNode>[])
+                  ..sort((a, b) => a.id.compareTo(b.id)))
+                .map((n) => n.toJson())
+                .toList(),
+        'sections': _sortedRecords(sections),
+        'selectionUnits': _sortedRecords(
+          selectionUnits
+              .map(
+                (u) => {
+                  ...u,
+                  if (u['nodeIds'] is List)
+                    'nodeIds': (List<dynamic>.from(u['nodeIds'])
+                      ..sort((a, b) => a.toString().compareTo(b.toString()))),
+                },
+              )
+              .toList(),
+        ),
+        'attachments': _sortedRecords(attachments, key: 'seatId'),
+        'generators': _sortedRecords(generators),
+        'background': background,
+        'presets': _sortedRecords(
+          presets
+              .map(
+                (p) => {
+                  ...p,
+                  'document': VenueLayoutDocument.fromJson(
+                    Map<String, dynamic>.from(p['document']),
+                  ).toJson(),
+                },
+              )
+              .toList(),
+        ),
+      });
 }
 
 final _uuid = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
 );
 final layoutColorPattern = RegExp(r'^#[0-9a-fA-F]{8}$');
+// Layout nodes are deeply immutable. Weak keys avoid retaining old drafts;
+// canvas-only snapshots can reuse the exact encoded byte count of each node.
+final _encodedNodeBytes = Expando<int>();
+int _documentPayloadBytes(VenueLayoutDocument document) {
+  final envelope = document._toJsonUnchecked(includeNodes: false);
+  var bytes = utf8.encode(jsonEncode(envelope)).length;
+  for (final node in document.nodes) {
+    bytes += _encodedNodeBytes[node] ??= utf8
+        .encode(jsonEncode(node.toJson()))
+        .length;
+  }
+  // The empty nodes array already contributes its brackets to the envelope.
+  return bytes + (document.nodes.isEmpty ? 0 : document.nodes.length - 1);
+}
+
 final _validationCache = Expando<List<LayoutIssue>>();
 List<LayoutIssue> validateDocument(VenueLayoutDocument d) =>
     _validationCache[d] ??= List<LayoutIssue>.unmodifiable(
@@ -642,7 +660,7 @@ List<LayoutIssue> _validateDocumentUncached(VenueLayoutDocument d) {
             'non_json_value',
           ].contains(i.reason),
         ) &&
-        utf8.encode(jsonEncode(d._toJsonUnchecked())).length > layoutMaxBytes)
+        _documentPayloadBytes(d) > layoutMaxBytes)
       issue('payload_limit', 'document');
   } catch (_) {
     issue('non_json_value', 'document');

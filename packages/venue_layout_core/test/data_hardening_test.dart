@@ -373,6 +373,41 @@ void main() {
       jsonEncode(d.copyWith(nodes: [b, a], sections: [u2, u1]).toJson()),
     );
   });
+  test('payload bytes remain exact across Unicode, node reuse and edits', () {
+    final text = LayoutNode(
+      id: newLayoutId(),
+      kind: 'text',
+      properties: {'text': 'ž🙂\n"\\'},
+    );
+    final seat = LayoutNode(id: newLayoutId(), kind: 'seat');
+    final base = VenueLayoutDocument(nodes: [text, seat]);
+    final bytes = utf8.encode(jsonEncode(base.toJson())).length;
+    final padding = 'x' * (layoutMaxBytes - bytes);
+    final boundary = text.copyWith(
+      properties: {'text': '${text.properties['text']}$padding'},
+    );
+    final exact = base.copyWith(nodes: [boundary, seat]);
+    expect(reasons(exact), isNot(contains('payload_limit')));
+    expect(
+      reasons(exact.copyWith(nodes: [seat, boundary])),
+      isNot(contains('payload_limit')),
+    );
+    expect(
+      reasons(exact.copyWith(canvas: {...exact.canvas, 'width': 10000})),
+      contains('payload_limit'),
+    );
+    final larger = boundary.copyWith(
+      properties: {'text': '${boundary.properties['text']}x'},
+    );
+    expect(
+      reasons(exact.copyWith(nodes: [larger, seat])),
+      contains('payload_limit'),
+    );
+    expect(
+      reasons(exact.copyWith(nodes: [text, seat])),
+      isNot(contains('payload_limit')),
+    );
+  });
   test('node seat depth and byte budgets are enforced without truncation', () {
     final tooMany = VenueLayoutDocument(
       nodes: List.generate(
