@@ -1,0 +1,37 @@
+{
+  "name": "@festapp/venue-layout",
+  "version": "0.2.0",
+  "description": "Venue layout SVG viewer using a shared Dart geometry kernel",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./kernel": {
+      "types": "./src/kernel.d.ts",
+      "default": "./dist/venue_layout_kernel.js"
+    }
+  },
+  "files": [
+    "src",
+    "dist/venue_layout_kernel.js",
+    "dist/demo.js",
+    "dist/manifest.json",
+    "demo",
+    "README.md",
+    "LICENSE",
+    "assets"
+  ],
+  "scripts": {
+    "build": "../tool/build_web.sh",
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/festappnet/venue_seat_picker",
+  "devDependencies": {
+    "playwright": "^1.55.0",
+    "esbuild": "^0.25.0"
+  }
+}

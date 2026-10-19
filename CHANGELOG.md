@@ -1,3 +1,10 @@
+## 0.2.0 (unreleased)
+
+- Add a backend-independent object layout document, controller and shared Dart/JS scene runtime alongside the existing grid API.
+- Add an editor, viewer, async picker, public nine-template library and licensed local resource fixtures.
+- Add standalone Flutter/JS demos, local export/import/autosave, reproducible kit tooling and explicit simulated host boundaries.
+- Document schema 1 as a separate contract from VenueSeatDocument. Existing grid consumers remain supported; no automatic migration is performed.
+
 ## 0.1.2
 
 - Keep zoomed plans visible by default in the viewer, picker and editor, center

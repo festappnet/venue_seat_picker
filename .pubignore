@@ -11,3 +11,15 @@ example/pubspec.lock
 pubspec.lock
 CONTRIBUTING.md
 SECURITY.md
+
+pubspec_overrides.yaml
+example/pubspec_overrides.yaml
+packages/
+web/node_modules/
+.fvm/
+**/__pycache__/
+build-demo-*.log
+.fvmrc
+
+# JS ships as its own npm artifact, never inside the Flutter wrapper.
+/web/

@@ -7,12 +7,16 @@ environment:
 
 dependencies:
   file_selector: ^1.0.4
+  crypto: ^3.0.6
+  web: ^1.1.1
   flutter:
     sdk: flutter
   venue_seat_picker:
     path: ..
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
 flutter:

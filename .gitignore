@@ -6,3 +6,15 @@ example/.dart_tool/
 example/build/
 example/pubspec.lock
 
+
+web/node_modules/
+pubspec_overrides.yaml
+example/pubspec_overrides.yaml
+packages/venue_layout_core/.dart_tool/
+packages/venue_layout_core/pubspec.lock
+web/dist/
+.fvm/
+**/__pycache__/
+build-demo-*.log
+web/assets/
+web/demo/seed.js

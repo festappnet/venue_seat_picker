@@ -1,0 +1,23 @@
+{
+  "protocol": 1,
+  "fixtures": [
+    {
+      "id": "fixture:sans",
+      "file": "Roboto.ttf",
+      "sha256": "7f3ec5073a282c666c9a0063573345841229caf50ed34d33017e20d441bf5caf",
+      "license": "Roboto-OFL.txt",
+      "family": "Roboto",
+      "source": "Google Fonts fixture; full copyright in embedded font name table and adjacent license",
+      "glyphCount": 352
+    },
+    {
+      "id": "fixture:serif",
+      "file": "Roboto-Slab.ttf",
+      "sha256": "0cde4b95c95fe0bd4090d396d48c3db57ff1d666fcb20907ecb713816e630e30",
+      "license": "Roboto-Slab-LICENSE.txt",
+      "family": "Roboto Slab",
+      "source": "Google Fonts fixture; full copyright in embedded font name table and adjacent license",
+      "glyphCount": 369
+    }
+  ]
+}

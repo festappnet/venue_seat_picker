@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const [kernelPath, fixturePath] = process.argv.slice(2);
+if (!kernelPath || !fixturePath) throw new Error('Usage: node parity_test.mjs kernel.js fixture.json');
+const scope = {console, setTimeout, clearTimeout}; scope.self = scope; scope.window = scope;
+vm.createContext(scope); vm.runInContext(fs.readFileSync(kernelPath, 'utf8'), scope);
+const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8')), kernel = scope.VenueLayoutKernel;
+assert.equal(kernel.protocol, 1);
+const document = JSON.stringify(fixture.document);
+assert.deepEqual(JSON.parse(kernel.decode(document)), fixture.document);
+assert.deepEqual(JSON.parse(kernel.validate(document)), []);
+assert.deepEqual(JSON.parse(kernel.compileScene(document, JSON.stringify(fixture.resources), JSON.stringify(fixture.presentation))), fixture.scene);
+assert.equal(kernel.hitTest(document, ...fixture.hitPoint), fixture.expectedHit);
+assert.deepEqual(JSON.parse(kernel.interpolate(document, JSON.stringify(fixture.interpolated), 1)), fixture.interpolated);
+console.log('Dart VM / compiled JS public wrapper: exact scene, glyph, hit and motion parity passed');
