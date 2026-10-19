@@ -1874,7 +1874,15 @@ VenueLayoutDocument resizeCanvas(
           (d.canvas['y'] as num).toDouble() +
           (center ? ((d.canvas['height'] as num) - height) / 2 : 0),
       b = documentBounds(d);
-  if (d.nodes.isNotEmpty &&
+  // An imported layout may already extend beyond its original boundary.
+  // Expanding that boundary cannot clip any previously visible content.
+  final containsPreviousCanvas =
+      x <= (d.canvas['x'] as num) &&
+      y <= (d.canvas['y'] as num) &&
+      x + width >= (d.canvas['x'] as num) + (d.canvas['width'] as num) &&
+      y + height >= (d.canvas['y'] as num) + (d.canvas['height'] as num);
+  if (!containsPreviousCanvas &&
+      d.nodes.isNotEmpty &&
       (b['x']! < x ||
           b['y']! < y ||
           b['x']! + b['width']! > x + width ||

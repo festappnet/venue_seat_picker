@@ -228,6 +228,34 @@ void main() {
     expect(fitCanvas(d).canvas['x'], lessThan(-100));
     expect(() => resizeCanvas(d, 64, 64), throwsStateError);
   });
+  test(
+    'canvas expansion preserves imports with existing boundary overflow',
+    () {
+      final node = LayoutNode(
+        id: newLayoutId(),
+        kind: 'shape',
+        x: 0,
+        y: 200,
+        width: 2,
+        height: 400,
+      );
+      final d = VenueLayoutDocument.empty().copyWith(
+        canvas: {
+          'x': 0,
+          'y': 0,
+          'width': 400,
+          'height': 400,
+          'fill': '#FFFFFFFF',
+        },
+        nodes: [node],
+      );
+      final expanded = resizeCanvas(d, 600, 400);
+      expect(expanded.canvas['width'], 600);
+      expect(expanded.nodes, d.nodes);
+      expect(resizeCanvas(d, 600, 600, center: true).canvas['x'], -100);
+      expect(() => resizeCanvas(d, 600, 300), throwsStateError);
+    },
+  );
   test('locks atomic group and ungroup retain transform', () {
     final d = tableLayout(shape: 'ellipse', count: 4),
         locked = d.copyWith(
