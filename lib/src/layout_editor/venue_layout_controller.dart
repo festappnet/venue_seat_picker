@@ -368,7 +368,34 @@ class VenueLayoutController extends ChangeNotifier {
                 .map((n) => n.id)
                 .toList(),
           ));
-      if (!onlyUnlock && !onlyLayerReindex) {
+      // A plan typography change freezes a locked label's current effective
+      // style as local metadata. It must preserve every other property and
+      // the rendered typography; this never authorizes a locked content edit.
+      const typography = {'fontId', 'size', 'bold', 'italic'};
+      Map<String, dynamic> withoutTypography(LayoutNode n) {
+        final props = {...n.properties};
+        for (final key in typography) {
+          props.remove(key);
+        }
+        final overrides = (props['appearanceOverrides'] as List? ?? const [])
+            .where((key) => !typography.contains(key))
+            .toList();
+        props.remove('appearanceOverrides');
+        if (overrides.isNotEmpty) props['appearanceOverrides'] = overrides;
+        return props;
+      }
+      dynamic textValue(VenueLayoutDocument doc, LayoutNode n, String key) =>
+          effectiveNodeProperties(doc, n)[key] ?? doc.defaultTextStyle[key] ??
+          (key == 'bold' || key == 'italic' ? false : null);
+      final onlyTypographyFreeze = unlocked != null &&
+          !sameLayoutValue(_document.appearance, next.appearance) &&
+          sameLayoutNode(
+            node.copyWith(properties: withoutTypography(node)),
+            unlocked.copyWith(properties: withoutTypography(unlocked)),
+          ) &&
+          typography.every((key) =>
+              textValue(_document, node, key) == textValue(next, unlocked, key));
+      if (!onlyUnlock && !onlyLayerReindex && !onlyTypographyFreeze) {
         error = 'Locked object: ${node.label.isEmpty ? node.kind : node.label}';
         notifyListeners();
         return false;

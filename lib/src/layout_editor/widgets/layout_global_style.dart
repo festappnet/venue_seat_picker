@@ -11,10 +11,14 @@ import 'layout_floor_style.dart';
 
 Future<void> showLayoutGlobalStyleDialog(
   BuildContext context,
-  VenueLayoutController controller,
-) => showDialog<void>(
+  VenueLayoutController controller, {
+  Widget Function(BuildContext, String)? globalFontPickerBuilder,
+}) => showDialog<void>(
   context: context,
-  builder: (_) => _GlobalStyleDialog(controller: controller),
+  builder: (_) => _GlobalStyleDialog(
+    controller: controller,
+    globalFontPickerBuilder: globalFontPickerBuilder,
+  ),
 );
 
 const _scopes = {
@@ -27,7 +31,11 @@ const _scopes = {
 };
 
 class _GlobalStyleDialog extends StatefulWidget {
-  const _GlobalStyleDialog({required this.controller});
+  const _GlobalStyleDialog({
+    required this.controller,
+    this.globalFontPickerBuilder,
+  });
+  final Widget Function(BuildContext, String)? globalFontPickerBuilder;
   final VenueLayoutController controller;
   @override
   State<_GlobalStyleDialog> createState() => _GlobalStyleDialogState();
@@ -246,6 +254,7 @@ class _GlobalStyleDialogState extends State<_GlobalStyleDialog> {
     listenable: c,
     builder: (context, _) {
       final properties = {
+        ...c.document.defaultTextStyle,
         ...effectiveNodeProperties(c.document, _samples[_kind]!),
         ..._appearanceDraft,
       };
@@ -426,6 +435,69 @@ class _GlobalStyleDialogState extends State<_GlobalStyleDialog> {
                       appearance: {_kind: _appearanceDraft},
                     ),
                     const SizedBox(height: 16),
+                    if (const {
+                      'table',
+                      'shape',
+                      'capacityArea',
+                      'text',
+                    }.contains(_kind)) ...[
+                      widget.globalFontPickerBuilder?.call(context, _kind) ??
+                          EditorFontPicker(
+                            value: properties['fontId'] as String?,
+                            label: 'Font',
+                            enabled: _enabled,
+                            translate: tr,
+                            options: [
+                              for (final entry
+                                  in (c.resources['fonts'] as Map? ?? {})
+                                      .entries)
+                                EditorFontOption(
+                                  id: '${entry.key}',
+                                  family: '${entry.value['family'] ?? 'Font'}',
+                                ),
+                            ],
+                            onSelected: (id) async {
+                              if (id != null) {
+                                _apply({'fontId': id});
+                                return;
+                              }
+                              _apply({'fontId': null});
+                            },
+                          ),
+                      const SizedBox(height: 12),
+                      _GlobalStyleNumber(
+                        key: ValueKey('$_kind-font-size'),
+                        label: 'Font size',
+                        value: (properties['size'] as num? ?? 24).toDouble(),
+                        min: layoutLimits['fontSizeMin']!.toDouble(),
+                        max: layoutLimits['fontSizeMax']!.toDouble(),
+                        sliderMax: 96,
+                        step: .1,
+                        enabled: _enabled,
+                        preview: (value) =>
+                            setState(() => _appearanceDraft['size'] = value),
+                        save: (value) => _apply({'size': value}),
+                      ),
+                      Row(
+                        children: [
+                          for (final entry in const [
+                            ('bold', 'Bold', Icons.format_bold),
+                            ('italic', 'Italic', Icons.format_italic),
+                          ])
+                            IconButton.filledTonal(
+                              tooltip: tr(entry.$2),
+                              isSelected: properties[entry.$1] == true,
+                              icon: Icon(entry.$3),
+                              onPressed: _enabled
+                                  ? () => _apply({
+                                      entry.$1: properties[entry.$1] != true,
+                                    })
+                                  : null,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     if (_kind == 'seat') ...[
                       Row(
                         children: [
@@ -647,7 +719,7 @@ class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
   @override
   Widget build(BuildContext context) {
     final field = EditorNumberScroll(
-      enabled: widget.enabled,
+      enabled: widget.enabled && widget.label != 'Font size',
       min: widget.min,
       max: widget.max,
       step: widget.step,

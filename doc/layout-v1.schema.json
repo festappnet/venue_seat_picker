@@ -239,10 +239,14 @@
         "appearanceOverrides": {
           "type": "array",
           "uniqueItems": true,
-          "maxItems": 13,
+          "maxItems": 17,
           "items": {
             "type": "string",
             "enum": [
+              "fontId",
+              "size",
+              "bold",
+              "italic",
               "seatWidth",
               "seatHeight",
               "seatGap",
@@ -419,6 +423,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "fontId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "bold": {
+          "type": "boolean"
+        },
+        "italic": {
+          "type": "boolean"
+        },
         "seatWidth": {
           "type": "number",
           "minimum": 1,

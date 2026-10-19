@@ -39,7 +39,17 @@ void main() {
     'additionalProperties': false,
     'properties': {
       for (final key in layoutAppearanceKeys)
-        key: key == 'objectStyle'
+        key: key == 'fontId'
+            ? {'type': 'string', 'minLength': 1}
+            : key == 'size'
+            ? {
+                'type': 'number',
+                'minimum': layoutLimits['fontSizeMin'],
+                'maximum': layoutLimits['fontSizeMax'],
+              }
+            : const {'bold', 'italic'}.contains(key)
+            ? {'type': 'boolean'}
+            : key == 'objectStyle'
             ? {'type': 'string', 'enum': layoutObjectStyles.toList()}
             : key == 'seatStyle'
             ? {'type': 'string', 'enum': layoutSeatStyles.toList()}

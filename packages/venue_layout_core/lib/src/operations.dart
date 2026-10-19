@@ -2955,10 +2955,58 @@ VenueLayoutDocument setLayoutAppearance(
     throw ArgumentError.value(kind, 'kind', 'Unsupported appearance kind');
   }
   final previous = document.appearance[kind] as Map? ?? const {};
+  final typography = styles.keys
+      .where(const {'fontId', 'size', 'bold', 'italic'}.contains)
+      .toSet();
+  final byId = {for (final n in document.nodes) n.id: n};
+  final guardedAncestors = <String>{};
+  for (final node in document.nodes.where((n) => n.locked)) {
+    LayoutNode? current = node;
+    while (current != null) {
+      guardedAncestors.add(current.id);
+      current = byId[current.parentId];
+    }
+  }
+  bool locked(LayoutNode node) {
+    if (guardedAncestors.contains(node.id)) return true;
+    LayoutNode? current = node;
+    while (current != null) {
+      if (current.locked) return true;
+      current = byId[current.parentId];
+    }
+    return false;
+  }
+
   final result = document.copyWith(
+    nodes: typography.isEmpty
+        ? document.nodes
+        : [
+            for (final n in document.nodes)
+              if (n.kind == kind && locked(n))
+                n.copyWith(
+                  properties: {
+                    ...n.properties,
+                    for (final key in typography)
+                      key:
+                          effectiveNodeProperties(document, n)[key] ??
+                          document.defaultTextStyle[key] ??
+                          (const {'bold', 'italic'}.contains(key)
+                              ? false
+                              : null),
+                    'appearanceOverrides': {
+                      ...(n.properties['appearanceOverrides'] as List? ??
+                          const []),
+                      ...typography,
+                    }.toList(),
+                  },
+                )
+              else
+                n,
+          ],
     appearance: {
       ...document.appearance,
-      kind: {...previous, ...styles},
+      kind: ({...previous, ...styles}
+        ..removeWhere((key, value) => key == 'fontId' && value == null)),
     },
   );
   final issues = validateDocument(result);

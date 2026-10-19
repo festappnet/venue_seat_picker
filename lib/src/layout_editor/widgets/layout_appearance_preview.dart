@@ -77,17 +77,31 @@ class _PreviewState extends State<LayoutAppearancePreview> {
             selectionUnits: couch.selectionUnits,
           );
         }
-        if (kind == 'table') return tableLayout(shape: 'roundedRect');
+        if (kind == 'table') {
+          final doc = tableLayout(shape: 'roundedRect');
+          return doc.copyWith(
+            nodes: [
+              for (final n in doc.nodes)
+                n.kind == 'table' ? n.copyWith(label: 'Aa') : n,
+            ],
+          );
+        }
         if (kind == 'furniture') return couchLayout(count: 3);
         return VenueLayoutDocument(
           nodes: [
             LayoutNode(
               id: newLayoutId(),
               kind: kind,
-              label: kind == 'text' ? 'Aa' : '',
+              label: const {'text', 'shape', 'capacityArea'}.contains(kind)
+                  ? 'Aa'
+                  : '',
               width: kind == 'seat' ? 38 : 150,
               height: kind == 'seat' ? 38 : 70,
-              properties: kind == 'shape' ? {'shape': 'rectangle'} : const {},
+              properties: kind == 'shape'
+                  ? {'shape': 'rectangle'}
+                  : kind == 'text'
+                  ? {'text': 'Aa'}
+                  : const {},
             ),
           ],
         );
@@ -96,7 +110,19 @@ class _PreviewState extends State<LayoutAppearancePreview> {
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
+    final label =
+        c.document.nodes
+            .where((n) => n.kind == widget.kind)
+            .map(
+              (n) => n.kind == 'text'
+                  ? '${n.properties['text'] ?? n.label}'
+                  : n.label,
+            )
+            .where((text) => text.isNotEmpty)
+            .firstOrNull ??
+        'Aa';
     final signature = jsonEncode([
+      label,
       widget.kind,
       widget.chairCount,
       if (widget.chairCount != null) documentSeating(c.document).properties,
@@ -140,7 +166,12 @@ class _PreviewState extends State<LayoutAppearancePreview> {
         defaultTextStyle: c.document.defaultTextStyle,
         nodes: [
           for (final n in base.nodes)
-            n.copyWith(label: widget.kind == 'text' ? 'Aa' : ''),
+            n.copyWith(
+              label: n.kind == widget.kind ? label : '',
+              properties: n.kind == 'text'
+                  ? {...n.properties, 'text': label}
+                  : n.properties,
+            ),
         ],
       );
       final profile = appearance['table'] as Map? ?? const {};

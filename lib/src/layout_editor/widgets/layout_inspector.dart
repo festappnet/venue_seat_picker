@@ -21,6 +21,7 @@ class LayoutInspector extends StatefulWidget {
     this.hostBuilder,
     this.onRenameNode,
     this.fontPickerBuilder,
+    this.globalFontPickerBuilder,
     this.canvasSelected = false,
     this.onImportBackground,
     this.onClearSelection,
@@ -32,6 +33,7 @@ class LayoutInspector extends StatefulWidget {
 
   /// Optional host font catalog for object typography, built only in edit mode.
   final Widget Function(BuildContext, LayoutNode)? fontPickerBuilder;
+  final Widget Function(BuildContext, String)? globalFontPickerBuilder;
   final void Function(LayoutNode, String)? onRenameNode;
   final Set<String> readOnlyLabelNodeIds;
   final bool cornerPivot;
@@ -938,7 +940,9 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                   if (id == null) {
                     properties.remove('fontId');
                   } else {
-                    properties['fontId'] = id;
+                    properties.addAll(
+                      localAppearanceProperties(n, {'fontId': id}),
+                    );
                   }
                   c.updateNode(n.copyWith(properties: properties));
                 },
@@ -2186,7 +2190,11 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               OutlinedButton.icon(
                 onPressed: c.readOnly || c.saving
                     ? null
-                    : () => showLayoutGlobalStyleDialog(context, c),
+                    : () => showLayoutGlobalStyleDialog(
+                        context,
+                        c,
+                        globalFontPickerBuilder: widget.globalFontPickerBuilder,
+                      ),
                 icon: const Icon(Icons.palette_outlined),
                 label: const LayoutText('Plan style'),
               ),

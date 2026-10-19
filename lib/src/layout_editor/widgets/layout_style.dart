@@ -207,6 +207,7 @@ LayoutAppearance captureLayoutAppearance(
 }
 
 const _globalVisualKeys = {
+  ..._labelTypographyKeys,
   'objectStyle',
   'seatStyle',
   'fill',

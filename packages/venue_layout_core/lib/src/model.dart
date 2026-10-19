@@ -991,6 +991,17 @@ void _validateExtras(
           (layoutSeatingDefaultKeys.contains(style.key) &&
               entry.key != 'table')) {
         issue('unknown_appearance_property', '$path.${style.key}');
+      } else if (style.key == 'fontId') {
+        if (style.value is! String || (style.value as String).isEmpty)
+          issue('invalid_font_id', '$path.fontId');
+      } else if (style.key == 'size') {
+        if (!_finite(style.value) ||
+            style.value < layoutLimits['fontSizeMin']! ||
+            style.value > layoutLimits['fontSizeMax']!)
+          issue('font_size', '$path.size');
+      } else if (style.key == 'bold' || style.key == 'italic') {
+        if (style.value is! bool)
+          issue('invalid_boolean', '$path.${style.key}');
       } else if (style.key == 'objectStyle') {
         if (!layoutObjectStyles.contains(style.value)) {
           issue('invalid_object_style', '$path.objectStyle');
@@ -1755,6 +1766,10 @@ const layoutSeatingDefaultKeys = <String>{
 };
 
 const layoutAppearanceKeys = <String>{
+  'fontId',
+  'size',
+  'bold',
+  'italic',
   ...layoutSeatingDefaultKeys,
   'objectStyle',
   'seatStyle',

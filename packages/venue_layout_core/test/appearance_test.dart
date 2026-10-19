@@ -15,19 +15,37 @@ Map<String, dynamic> item(
         .firstWhere((i) => i['id'] == id);
 
 void main() {
-  test('occupied marker can be hidden without changing status or pending feedback', () {
-    final d = tableLayout(shape: 'rect', count: 2);
-    final seat = d.nodes.firstWhere((n) => n.kind == 'seat');
-    List states(Map<String, dynamic> state) =>
-        (compileScene(d, presentation: {seat.id: state})['items'] as List)
-            .where((item) => item['id'] == '${seat.id}:state').toList();
-    expect(states({'status': 'occupied'}), hasLength(1));
-    expect(states({'status': 'occupied', 'stateMarker': 'none'}), isEmpty);
-    expect(states({'status': 'occupied', 'stateMarker': 'none', 'pending': true}), hasLength(1));
-    expect(item(d, seat.id, presentation: {seat.id: {
-      'status': 'occupied', 'stateMarker': 'none', 'fill': '#412673FF',
-    }})['fill'], '#412673FF');
-  });
+  test(
+    'occupied marker can be hidden without changing status or pending feedback',
+    () {
+      final d = tableLayout(shape: 'rect', count: 2);
+      final seat = d.nodes.firstWhere((n) => n.kind == 'seat');
+      List states(Map<String, dynamic> state) =>
+          (compileScene(d, presentation: {seat.id: state})['items'] as List)
+              .where((item) => item['id'] == '${seat.id}:state')
+              .toList();
+      expect(states({'status': 'occupied'}), hasLength(1));
+      expect(states({'status': 'occupied', 'stateMarker': 'none'}), isEmpty);
+      expect(
+        states({'status': 'occupied', 'stateMarker': 'none', 'pending': true}),
+        hasLength(1),
+      );
+      expect(
+        item(
+          d,
+          seat.id,
+          presentation: {
+            seat.id: {
+              'status': 'occupied',
+              'stateMarker': 'none',
+              'fill': '#412673FF',
+            },
+          },
+        )['fill'],
+        '#412673FF',
+      );
+    },
+  );
   test(
     'optional appearance is immutable and no-style documents stay sparse',
     () {
@@ -224,6 +242,67 @@ void main() {
     },
   );
   test(
+    'scoped font compiles stored glyphs and reports its missing resource',
+    () {
+      final node = LayoutNode(
+        id: newLayoutId(),
+        kind: 'table',
+        label: 'A',
+        x: 300,
+        y: 300,
+        width: 180,
+        height: 100,
+      );
+      final doc = setLayoutAppearance(
+        VenueLayoutDocument(nodes: [node]),
+        'table',
+        {'fontId': 'scoped:font', 'size': 40, 'bold': true, 'italic': true},
+      );
+      final missing = compileScene(doc)['issues'] as List;
+      expect(
+        missing.any((issue) => issue['path'] == 'resources.fonts.scoped:font'),
+        true,
+      );
+      final scene = compileScene(
+        doc,
+        resources: {
+          'fonts': {
+            'scoped:font': {
+              'id': 'scoped:font',
+              'hash': 'a' * 64,
+              'family': 'Scoped',
+              'unitsPerEm': 1000,
+              'ascent': 800,
+              'descent': -200,
+              'glyphs': {
+                'A': {
+                  'advance': 800,
+                  'path': [
+                    ['M', 0, 0],
+                    ['L', 800, 0],
+                    ['L', 0, 800],
+                    ['Z'],
+                  ],
+                },
+              },
+            },
+          },
+        },
+      );
+      final glyph = (scene['items'] as List).firstWhere(
+        (item) => item['kind'] == 'glyphs',
+      );
+      expect(glyph['path'], isNotEmpty);
+      expect(glyph['strokeWidth'], 1);
+      expect(
+        (scene['issues'] as List).where(
+          (issue) => '${issue['path']}'.contains('scoped:font'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+  test(
     'appearance rejects unknown kinds keys unsafe values and malformed overrides',
     () {
       final d = tableLayout(shape: 'rect', count: 2), id = d.nodes.first.id;
@@ -238,7 +317,9 @@ void main() {
         {'cornerRadius': double.infinity},
         {'opacity': 1.1},
         {'strokeWidth': 1e10},
-        {'fontId': 'unapproved'},
+        {'fontId': ''},
+        {'size': 0},
+        {'bold': 'yes'},
       ]) {
         expect(
           () => setLayoutAppearance(d, 'table', patch),
@@ -273,7 +354,7 @@ void main() {
         throwsA(isA<InvalidLayoutDocument>()),
       );
       expect(
-        () => setNodeAppearanceOverride(d, [id], ['size']),
+        () => setNodeAppearanceOverride(d, [id], ['text']),
         throwsArgumentError,
       );
     },

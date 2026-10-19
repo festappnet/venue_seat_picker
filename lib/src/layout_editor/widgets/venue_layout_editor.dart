@@ -39,11 +39,13 @@ class VenueLayoutEditor extends StatefulWidget {
     this.readOnlyLabelNodeIds = const {},
     this.onRenameNode,
     this.fontPickerBuilder,
+    this.globalFontPickerBuilder,
   });
   final VenueLayoutController controller;
 
   /// Optional host font catalog for object typography, built only in edit mode.
   final Widget Function(BuildContext, LayoutNode)? fontPickerBuilder;
+  final Widget Function(BuildContext, String)? globalFontPickerBuilder;
 
   /// Host actions share the editor toolbar. Trailing actions stay visible while
   /// tools scroll horizontally on smaller screens.
@@ -2469,6 +2471,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       readOnlyLabelNodeIds: widget.readOnlyLabelNodeIds,
       onRenameNode: widget.onRenameNode,
       fontPickerBuilder: widget.fontPickerBuilder,
+      globalFontPickerBuilder: widget.globalFontPickerBuilder,
       onImportBackground: widget.onImportBackground,
       onCopyStyle: c.selection.isEmpty ? null : _copyStyle,
       onPasteStyle: _copiedAppearance == null || !_canEdit ? null : _pasteStyle,
@@ -2640,6 +2643,8 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         : () => showLayoutGlobalStyleDialog(
                                             context,
                                             c,
+                                            globalFontPickerBuilder:
+                                                widget.globalFontPickerBuilder,
                                           ),
                                     icon: const Icon(
                                       Icons.palette_outlined,
