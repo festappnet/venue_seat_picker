@@ -74,6 +74,7 @@ export function mount(container, options = {}) {
   if (!container || !globalThis.VenueLayoutKernel) throw new Error('Container and VenueLayoutKernel are required');
   const root = document.createElement('div');
   root.className = 'venue-layout-viewer';
+  root.style.position = 'relative';
   const svg = element('svg', {role: 'img', 'aria-label': options.accessibilityLabel || message(options, 'viewerLabel'), width: '100%', height: '100%'});
   svg.style.touchAction = 'none';
   svg.style.display = 'block';
@@ -83,6 +84,12 @@ export function mount(container, options = {}) {
   list.setAttribute('aria-label', message(options, 'places'));
   const live = document.createElement('div');
   live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite');
+  // Preserve keyboard/screen-reader controls without a second visual seat UI.
+  for (const assistive of [list, live]) Object.assign(assistive.style, {
+    position: 'absolute', top: '0', left: '0', width: '1px', height: '1px',
+    overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap',
+    padding: '0', margin: '-1px', border: '0', boxSizing: 'border-box',
+  });
   const detail = document.createElement('div');
   root.append(svg, list, detail, live); container.append(root);
   const handle = {serial: ++viewerSerial, container, root, svg, list, detail, live, options: {}, pending: new Set(), selected: new Set(), quantities: new Map(), disposed: false, generation: 0, update(next) {return update(handle, next);}, dispose() {dispose(handle);}};

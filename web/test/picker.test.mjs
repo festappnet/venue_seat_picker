@@ -11,14 +11,14 @@ before(async()=>{server=createServer(async(req,res)=>{if(req.url==='/qa-blank'){
 after(async()=>{await browser?.close();await new Promise(r=>server.close(r));});
 const setup=async()=>{const page=await browser.newPage();await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());await page.goto(`${base}/qa-blank`);await page.waitForFunction(()=>!!globalThis.VenueLayoutKernel);await page.evaluate(async()=>{const {mount}=await import('/src/index.js');document.body.replaceChildren();const host=document.createElement('div');document.body.append(host);const node=(id,x)=>({id,kind:'seat',label:'',transform:{x,y:100,rotation:0},width:40,height:40});window.calls=[];window.resolveSelection={};window.viewer=mount(host,{document:{schemaVersion:1,symbolSetVersion:1,defaultTextStyle:{fontId:'fixture:sans',size:24,color:'#222222ff'},selectionUnits:[],sections:[],attachments:[],presets:[],generators:[],canvas:{x:0,y:0,width:800,height:600,fill:'#ffffffff'},nodes:[node('00000000-0000-4000-8000-000000000001',100),node('00000000-0000-4000-8000-000000000002',200)]},onSelectionRequested:(ids,selecting)=>new Promise(resolve=>{const id=[...ids][0];window.calls.push({ids:[...ids],selecting});window.resolveSelection[id]=resolve;})});});return page;};
 const a='00000000-0000-4000-8000-000000000001',b='00000000-0000-4000-8000-000000000002';
-test('independent late rejection preserves another accepted selection',async()=>{const p=await setup();try{await p.locator(`[data-node-id="${a}"]`).last().click();await p.locator(`[data-node-id="${b}"]`).last().click();await p.evaluate(b=>resolveSelection[b]({accepted:true}),b);await p.evaluate(a=>resolveSelection[a]({accepted:false,message:'Conflict'}),a);await p.waitForFunction(()=>viewer.pending.size===0);assert.deepEqual(await p.evaluate(()=>[...viewer.selected]),[b]);assert.equal(await p.locator(`[data-node-id="${b}"]`).last().getAttribute('aria-pressed'),'true');}finally{await p.close();}});
-test('unavailable seat sends no selection request',async()=>{const p=await setup();try{await p.evaluate(a=>viewer.update({seatPresentation:{[a]:{status:'occupied'}}}),a);await p.locator(`[data-node-id="${a}"]`).last().click();assert.deepEqual(await p.evaluate(()=>calls),[]);assert.match(await p.getByRole('status').textContent(),/unavailable/);}finally{await p.close();}});
+test('independent late rejection preserves another accepted selection',async()=>{const p=await setup();try{await p.locator(`[data-node-id="${a}"]`).last().press('Space');await p.locator(`[data-node-id="${b}"]`).last().press('Space');await p.evaluate(b=>resolveSelection[b]({accepted:true}),b);await p.evaluate(a=>resolveSelection[a]({accepted:false,message:'Conflict'}),a);await p.waitForFunction(()=>viewer.pending.size===0);assert.deepEqual(await p.evaluate(()=>[...viewer.selected]),[b]);assert.equal(await p.locator(`[data-node-id="${b}"]`).last().getAttribute('aria-pressed'),'true');}finally{await p.close();}});
+test('unavailable seat sends no selection request',async()=>{const p=await setup();try{await p.evaluate(a=>viewer.update({seatPresentation:{[a]:{status:'occupied'}}}),a);await p.locator(`[data-node-id="${a}"]`).last().press('Space');assert.deepEqual(await p.evaluate(()=>calls),[]);assert.match(await p.getByRole('status').textContent(),/unavailable/);}finally{await p.close();}});
 test('state patch retains unchanged scene elements and camera',async()=>{const p=await setup();try{await p.evaluate(b=>{window.retained=viewer.svg.querySelector(`[data-node-id="${b}"]`);window.cameraBefore=viewer.svg.getAttribute('viewBox');},b);await p.evaluate(a=>viewer.update({seatPresentation:{[a]:{selected:true}}}),a);assert.equal(await p.evaluate(b=>retained===viewer.svg.querySelector(`[data-node-id="${b}"]`),b),true);assert.equal(await p.evaluate(()=>viewer.svg.getAttribute('viewBox')),await p.evaluate(()=>cameraBefore));}finally{await p.close();}});
 test('paired-unit pending rejection is atomic and standing sends quantity only',async()=>{const p=await setup();try{
  await p.evaluate(({a,b})=>{const document={...viewer.options.document,selectionUnits:[{id:'00000000-0000-4000-8000-000000000009',nodeIds:[a,b]}],nodes:[...viewer.options.document.nodes,{id:'00000000-0000-4000-8000-000000000003',kind:'capacityArea',label:'Standing',transform:{x:400,y:300,rotation:0},width:160,height:100,capacity:20}]};viewer.update({document,capacityPresentation:{'00000000-0000-4000-8000-000000000003':{capacity:20,available:20}},onQuantityRequested:async(id,count)=>{window.quantity={id,count};return{accepted:true};}});},{a,b});
- await p.locator(`[data-node-id="${a}"]`).last().click();assert.deepEqual(await p.evaluate(()=>calls[0].ids),[a,b]);assert.deepEqual(new Set(await p.evaluate(()=>[...viewer.pending])),new Set([a,b]));
+ await p.locator(`[data-node-id="${a}"]`).last().press('Space');assert.deepEqual(await p.evaluate(()=>calls[0].ids),[a,b]);assert.deepEqual(new Set(await p.evaluate(()=>[...viewer.pending])),new Set([a,b]));
  await p.evaluate(a=>resolveSelection[a]({accepted:false,message:'Unit unavailable'}),a);await p.waitForFunction(()=>viewer.pending.size===0);assert.deepEqual(await p.evaluate(()=>[...viewer.selected]),[]);
- await p.locator('[data-node-id="00000000-0000-4000-8000-000000000003"]').last().click();await p.getByRole('spinbutton').fill('2');await p.getByRole('button',{name:'Confirm quantity'}).click();await p.waitForFunction(()=>!!window.quantity);assert.equal(await p.evaluate(()=>quantity.count),2);assert.equal(await p.evaluate(()=>calls.length),1);
+ await p.locator('[data-node-id="00000000-0000-4000-8000-000000000003"]').last().press('Space');await p.getByRole('spinbutton').fill('2');await p.getByRole('button',{name:'Confirm quantity'}).click();await p.waitForFunction(()=>!!window.quantity);assert.equal(await p.evaluate(()=>quantity.count),2);assert.equal(await p.evaluate(()=>calls.length),1);
 }finally{await p.close();}});
 test('public kernel rejects malformed transport documents and malformed font resources',async()=>{const p=await setup();try{
  const fixtureResources=JSON.parse(await readFile(new URL('../../assets/layout_fonts/fixtures.json',import.meta.url),'utf8'));
@@ -72,16 +72,16 @@ test('presentation patches preserve atomic layer order in scene and SVG', async(
 });
 test('preselected seat releases visibly; pending blocks double clicks and rejection restores the check',async()=>{const p=await setup();try{
  await p.evaluate(a=>viewer.update({seatPresentation:{[a]:{selected:true,status:'available'}}}),a);
- await p.locator(`[data-node-id="${a}"]`).last().click();
+ await p.locator(`[data-node-id="${a}"]`).last().press('Space');
  assert.equal(await p.evaluate(()=>calls[0].selecting),false);
  assert.equal(await p.evaluate(a=>viewer.selected.has(a),a),false);
  assert.equal(await p.evaluate(a=>[...viewer.sceneItems.values()].some(i=>i.id===`${a}:state`&&i.stroke==='#FFFFFFFF'),a),false);
- await p.locator(`[data-node-id="${a}"]`).last().click();assert.equal(await p.evaluate(()=>calls.length),1);
+ await p.locator(`[data-node-id="${a}"]`).last().press('Space');assert.equal(await p.evaluate(()=>calls.length),1);
  await p.evaluate(a=>resolveSelection[a]({accepted:false}),a);await p.waitForFunction(()=>viewer.pending.size===0);
  assert.equal(await p.evaluate(a=>viewer.selected.has(a),a),true);
  assert.equal(await p.evaluate(a=>[...viewer.sceneItems.values()].some(i=>i.id===`${a}:state`&&i.stroke==='#FFFFFFFF'),a),true);
  await p.evaluate(b=>viewer.update({seatPresentation:{[b]:{selectable:false}}}),b);
- await p.locator(`[data-node-id="${b}"]`).last().click();assert.equal(await p.evaluate(()=>calls.length),1);
+ await p.locator(`[data-node-id="${b}"]`).last().press('Space');assert.equal(await p.evaluate(()=>calls.length),1);
 }finally{await p.close();}});
 
 test('SVG applies canonical outline width and opacity to each paint like Flutter', async()=>{
@@ -126,14 +126,14 @@ test('standing restores total quantity, accepts zero, and fences replaced async 
   const document={...viewer.options.document,nodes:[...viewer.options.document.nodes,{id:area,kind:'capacityArea',label:'Standing',transform:{x:400,y:300,rotation:0},width:160,height:100}]};
   viewer.update({document,capacityPresentation:{[area]:{available:5,quantity:3}},onQuantityRequested:(id,count)=>new Promise(resolve=>{window.quantityCount=count;window.quantityResolve=resolve;})});
  },area);
- await p.locator(`[role=list] [data-node-id="${area}"]`).click();
+ await p.locator(`[role=list] [data-node-id="${area}"]`).press('Space');
  assert.equal(await p.locator('input[type=number]').inputValue(),'3');
  await p.locator('input[type=number]').fill('0');await p.getByRole('button',{name:'Confirm quantity',exact:true}).click();
  assert.equal(await p.evaluate(()=>quantityCount),0);
  await p.evaluate(area=>viewer.update({capacityPresentation:{[area]:{available:5,quantity:3}}}),area);
  assert.equal(await p.evaluate(area=>viewer.pending.has(area),area),true);
  await p.evaluate(()=>quantityResolve({accepted:true}));await p.waitForFunction(()=>viewer.pending.size===0);
- await p.locator(`[role=list] [data-node-id="${area}"]`).click();assert.equal(await p.locator('input[type=number]').inputValue(),'0');
+ await p.locator(`[role=list] [data-node-id="${area}"]`).press('Space');assert.equal(await p.locator('input[type=number]').inputValue(),'0');
  await p.getByRole('button',{name:'Confirm quantity',exact:true}).click();
  await p.evaluate(()=>{viewer.update({document:structuredClone(viewer.options.document)});quantityResolve({accepted:false,message:'stale quantity'});});
  await p.waitForFunction(()=>viewer.pending.size===0);
@@ -145,9 +145,22 @@ test('host localized accessible labels and selection announcements use public me
  const p=await setup();
  await p.evaluate(()=>viewer.update({messages:{place:'Místo',available:'Volné',selectedPlaces:'Vybraná místa: {count}'}}));
  assert.match(await p.getByRole('list').textContent(),/Volné/);
- await p.getByRole('list').getByRole('button').first().click();
+ await p.getByRole('list').getByRole('button').first().press('Space');
  await p.evaluate(a=>resolveSelection[a]({accepted:true}),a);
  await p.waitForFunction(()=>viewer.pending.size===0);
  assert.match(await p.getByRole('status').textContent(),/Vybraná místa:/);
  await p.close();
+});
+
+test('assistive seat list remains keyboard accessible without occupying visual space', async()=>{
+ const p=await setup();
+ try {
+  const list=p.locator('.venue-layout-viewer > [role="list"]');
+  const bounds=await list.boundingBox();
+  assert.ok(bounds.width<=1 && bounds.height<=1, 'assistive seat buttons must not become a visible seat list');
+  assert.equal(await list.getByRole('button').count(),2);
+  await list.getByRole('button').first().focus();
+  await p.keyboard.press('Space');
+  assert.deepEqual(await p.evaluate(()=>calls.map(c=>c.ids[0])),[a]);
+ } finally {await p.close();}
 });
