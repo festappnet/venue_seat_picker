@@ -88,12 +88,13 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _selectionShiftDown = false;
   VenueLayoutDocument? _hitBoundsDocument;
   final Map<String, Map<String, double>> _rowHitBounds = {};
+  List<LayoutNode> _hitOrder = const [];
   String? _gestureTool;
   bool _libraryOpen = false;
   Map<String, dynamic>? _previewSeating;
   Map<String, double>? _canvasResizeBounds;
-  Offset? _pendingCanvasPoint;
-  int? _canvasFrameCallback;
+  Offset? _pendingResizePoint;
+  int? _resizeFrameCallback;
   final Map<String, VenueLayoutDocument> _previews = {};
   final Map<String, VenueLayoutDocument> _themedPreviews = {};
   String _librarySearch = '';
@@ -205,7 +206,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   @override
   void dispose() {
-    _discardCanvasPreview();
+    _discardResizePreview();
     _stopPaste();
     _paletteFeedbackState.dispose();
     _focus.dispose();
@@ -250,12 +251,15 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       point.dy,
       tolerance: 8 / _viewportScale,
     );
-    if (direct != null) return direct;
     if (!identical(_hitBoundsDocument, c.document)) {
       _hitBoundsDocument = c.document;
       _rowHitBounds.clear();
+      _hitOrder = orderedNodes(c.document).reversed.toList();
     }
-    for (final node in orderedNodes(c.document).reversed) {
+    // Assembly interiors participate at their real layer rank. A backdrop
+    // cannot steal a gap, while a foreground object and direct seat hits win.
+    for (final node in _hitOrder) {
+      if (node.id == direct) return direct;
       if (node.properties['assembly'] != 'rows') continue;
       final bounds = _rowHitBounds.putIfAbsent(
         node.id,
@@ -793,31 +797,32 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     c.beginGesture();
   }
 
-  void _discardCanvasPreview() {
-    final callback = _canvasFrameCallback;
-    _canvasFrameCallback = null;
-    _pendingCanvasPoint = null;
+  void _discardResizePreview() {
+    final callback = _resizeFrameCallback;
+    _resizeFrameCallback = null;
+    _pendingResizePoint = null;
     if (callback != null) {
       SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
     }
   }
 
-  void _flushCanvasPreview() {
-    final point = _pendingCanvasPoint;
-    _discardCanvasPreview();
+  void _flushResizePreview() {
+    final point = _pendingResizePoint;
+    _discardResizePreview();
     if (point != null && mounted) _applyDragUpdate(point);
   }
 
   void _dragUpdate(Offset point) {
-    if (_gestureTool?.startsWith('Canvas resize ') ?? false) {
+    if ((_gestureTool?.startsWith('Canvas resize ') ?? false) ||
+        (_gestureTool?.startsWith('Resize') ?? false)) {
       // Multiple mouse samples can arrive before one frame is paintable.
       // Apply only the latest sample before that frame's build and paint.
-      _pendingCanvasPoint = point;
-      _canvasFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((
+      _pendingResizePoint = point;
+      _resizeFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((
         _,
       ) {
-        _canvasFrameCallback = null;
-        _flushCanvasPreview();
+        _resizeFrameCallback = null;
+        _flushResizePreview();
       });
       return;
     }
@@ -1035,7 +1040,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         final vertical = north || direction.contains('s');
         final dx = (point.dx - pointer.dx) * (west ? -1 : 1);
         final dy = (point.dy - pointer.dy) * (north ? -1 : 1);
-        // Uniform scaling preserves rotated furniture and all existing seats.
+        // Scale furniture and spacing while retaining physical chair sizes.
         final change =
             horizontal &&
                 (!vertical ||
@@ -1073,16 +1078,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
               return node.copyWith(
                 x: node.id == n.id ? origin[0] : node.x * scale,
                 y: node.id == n.id ? origin[1] : node.y * scale,
-                width: node.width * scale,
-                height: node.height * scale,
+                width: node.kind == 'seat' ? node.width : node.width * scale,
+                height: node.kind == 'seat' ? node.height : node.height * scale,
                 properties: {
                   ...node.properties,
-                  if (node.properties['points'] is List)
+                  if (node.kind != 'seat' && node.properties['points'] is List)
                     'points': [
                       for (final p in node.properties['points'] as List)
                         [(p[0] as num) * scale, (p[1] as num) * scale],
                     ],
-                  if (node.properties['holes'] is List)
+                  if (node.kind != 'seat' && node.properties['holes'] is List)
                     'holes': [
                       for (final hole in node.properties['holes'] as List)
                         [
@@ -1278,7 +1283,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _endGesture() {
-    _flushCanvasPreview();
+    _flushResizePreview();
     _resizeRemovedSeats = 0;
     _selectionBeforeDown = null;
     if (_startDocument != null &&
@@ -1366,7 +1371,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _cancelGesture() {
-    _discardCanvasPreview();
+    _discardResizePreview();
     _surfaceBrush = null;
     _resizeRemovedSeats = 0;
     _drawId = null;
@@ -2011,7 +2016,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   void _handleStart(String mode, Offset point) {
-    _discardCanvasPreview();
+    _discardResizePreview();
     _resizeRemovedSeats = 0;
     _focus.requestFocus();
     _gestureTool = mode;

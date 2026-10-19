@@ -26,6 +26,57 @@ void main() {
         ),
       );
 
+  testWidgets('resizing a wrapped table preserves chair size and one undo', (
+    tester,
+  ) async {
+    final tableDoc = tableLayout(shape: 'roundedRect', count: 6);
+    final table = tableDoc.nodes.firstWhere((n) => n.kind == 'table');
+    final wrapper = LayoutNode(
+      id: newLayoutId(),
+      kind: 'group',
+      width: 1,
+      height: 1,
+    );
+    final original = tableDoc.copyWith(
+      nodes: [
+        wrapper,
+        for (final node in tableDoc.nodes)
+          if (node.id == table.id)
+            node.copyWith(parentId: wrapper.id)
+          else
+            node,
+      ],
+    );
+    final c = VenueLayoutController(original)..select({wrapper.id});
+    await open(tester, c);
+    final bounds = selectionBounds(original, {wrapper.id});
+    final corner = Offset(
+      bounds['x']! + bounds['width']!,
+      bounds['y']! + bounds['height']!,
+    );
+    var updates = 0;
+    c.addListener(() => updates++);
+    surface(tester).onHandleStart!('Resize se', corner);
+    for (var i = 1; i <= 100; i++) {
+      surface(tester).onDragUpdate!(
+        corner + Offset(i.toDouble(), i.toDouble()),
+      );
+    }
+    expect(updates, lessThanOrEqualTo(1));
+    surface(tester).onDragEnd!();
+    final enlarged = c.document.nodes.firstWhere((n) => n.id == table.id);
+    expect(enlarged.width, greaterThan(table.width));
+    for (final seat in tableDoc.nodes.where((n) => n.kind == 'seat')) {
+      final after = c.document.nodes.firstWhere((n) => n.id == seat.id);
+      expect(after.width, seat.width);
+      expect(after.height, seat.height);
+    }
+    await tester.pump();
+    c.undo();
+    expect(c.document, same(original));
+    expect(c.canUndo, isFalse);
+  });
+
   testWidgets(
     'round resize keeps circle; Shift permits ellipse; free surplus seats undo together',
     (tester) async {
@@ -41,6 +92,7 @@ void main() {
       final corner = Offset(table.x + 80, table.y + 80);
       surface(tester).onHandleStart!('Resize', corner);
       surface(tester).onDragUpdate!(corner - const Offset(60, 20));
+      await tester.pump();
       final resized = c.document.nodes.firstWhere((n) => n.id == table.id);
       expect(resized.width, 100);
       expect(resized.height, 100);
