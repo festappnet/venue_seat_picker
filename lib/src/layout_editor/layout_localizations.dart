@@ -603,6 +603,10 @@ const _cs = <String, String>{
   'Table shape': 'Tvar stolu',
   'Surface shape': 'Tvar plochy',
   'Custom outline': 'Vlastní obrys',
+  'Current outline': 'Současný obrys',
+  'The current outline is preserved until you choose a new shape.':
+      'Současný obrys zůstane zachován, dokud nevybereš nový tvar.',
+  'Blocks seat placement': 'Brání umístění židlí',
   'Change table shape': 'Změnit tvar stolu',
   'The selected shape cannot fit the existing chairs. Increase the table size first.':
       'Zvolený tvar nepojme současné židle. Nejprve zvětšete stůl.',

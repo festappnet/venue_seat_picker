@@ -823,7 +823,12 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           key: ValueKey(
             'table-shape-${node.id}-${_tableShape(node)}-$_shapeControlRevision',
           ),
-          initialValue: _tableShape(node),
+          initialValue: !isBarNode(node) && _tableShape(node) == 'polygon'
+              ? null
+              : _tableShape(node),
+          hint: !isBarNode(node) && _tableShape(node) == 'polygon'
+              ? const LayoutText('Current outline')
+              : null,
           isExpanded: true,
           decoration: InputDecoration(
             labelText: VenueLayoutStrings.text(
@@ -831,12 +836,19 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               isBarNode(node) ? 'Surface shape' : 'Table shape',
             ),
             border: const OutlineInputBorder(),
+            helperText: !isBarNode(node) && _tableShape(node) == 'polygon'
+                ? VenueLayoutStrings.text(
+                    context,
+                    'The current outline is preserved until you choose a new shape.',
+                  )
+                : null,
+            helperMaxLines: 3,
           ),
           items: [
             for (final entry in {
               'rectangle': 'Rectangle',
               if (!isBarNode(node)) 'round': 'Round',
-              'polygon': 'Custom outline',
+              if (isBarNode(node)) 'polygon': 'Custom outline',
             }.entries)
               DropdownMenuItem(
                 value: entry.key,
@@ -852,7 +864,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                   }
                 },
         ),
-        if (_tableShape(node) == 'polygon')
+        if (isBarNode(node) && _tableShape(node) == 'polygon')
           const Padding(
             padding: EdgeInsets.only(top: 8),
             child: LayoutText(
@@ -1331,20 +1343,15 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           tilePadding: EdgeInsets.zero,
           childrenPadding: const EdgeInsets.only(top: 8),
           children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const LayoutText('Rotate around corner'),
-              value: widget.cornerPivot,
-              onChanged: widget.onPivotChanged,
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const LayoutText('Physical obstacle'),
-              value: p['obstacle'] == true,
-              onChanged: (c.readOnly || c.saving)
-                  ? null
-                  : (v) => _property(n, 'obstacle', v),
-            ),
+            if (n.kind == 'shape')
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const LayoutText('Blocks seat placement'),
+                value: p['obstacle'] == true,
+                onChanged: (c.readOnly || c.saving)
+                    ? null
+                    : (v) => _property(n, 'obstacle', v),
+              ),
             if (!openPath) _outlineStyle(n, p),
             const SizedBox(height: 12),
             if (!openPath)
@@ -1371,7 +1378,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                 p['strokeWidth'] as num? ?? 1,
                 (v) => _property(n, 'strokeWidth', v),
               ),
-            if (p['points'] != null)
+            if (p['points'] != null && (n.kind != 'table' || isBarNode(n)))
               _field(
                 'Vertices [[x,y], ...]',
                 jsonEncode(p['points']),

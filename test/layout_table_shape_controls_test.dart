@@ -58,10 +58,23 @@ void main() {
       )..select({table.id});
       await open(tester, controller);
       expect(find.text('Preview count'), findsNothing);
+      final shapeControl = tester.widget<DropdownButton<String>>(
+        find.byType(DropdownButton<String>).first,
+      );
+      expect(shapeControl.items!.map((item) => item.value), [
+        'rectangle',
+        'round',
+      ]);
+      final advanced = find.text('Advanced object properties');
+      await tester.ensureVisible(advanced);
+      await tester.tap(advanced);
+      await tester.pumpAndSettle();
+      expect(find.text('Rotate around corner'), findsNothing);
+      expect(find.text('Physical obstacle'), findsNothing);
+      expect(find.text('Blocks seat placement'), findsNothing);
       expect(find.byTooltip('Add one seat'), findsOneWidget);
       expect(find.byTooltip('Remove one seat'), findsOneWidget);
       for (final entry in {
-        'Custom outline': 'polygon',
         'Rectangle': 'roundedRect',
         'Round': 'round',
       }.entries) {
@@ -94,6 +107,60 @@ void main() {
       }
       controller.undo();
       controller.undo();
+      expect(controller.document, same(original));
+    },
+  );
+
+  testWidgets(
+    'imported table outlines remain intact until a basic shape is chosen',
+    (tester) async {
+      final base = tableLayout(
+        shape: 'roundedRect',
+        width: 200,
+        height: 200,
+        count: 4,
+      );
+      final table = base.nodes.firstWhere((node) => node.kind == 'table');
+      final original = reshapeTableSurface(base, table.id, 'rectangle');
+      final seatIds = original.nodes
+          .where((node) => node.kind == 'seat')
+          .map((node) => node.id)
+          .toSet();
+      final controller = VenueLayoutController(
+        original,
+        protectedSeatIds: () => seatIds,
+      )..select({table.id});
+      await open(tester, controller);
+      final control = tester.widget<DropdownButtonFormField<String>>(
+        find.byType(DropdownButtonFormField<String>).first,
+      );
+      expect(control.initialValue, isNull);
+      expect(
+        tester
+            .widget<DropdownButton<String>>(
+              find.byType(DropdownButton<String>).first,
+            )
+            .items!
+            .map((item) => item.value),
+        ['rectangle', 'round'],
+      );
+      expect(find.text('Current outline'), findsOneWidget);
+      expect(controller.document, same(original));
+      expect(controller.canUndo, isFalse);
+      await choose(tester, 'Round');
+      expect(
+        controller.document.nodes
+            .firstWhere((node) => node.id == table.id)
+            .properties['shape'],
+        'round',
+      );
+      expect(
+        controller.document.nodes
+            .where((node) => node.kind == 'seat')
+            .map((node) => node.id)
+            .toSet(),
+        seatIds,
+      );
       controller.undo();
       expect(controller.document, same(original));
     },

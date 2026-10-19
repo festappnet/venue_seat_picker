@@ -318,52 +318,56 @@ class LayoutStylePresets extends StatelessWidget {
   final ValueChanged<LayoutAppearance>? onApply;
   final bool colorsOnly;
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      for (final entry
-          in (colorsOnly ? layoutColorPalettes : layoutAppearancePresets)
-              .entries)
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: OutlinedButton(
-              key: ValueKey('layout-style-${entry.key}'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 2,
-                ),
-                minimumSize: const Size(0, 58),
-              ),
-              onPressed: controller.readOnly || controller.saving
-                  ? null
-                  : () => onApply != null
-                        ? onApply!(entry.value)
-                        : controller.apply(
-                            applyLayoutAppearance(
-                              controller.document,
-                              controller.selection,
-                              entry.value,
-                            ),
-                            label: 'Apply style',
-                          ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _LayoutStylePreview(appearance: entry.value),
-                  const SizedBox(height: 5),
-                  LayoutText(
-                    entry.key,
-                    style: Theme.of(context).textTheme.labelSmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+  Widget build(BuildContext context) => SingleChildScrollView(
+    key: const ValueKey('layout-style-presets-scroll'),
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final entry
+            in (colorsOnly ? layoutColorPalettes : layoutAppearancePresets)
+                .entries)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: SizedBox.square(
+              dimension: 88,
+              child: OutlinedButton(
+                key: ValueKey('layout-style-${entry.key}'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.all(8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                ],
+                ),
+                onPressed: controller.readOnly || controller.saving
+                    ? null
+                    : () => onApply != null
+                          ? onApply!(entry.value)
+                          : controller.apply(
+                              applyLayoutAppearance(
+                                controller.document,
+                                controller.selection,
+                                entry.value,
+                              ),
+                              label: 'Apply style',
+                            ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _LayoutStylePreview(appearance: entry.value),
+                    const SizedBox(height: 5),
+                    LayoutText(
+                      entry.key,
+                      style: Theme.of(context).textTheme.labelSmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-    ],
+      ],
+    ),
   );
 }
 
