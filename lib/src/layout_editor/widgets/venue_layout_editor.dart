@@ -2450,6 +2450,31 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     );
   }
 
+  List<Widget> _pointerTools() => [
+    for (final entry in <String, IconData>{
+      'Select': Icons.near_me_outlined,
+      'Pan': Icons.pan_tool_outlined,
+      if (widget.interactionEnabled) ...{
+        'Resize': Icons.open_in_full,
+        'Rotate': Icons.rotate_right,
+      },
+    }.entries)
+      IconButton(
+        tooltip: VenueLayoutStrings.text(context, entry.key),
+        isSelected: _tool == entry.key,
+        style: IconButton.styleFrom(
+          backgroundColor: _tool == entry.key
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Colors.transparent,
+        ),
+        onPressed: () {
+          _cancelGesture();
+          setState(() => _tool = entry.key);
+        },
+        icon: Icon(entry.value, size: 20),
+      ),
+  ];
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: c,
@@ -2516,36 +2541,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   label: const LayoutText('Insert'),
                                 ),
                               const SizedBox(width: 12),
-                              for (final entry
-                                  in <String, IconData>{
-                                    'Select': Icons.near_me_outlined,
-                                    'Pan': Icons.pan_tool_outlined,
-                                    'Resize': Icons.open_in_full,
-                                    'Rotate': Icons.rotate_right,
-                                  }.entries.where(
-                                    (entry) =>
-                                        widget.interactionEnabled ||
-                                        ['Select', 'Pan'].contains(entry.key),
-                                  ))
-                                IconButton(
-                                  tooltip: VenueLayoutStrings.text(
-                                    context,
-                                    entry.key,
-                                  ),
-                                  isSelected: _tool == entry.key,
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: _tool == entry.key
-                                        ? Theme.of(
-                                            context,
-                                          ).colorScheme.primaryContainer
-                                        : Colors.transparent,
-                                  ),
-                                  onPressed: () {
-                                    _cancelGesture();
-                                    setState(() => _tool = entry.key);
-                                  },
-                                  icon: Icon(entry.value, size: 20),
-                                ),
+                              if (!wide) ..._pointerTools(),
                               const SizedBox(width: 16),
                               if (_canEdit)
                                 Tooltip(
@@ -2692,8 +2688,34 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (wide && _canEdit) ...[
-                      SizedBox(width: 232, child: _palette()),
+                    if (wide) ...[
+                      Material(
+                        key: const ValueKey('layout-editor-tool-sidebar'),
+                        color: layoutPanelColor(context),
+                        child: SizedBox(
+                          width: _canEdit ? 232 : 64,
+                          child: Column(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
+                                child: _canEdit
+                                    ? Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: _pointerTools(),
+                                      )
+                                    : Column(children: _pointerTools()),
+                              ),
+                              if (_canEdit) ...[
+                                const Divider(height: 1),
+                                Expanded(child: _palette()),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
                       const VerticalDivider(width: 1),
                     ],
                     Expanded(
