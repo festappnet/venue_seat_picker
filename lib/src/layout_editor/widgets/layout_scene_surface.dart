@@ -404,6 +404,16 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         );
       }
 
+      final resizeSelection = widget.document.nodes
+          .where((node) => widget.selected.contains(node.id))
+          .firstOrNull;
+      final resizeBounds = resizeSelection?.kind == 'group'
+          ? selectionBounds(widget.document, {resizeSelection!.id})
+          : {
+              'width': resizeSelection?.width ?? 0.0,
+              'height': resizeSelection?.height ?? 0.0,
+            };
+
       Widget handle(
         String mode,
         List<double> at,
@@ -433,9 +443,18 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                     ? 'Extend surface'
                     : 'Add bend')
               : '$mode handle';
+          // Keep a draggable body between handles when the plan is fitted to
+          // a tall hall. Fixed 24px edge targets can cover the entire tabletop.
+          final target = mode.startsWith('Resize')
+              ? (math.min(resizeBounds['width']!, resizeBounds['height']!) *
+                        scale *
+                        _cameraScale(_camera.value) /
+                        3)
+                    .clamp(10.0, 24.0)
+              : 24.0;
           return Positioned(
-            left: screen.dx - 12,
-            top: screen.dy - 12,
+            left: screen.dx - target / 2,
+            top: screen.dy - target / 2,
             child: Semantics(
               button: true,
               label: VenueLayoutStrings.text(context, label),
@@ -459,8 +478,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       widget.onDragCancel?.call();
                     },
                     child: SizedBox(
-                      width: 24,
-                      height: 24,
+                      width: target,
+                      height: target,
                       child: Center(
                         child: Container(
                           width: rotation ? 12 : 10,

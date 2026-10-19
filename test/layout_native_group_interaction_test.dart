@@ -136,4 +136,64 @@ void main() {
       }
     },
   );
+  testWidgets('fit-view table body stays draggable between resize targets', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = VenueLayoutController(
+      VenueLayoutDocument(
+        canvas: {
+          'x': 0,
+          'y': 0,
+          'width': 1920,
+          'height': 3456,
+          'fill': '#FFFFFFFF',
+        },
+      ),
+    );
+    addTearDown(c.dispose);
+    c.insert(tableLayout(shape: 'roundedRect', x: 960, y: 1600));
+    final id = c.selection.single;
+    final before = c.document.nodes.firstWhere((n) => n.id == id);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 848,
+            child: VenueLayoutEditor(controller: c, showGallery: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final surface = find.byWidgetPredicate(
+      (w) => w is LayoutSceneSurface && w.onTap != null,
+    );
+    final rect = tester.getRect(surface);
+    final scale = math.min((rect.width - 32) / 1920, (rect.height - 32) / 3456);
+    final origin =
+        rect.topLeft +
+        Offset(
+          (rect.width - 1920 * scale) / 2,
+          (rect.height - 3456 * scale) / 2,
+        );
+    final pointer = await tester.startGesture(
+      origin + Offset(before.x * scale, before.y * scale),
+    );
+    await pointer.moveBy(const Offset(30, 0));
+    await pointer.moveBy(const Offset(60, 0));
+    await tester.pump();
+    final during = c.document.nodes.firstWhere((n) => n.id == id);
+    expect(
+      during.x,
+      greaterThan(before.x),
+      reason: 'The table body must move before mouse-up',
+    );
+    expect(during.width, before.width);
+    expect(during.height, before.height);
+    await pointer.up();
+    await tester.pumpAndSettle();
+    expect(c.error, isNull);
+  });
 }
