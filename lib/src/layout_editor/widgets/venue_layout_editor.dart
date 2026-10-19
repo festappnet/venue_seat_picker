@@ -27,6 +27,12 @@ class VenueLayoutEditor extends StatefulWidget {
     this.capacityPresentation = const {},
     this.interactionEnabled = true,
     this.onNodeActivated,
+    this.inspectorOverride,
+    this.viewSelection,
+    this.onViewSelectionChanged,
+    this.viewSelectableIds,
+    this.viewSelectionTarget,
+    this.readOnlyLabelNodeIds = const {},
   });
   final VenueLayoutController controller;
 
@@ -43,6 +49,23 @@ class VenueLayoutEditor extends StatefulWidget {
 
   /// Exact node hit, shared by pointer/touch and keyboard Enter/Space.
   final ValueChanged<String>? onNodeActivated;
+
+  /// Host-owned operational inspector, shown in viewing mode even without a selection.
+  final Widget? inspectorOverride;
+
+  /// Optional controlled, transient view selection. Geometry history is untouched.
+  final Set<String>? viewSelection;
+  final ValueChanged<Set<String>>? onViewSelectionChanged;
+
+  /// Exact nodes eligible for viewing selection. Defaults to seats/capacity areas.
+  final Set<String>? viewSelectableIds;
+
+  /// Maps a physical node to its host-owned logical selection identity.
+  /// For example, a table imported inside a commercial group selects that group.
+  final String Function(String nodeId)? viewSelectionTarget;
+
+  /// Names owned by a host business workflow rather than geometry editing.
+  final Set<String> readOnlyLabelNodeIds;
   final Widget Function(BuildContext, LayoutNode)? inspectorBuilder;
   final bool showGallery;
   final ValueChanged<LayoutTemplate>? onTemplateSelected;
@@ -270,8 +293,26 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     }
   }
 
-  bool _viewSelectable(LayoutNode node) =>
-      node.kind == 'seat' || node.kind == 'capacityArea';
+  String get _viewHint =>
+      c.document.nodes.any(
+        (node) =>
+            _viewSelectable(node) &&
+            (node.kind == 'table' || node.kind == 'group'),
+      )
+      ? 'Select a table or seat. Shift-click adds to the selection. Drag to pan; scroll to zoom.'
+      : 'Select a seat to view its details. Drag to pan; scroll to zoom.';
+
+  Set<String> get _viewSelection => widget.viewSelection ?? c.selection;
+  String _viewTarget(String id) => widget.viewSelectionTarget?.call(id) ?? id;
+
+  void _selectView(Set<String> ids) {
+    if (widget.viewSelection == null) c.select(ids);
+    widget.onViewSelectionChanged?.call(Set.unmodifiable(ids));
+  }
+
+  bool _viewSelectable(LayoutNode node) => widget.viewSelectableIds == null
+      ? node.kind == 'seat' || node.kind == 'capacityArea'
+      : widget.viewSelectableIds!.contains(node.id);
 
   void _tap(Offset point) {
     var activated = _hitAt(point);
@@ -281,12 +322,22 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         )) {
       activated = null;
     }
-    if (activated != null) widget.onNodeActivated?.call(activated);
     if (!_canEdit) {
       _focus.requestFocus();
-      c.select(activated == null ? {} : {activated});
+      final target = activated == null ? null : _viewTarget(activated);
+      final selected = target == null
+          ? <String>{}
+          : HardwareKeyboard.instance.isShiftPressed
+          ? {..._viewSelection}
+          : <String>{};
+      if (target != null && !selected.remove(target)) {
+        selected.add(target);
+      }
+      _selectView(selected);
+      if (activated != null) widget.onNodeActivated?.call(activated);
       return;
     }
+    if (activated != null) widget.onNodeActivated?.call(activated);
     if (_canvasSelected) setState(() => _canvasSelected = false);
     _focus.requestFocus();
     if (_tool == 'Select' ||
@@ -369,7 +420,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   bool _beginInline(LayoutNode node, {bool insertion = false}) {
-    if (!_editable(node)) return false;
+    if (!_editable(node) || widget.readOnlyLabelNodeIds.contains(node.id)) {
+      return false;
+    }
     setState(() {
       _inlineId = node.id;
       _inlineInsertion = insertion;
@@ -1310,20 +1363,27 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     if (widget.onNodeActivated != null &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.space) &&
-        c.selection.length == 1) {
-      widget.onNodeActivated!(c.selection.single);
+        (widget.interactionEnabled ? c.selection : _viewSelection).length ==
+            1) {
+      widget.onNodeActivated!(
+        (widget.interactionEnabled ? c.selection : _viewSelection).single,
+      );
       return KeyEventResult.handled;
     }
     if (!widget.interactionEnabled &&
         event.logicalKey == LogicalKeyboardKey.tab) {
-      final nodes = c.document.nodes.where(_viewSelectable).toList();
-      if (nodes.isEmpty) return KeyEventResult.ignored;
-      final current = nodes.indexWhere((n) => c.selection.contains(n.id));
+      final ids = c.document.nodes
+          .where(_viewSelectable)
+          .map((n) => _viewTarget(n.id))
+          .toSet()
+          .toList();
+      if (ids.isEmpty) return KeyEventResult.ignored;
+      final current = ids.indexWhere(_viewSelection.contains);
       final direction = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;
       final next = current < 0
-          ? (direction > 0 ? 0 : nodes.length - 1)
-          : (current + direction) % nodes.length;
-      c.select({nodes[next].id});
+          ? (direction > 0 ? 0 : ids.length - 1)
+          : (current + direction) % ids.length;
+      _selectView({ids[next]});
       return KeyEventResult.handled;
     }
     if (!_canEdit) return KeyEventResult.ignored;
@@ -2243,8 +2303,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   Widget _buildInspector() {
     if (!widget.interactionEnabled) {
+      if (widget.inspectorOverride != null) return widget.inspectorOverride!;
       final selected = c.document.nodes.where(
-        (n) => c.selection.contains(n.id),
+        (n) => _viewSelection.contains(n.id),
       );
       return SingleChildScrollView(
         padding: const EdgeInsets.all(12),
@@ -2267,6 +2328,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       cornerPivot: _cornerPivot,
       onPivotChanged: (v) => setState(() => _cornerPivot = v),
       hostBuilder: widget.inspectorBuilder,
+      readOnlyLabelNodeIds: widget.readOnlyLabelNodeIds,
       onImportBackground: widget.onImportBackground,
       onCopyStyle: c.selection.isEmpty ? null : _copyStyle,
       onPasteStyle: _copiedAppearance == null || !_canEdit ? null : _pasteStyle,
@@ -2384,13 +2446,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   ),
                                 ),
                               if (widget.interactionEnabled)
-                                IconButton(
+                                TextButton.icon(
                                   key: const ValueKey('edit-canvas'),
-                                  tooltip: VenueLayoutStrings.text(
-                                    context,
-                                    'Canvas settings',
-                                  ),
-                                  isSelected: _editingCanvas,
+                                  label: const LayoutText('Canvas size'),
                                   icon: const Icon(
                                     Icons.aspect_ratio,
                                     size: 20,
@@ -2489,14 +2547,17 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   ),
                                   icon: const Icon(Icons.tune),
                                 ),
-                              LayoutText(
-                                c.dirty
-                                    ? 'Unsaved changes'
-                                    : !_canEdit
-                                    ? 'Read only'
-                                    : 'Saved',
-                                style: Theme.of(context).textTheme.labelMedium,
-                              ),
+                              if (widget.interactionEnabled || c.readOnly || c.dirty)
+                                LayoutText(
+                                  c.dirty
+                                      ? 'Unsaved changes'
+                                      : !_canEdit
+                                      ? 'Read only'
+                                      : 'Saved',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.labelMedium,
+                                ),
                             ],
                           ),
                         ),
@@ -2537,7 +2598,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   explicitChildNodes: true,
                                   label: VenueLayoutStrings.text(
                                     context,
-                                    'Layout canvas. Select an object, then use arrow keys to move. Shift moves ten steps. Escape cancels.',
+                                    widget.interactionEnabled
+                                        ? 'Layout canvas. Select an object, then use arrow keys to move. Shift moves ten steps. Escape cancels.'
+                                        : _viewHint,
                                   ),
                                   child: LayoutSceneSurface(
                                     key: ValueKey(_templateViewport),
@@ -2570,7 +2633,12 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                       ...widget.seatPresentation,
                                       ...widget.capacityPresentation,
                                     },
-                                    selected: c.selection,
+                                    selected: widget.interactionEnabled
+                                        ? c.selection
+                                        : _viewSelection,
+                                    selectableIds: widget.interactionEnabled
+                                        ? null
+                                        : widget.viewSelectableIds,
                                     highlightedIds: _seatTargetId == null
                                         ? const {}
                                         : {_seatTargetId!},
@@ -2755,7 +2823,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                   alignment: Alignment.centerLeft,
                   child: LayoutText(
                     !widget.interactionEnabled
-                        ? 'Select a seat to view its details. Drag to pan; scroll to zoom.'
+                        ? _viewHint
                         : _seatTargetId != null
                         ? 'Release to attach chair to table.'
                         : _editingCanvas

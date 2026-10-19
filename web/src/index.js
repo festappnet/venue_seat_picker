@@ -241,7 +241,7 @@ function render(handle, dirtyIds) {
         group.append(local);
       } else {handle.live.textContent = message(options, 'backgroundUnavailable'); options.onIssues?.([{reason: 'asset_unavailable', path: 'background', assetRef: item.assetRef}]);}
     } else {
-      group.append(element('path', {d: pathData(item.path || []), fill: color(item.fill), stroke: color(item.stroke), 'fill-opacity': item.opacity ?? 1, 'stroke-opacity': item.opacity ?? 1, 'stroke-width': item.strokeWidth || 0, 'stroke-dasharray': item.dash?.join?.(' '), 'stroke-linecap': item.kind==='state'?'round':'butt', 'stroke-linejoin': item.kind==='state'?'round':'miter'}));
+      group.append(element('path', {d: pathData(item.path || []), fill: color(item.fill), stroke: color(item.stroke), 'fill-opacity': item.opacity ?? 1, 'stroke-opacity': item.opacity ?? 1, 'stroke-width': item.strokeWidth || 0, 'vector-effect': item.kind === 'floor' ? 'non-scaling-stroke' : null, 'stroke-dasharray': item.dash?.join?.(' '), 'stroke-linecap': item.kind==='state'?'round':'butt', 'stroke-linejoin': item.kind==='state'?'round':'miter'}));
     }
     const tooltip = options.seatPresentation?.[item.nodeId || item.id]?.tooltip ?? item.label;
     if (tooltip) {const title = element('title'); title.textContent = tooltip; group.append(title);}

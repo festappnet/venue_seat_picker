@@ -30,6 +30,7 @@ class LayoutSceneSurface extends StatefulWidget {
     this.presentation = const {},
     this.selected = const {},
     this.highlightedIds = const {},
+    this.selectableIds,
     this.canvasSelected = false,
     this.transientForegroundIds = const {},
     this.warningIds = const {},
@@ -66,6 +67,7 @@ class LayoutSceneSurface extends StatefulWidget {
   final VenueLayoutDocument document;
   final Map<String, dynamic> resources, presentation;
   final Set<String> selected, highlightedIds;
+  final Set<String>? selectableIds;
   final Set<String> transientForegroundIds, warningIds;
   final List<Map<String, dynamic>> snapGuides;
   final ValueChanged<double>? onViewportScaleChanged;
@@ -122,7 +124,10 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
     final id = _hoverNodeId;
     if (id != null &&
         widget.document.nodes.any(
-          (n) => n.id == id && (n.kind == 'seat' || n.kind == 'capacityArea'),
+          (n) =>
+              n.id == id &&
+              (widget.selectableIds?.contains(n.id) ??
+                  (n.kind == 'seat' || n.kind == 'capacityArea')),
         )) {
       final raw = widget.presentation[id];
       final p = raw is Map ? raw : const {};
@@ -736,6 +741,19 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                     child: Tooltip(
                       key: _hoverTooltipKey,
                       message: _hoverMessage!,
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHigh.withAlpha(255),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      textStyle: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                       triggerMode: TooltipTriggerMode.manual,
                       child: const SizedBox(width: 1, height: 1),
                     ),
@@ -1581,7 +1599,9 @@ class LayoutScenePainter extends CustomPainter {
               ..strokeJoin = item['kind'] == 'state'
                   ? StrokeJoin.round
                   : StrokeJoin.miter
-              ..strokeWidth = strokeWidth
+              ..strokeWidth = item['kind'] == 'floor'
+                  ? strokeWidth / zoom
+                  : strokeWidth
               ..color = itemColor(item['stroke']),
           );
         }

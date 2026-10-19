@@ -23,8 +23,10 @@ class LayoutInspector extends StatefulWidget {
     this.onClearSelection,
     this.onCopyStyle,
     this.onPasteStyle,
+    this.readOnlyLabelNodeIds = const {},
   });
   final VenueLayoutController controller;
+  final Set<String> readOnlyLabelNodeIds;
   final bool cornerPivot;
   final bool canvasSelected;
   final Future<void> Function()? onImportBackground;
@@ -785,7 +787,8 @@ class _LayoutInspectorState extends State<LayoutInspector> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 12),
-        _field('Name', n.label, (v) => c.updateNode(n.copyWith(label: v))),
+        if (!widget.readOnlyLabelNodeIds.contains(n.id))
+          _field('Name', n.label, (v) => c.updateNode(n.copyWith(label: v))),
         if (n.kind == 'table' &&
             c.document.nodes.any(
               (seat) => seat.kind == 'seat' && seat.parentId == n.id,

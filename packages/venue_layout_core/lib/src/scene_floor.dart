@@ -42,8 +42,9 @@ Map<String, dynamic>? floorSceneItem(VenueLayoutDocument document) {
   } else {
     for (var y = dy / 2; y < height - 3; y += dy) {
       for (var x = dx / 2; x < width - 3; x += dx) {
-        line(x - 2, y, x + 2, y);
-        line(x, y - 2, x, y + 2);
+        final stitch = min(dx, dy) * .09;
+        line(x - stitch, y - stitch, x + stitch, y + stitch);
+        line(x - stitch, y + stitch, x + stitch, y - stitch);
       }
     }
   }
@@ -61,13 +62,13 @@ Map<String, dynamic>? floorSceneItem(VenueLayoutDocument document) {
     'path': path,
     'fill': '#00000000',
     'stroke': dark
-        ? '#FFFFFF24'
+        ? '#FFFFFF66'
         : style == 'wood'
-        ? '#8B623F24'
+        ? '#8B623F66'
         : style == 'tile'
-        ? '#64748B1A'
-        : '#64748B16',
-    'strokeWidth': style == 'carpet' ? 1.0 : .7,
-    'minZoom': .18,
+        ? '#47556959'
+        : '#47556966',
+    // Floor grain is a screen-space hairline in both renderers.
+    'strokeWidth': style == 'carpet' ? .85 : 1.0,
   };
 }

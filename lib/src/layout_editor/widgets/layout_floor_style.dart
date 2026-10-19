@@ -18,7 +18,7 @@ class LayoutFloorStyleField extends StatelessWidget {
           labelText: VenueLayoutStrings.text(context, 'Floor appearance'),
           helperText: VenueLayoutStrings.text(
             context,
-            'Subtle pattern. A custom background takes precedence.',
+            'Floor patterns stay visible when zoomed out. A custom background takes precedence.',
           ),
           helperMaxLines: 2,
         ),

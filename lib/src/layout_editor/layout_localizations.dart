@@ -332,6 +332,8 @@ const _cs = <String, String>{
       'Kliknutím na místo zobrazíš jeho podrobnosti.',
   'Select a seat to view its details. Drag to pan; scroll to zoom.':
       'Kliknutím zobrazíš detail místa. Tažením posuneš pohled, kolečkem přiblížíš.',
+  'Select a table or seat. Shift-click adds to the selection. Drag to pan; scroll to zoom.':
+      'Vyber stůl nebo místo. Shift + klik přidá do výběru. Tažením posuneš pohled, kolečkem přiblížíš.',
   'Canvas settings': 'Nastavení plátna',
   'Changes apply immediately. Undo restores the previous style.':
       'Změny se projeví ihned. Zpět obnoví předchozí styl.',
@@ -642,8 +644,8 @@ const _cs = <String, String>{
   'Meeting area': 'Jednací část',
   'Geometry': 'Rozměry a poloha',
   'Floor appearance': 'Vzhled podlahy',
-  'Subtle pattern. A custom background takes precedence.':
-      'Jemný vzor. Vlastní obrázek podkladu má přednost.',
+  'Floor patterns stay visible when zoomed out. A custom background takes precedence.':
+      'Vzor zůstává viditelný i při oddálení. Vlastní obrázek podkladu má přednost.',
   'Plain floor': 'Bez vzoru',
   'Wooden floor': 'Dřevěná podlaha',
   'Tiled floor': 'Dlažba',

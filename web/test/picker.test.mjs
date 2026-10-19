@@ -169,3 +169,27 @@ test('public zoom controls clamp, report bounds and restore fit',async()=>{const
  const result=await p.evaluate(()=>{let state;viewer.update({minZoom:1,maxZoom:5,onCameraChanged:s=>state=s});viewer.fitToScreen();const fit=viewer.svg.getAttribute('viewBox');const initial=state;viewer.zoomBy(1.25);const zoomed=viewer.svg.getAttribute('viewBox');viewer.zoomBy(100);const maximum=state;viewer.zoomBy(.0001);const minimum=state;viewer.fitToScreen();return{fit,zoomed,restored:viewer.svg.getAttribute('viewBox'),initial,maximum,minimum};});
  assert.notEqual(result.fit,result.zoomed);assert.equal(result.fit,result.restored);assert.equal(result.initial.canZoomOut,false);assert.equal(result.maximum.canZoomIn,false);assert.equal(result.minimum.canZoomOut,false);
 }finally{await p.close();}});
+
+
+test('floor grain remains visible when fitted below 18 percent zoom', async()=>{
+ const p=await setup();
+ try {
+  const result=await p.evaluate(()=>{
+   const document={schemaVersion:1,symbolSetVersion:1,defaultTextStyle:{fontId:'fixture:sans',size:24,color:'#222222ff'},selectionUnits:[],sections:[],attachments:[],presets:[],generators:[],nodes:[],canvas:{x:0,y:0,width:4000,height:4000,fill:'#ffffffff'}};
+   viewer.svg.style.cssText='width:600px;height:600px';
+   return ['wood','tile','carpet'].map(floorStyle=>{
+    viewer.update({document:{...document,canvas:{...document.canvas,floorStyle}}});
+    viewer.fitToScreen();
+    const path=viewer.svg.querySelector('[data-node-id="canvas:floor"] path');
+    if(!path)return null;
+    const style=getComputedStyle(path);
+    return {vectorEffect:style.vectorEffect,stroke:style.stroke};
+   });
+  });
+  for(const floor of result){
+   assert.ok(floor, 'a fitted plan must retain its floor pattern');
+   assert.equal(floor.vectorEffect,'non-scaling-stroke');
+   assert.ok(Number(floor.stroke.match(/, ([\d.]+)\)$/)?.[1]) >= .3, floor.stroke);
+  }
+ } finally {await p.close();}
+});
