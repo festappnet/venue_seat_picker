@@ -4,20 +4,64 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
+enum LayoutEditKind { edit, attachSeat }
+
+class LayoutEditIntent {
+  const LayoutEditIntent({
+    this.kind = LayoutEditKind.edit,
+    this.nodeId,
+    this.targetId,
+  });
+  final LayoutEditKind kind;
+  final String? nodeId, targetId;
+}
+
 /// Optional host draft state included in the very same undo transaction.
 abstract class LayoutHistoryParticipant {
   Object? capture();
+
+  /// Pure preparation with current live guards. Throwing rejects the complete
+  /// command before geometry, host state or history stacks are changed.
+  Object? prepare(
+    VenueLayoutDocument before,
+    VenueLayoutDocument after,
+    Object? checkpoint, {
+    required bool restoring,
+    required LayoutEditIntent intent,
+  });
+
+  /// Commit a previously prepared checkpoint synchronously, without validation.
   void restore(Object? checkpoint);
 }
 
 class LayoutSelectionResult {
-  const LayoutSelectionResult({required this.accepted, this.message});
+  const LayoutSelectionResult({
+    required this.accepted,
+    this.message,
+    this.authoritativeSeatIds,
+  });
   final bool accepted;
   final String? message;
+
+  /// Confirmed authority recovery for requested seats only.
+  final Set<String>? authoritativeSeatIds;
 }
 
 class _Checkpoint {
-  _Checkpoint(this.document, this.host, this.selection);
+  _Checkpoint(
+    this.document,
+    this.host,
+    this.selection, [
+    this.resources = const {},
+  ]);
+  final Map<String, dynamic> resources;
+  late final int documentBytes = utf8
+      .encode(jsonEncode(document.toJson()))
+      .length;
+  static final _resourceSizes = Expando<int>();
+  int get resourceBytes => _resourceSizes[resources] ??= utf8
+      .encode(jsonEncode({...resources}..remove('images')))
+      .length;
   final VenueLayoutDocument document;
   final List<Object?> host;
   final Set<String> selection;
@@ -89,6 +133,15 @@ class VenueLayoutController extends ChangeNotifier {
   VenueLayoutDocument _baseline;
   Map<String, dynamic> _resources;
   Set<String> _selection = const {};
+  Set<String> _hoveredIds = const {};
+  Set<String> get hoveredIds => _hoveredIds;
+  void highlightObjects(Set<String> ids) {
+    final next = ids.isEmpty ? const <String>{} : layoutSubtree(_document, ids);
+    if (setEquals(_hoveredIds, next)) return;
+    _hoveredIds = Set.unmodifiable(next);
+    notifyListeners();
+  }
+
   final Set<String> _placementWarningIds = {};
   final List<_Checkpoint> _undo = [], _redo = [];
   final List<LayoutHistoryParticipant> _participants = [];
@@ -124,18 +177,20 @@ class VenueLayoutController extends ChangeNotifier {
   bool get gestureActive => _gesture != null;
   Set<String> get placementWarningIds => Set.unmodifiable(_placementWarningIds);
 
-  List<LayoutPlacementIssue> get placementIssues {
+  List<LayoutPlacementIssue> get placementIssues =>
+      placementIssuesFor(_document);
+  List<LayoutPlacementIssue> placementIssuesFor(VenueLayoutDocument document) {
     final result = [
-      for (final pair in layoutCollisions(_document))
+      for (final pair in layoutCollisions(document))
         LayoutPlacementIssue('overlap', pair),
     ];
-    final canvas = _document.canvas;
+    final canvas = document.canvas;
     final left = (canvas['x'] as num? ?? 0).toDouble();
     final top = (canvas['y'] as num? ?? 0).toDouble();
     final right = left + (canvas['width'] as num).toDouble();
     final bottom = top + (canvas['height'] as num).toDouble();
-    final matrices = worldMatrices(_document);
-    for (final node in _document.nodes) {
+    final matrices = worldMatrices(document);
+    for (final node in document.nodes) {
       if (node.kind == 'group') continue;
       if (worldHull(node, matrices[node.id]!).any(
         (p) =>
@@ -184,17 +239,44 @@ class VenueLayoutController extends ChangeNotifier {
     _document,
     _participants.map((p) => p.capture()).toList(),
     _selection,
+    _resources,
   );
-  void _restore(_Checkpoint point) {
-    _document = point.document;
-    _placementWarningIds.clear();
-    _selection = point.selection;
-    for (
-      var i = 0;
-      i < math.min(point.host.length, _participants.length);
-      i++
-    ) {
-      _participants[i].restore(point.host[i]);
+  List<Object?> _prepareHost(
+    VenueLayoutDocument next, {
+    _Checkpoint? checkpoint,
+    LayoutEditIntent intent = const LayoutEditIntent(),
+  }) {
+    if (checkpoint != null && checkpoint.host.length != _participants.length) {
+      throw StateError('history_participants_changed');
+    }
+    return [
+      for (var i = 0; i < _participants.length; i++)
+        _participants[i].prepare(
+          _document,
+          next,
+          checkpoint?.host[i],
+          restoring: checkpoint != null,
+          intent: intent,
+        ),
+    ];
+  }
+
+  bool _restore(_Checkpoint point) {
+    try {
+      if (!_accept(point.document)) return false;
+      final host = _prepareHost(point.document, checkpoint: point);
+      _document = point.document;
+      _resources = point.resources;
+      for (var i = 0; i < _participants.length; i++) {
+        _participants[i].restore(host[i]);
+      }
+      _placementWarningIds.clear();
+      _selection = point.selection;
+      return true;
+    } catch (e) {
+      error = e is StateError ? e.message : e.toString();
+      notifyListeners();
+      return false;
     }
   }
 
@@ -368,40 +450,7 @@ class VenueLayoutController extends ChangeNotifier {
                 .map((n) => n.id)
                 .toList(),
           ));
-      // A plan typography change freezes a locked label's current effective
-      // style as local metadata. It must preserve every other property and
-      // the rendered typography; this never authorizes a locked content edit.
-      const typography = {'fontId', 'size', 'bold', 'italic'};
-      Map<String, dynamic> withoutTypography(LayoutNode n) {
-        final props = {...n.properties};
-        for (final key in typography) {
-          props.remove(key);
-        }
-        final overrides = (props['appearanceOverrides'] as List? ?? const [])
-            .where((key) => !typography.contains(key))
-            .toList();
-        props.remove('appearanceOverrides');
-        if (overrides.isNotEmpty) props['appearanceOverrides'] = overrides;
-        return props;
-      }
-
-      dynamic textValue(VenueLayoutDocument doc, LayoutNode n, String key) =>
-          effectiveNodeProperties(doc, n)[key] ??
-          doc.defaultTextStyle[key] ??
-          (key == 'bold' || key == 'italic' ? false : null);
-      final onlyTypographyFreeze =
-          unlocked != null &&
-          !sameLayoutValue(_document.appearance, next.appearance) &&
-          sameLayoutNode(
-            node.copyWith(properties: withoutTypography(node)),
-            unlocked.copyWith(properties: withoutTypography(unlocked)),
-          ) &&
-          typography.every(
-            (key) =>
-                textValue(_document, node, key) ==
-                textValue(next, unlocked, key),
-          );
-      if (!onlyUnlock && !onlyLayerReindex && !onlyTypographyFreeze) {
+      if (!onlyUnlock && !onlyLayerReindex) {
         error = 'Locked object: ${node.label.isEmpty ? node.kind : node.label}';
         notifyListeners();
         return false;
@@ -414,45 +463,22 @@ class VenueLayoutController extends ChangeNotifier {
   // A chair edited on its own keeps its attachment and identity, but becomes
   // a manual placement so table reflow does not undo the user's adjustment.
   VenueLayoutDocument _retainManualChairPositions(VenueLayoutDocument next) {
-    final baseline = _gesture?.document ?? _document;
-    final before = {for (final n in baseline.nodes) n.id: n};
-    final selected = layoutSubtree(baseline, _selection);
-    final moved = <String>{};
-    for (final n in next.nodes) {
-      final old = before[n.id];
-      if (old == null ||
-          n.kind != 'seat' ||
-          old.parentId != n.parentId ||
-          !_selection.contains(n.id) ||
-          selected.contains(n.parentId) ||
-          before[n.parentId]?.kind != 'table') {
-        continue;
-      }
-      if (old.x != n.x || old.y != n.y || old.rotation != n.rotation) {
-        moved.add(n.id);
-      }
-    }
-    if (moved.isEmpty) return next;
-    return next.copyWith(
-      nodes: next.nodes
-          .map(
-            (n) => moved.contains(n.id)
-                ? n.copyWith(properties: {...n.properties, 'manual': true})
-                : n,
-          )
-          .toList(),
-      attachments: next.attachments
-          .map(
-            (a) => moved.contains(a['seatId'])
-                ? <String, dynamic>{...a, 'manual': true}
-                : a,
-          )
-          .toList(),
-    );
+    return next;
   }
 
-  bool apply(VenueLayoutDocument next, {String label = 'Edit'}) =>
-      _apply(next, label: label);
+  bool apply(
+    VenueLayoutDocument next, {
+    String label = 'Edit',
+    Map<String, dynamic>? preparedResources,
+    List<Object?>? participantCheckpoints,
+    LayoutEditIntent intent = const LayoutEditIntent(),
+  }) => _apply(
+    next,
+    label: label,
+    preparedResources: preparedResources,
+    participantCheckpoints: participantCheckpoints,
+    intent: intent,
+  );
 
   bool moveChairToTableSide(String seatId, String side) => _apply(
     moveTableSeatToSide(_document, seatId, side),
@@ -463,8 +489,11 @@ class VenueLayoutController extends ChangeNotifier {
   bool _apply(
     VenueLayoutDocument next, {
     String label = 'Edit',
+    Map<String, dynamic>? preparedResources,
     bool reflowTables = true,
     bool retainManualChairs = true,
+    List<Object?>? participantCheckpoints,
+    LayoutEditIntent intent = const LayoutEditIntent(),
   }) {
     if (readOnly || saving) return false;
     if (retainManualChairs) next = _retainManualChairPositions(next);
@@ -475,34 +504,36 @@ class VenueLayoutController extends ChangeNotifier {
       return false;
     }
     late VenueLayoutDocument accepted;
+    late List<Object?> preparedHost;
+    Map<String, dynamic>? acceptedResources;
     try {
-      accepted = next;
-      if (reflowTables) {
-        final priorMatrices = worldMatrices(_document);
-        final nextMatrices = worldMatrices(next);
-        final priorNodes = {for (final node in _document.nodes) node.id: node};
-        final movedTables = next.nodes
-            .where((node) {
-              if (node.kind != 'table') return false;
-              final prior = priorNodes[node.id];
-              return prior == null ||
-                  prior.width != node.width ||
-                  prior.height != node.height ||
-                  !listEquals(priorMatrices[node.id], nextMatrices[node.id]);
-            })
-            .map((node) => node.id)
-            .toSet();
-        accepted = movedTables.isEmpty
-            ? next
-            : reflowTablesAtCanvasEdges(next, movedTables);
+      if (preparedResources != null) {
+        acceptedResources = _snapshotResources(preparedResources);
       }
+      accepted = next;
+      {}
       if (!_accept(accepted)) return false;
+      preparedHost = _prepareHost(
+        accepted,
+        checkpoint: participantCheckpoints == null
+            ? null
+            : _Checkpoint(accepted, participantCheckpoints, _selection),
+        intent: intent,
+      );
     } catch (e) {
       error = e is StateError ? e.message : e.toString();
       notifyListeners();
       return false;
     }
-    if (sameLayoutDocument(accepted, _document)) {
+    if (sameLayoutDocument(accepted, _document) &&
+        _hostEqual(
+          preparedHost,
+          _participants.map((p) => p.capture()).toList(),
+        )) {
+      if (acceptedResources != null) {
+        _resources = acceptedResources;
+        notifyListeners();
+      }
       return true;
     }
     if (_gesture == null) {
@@ -511,6 +542,10 @@ class VenueLayoutController extends ChangeNotifier {
       _redo.clear();
     }
     _document = accepted;
+    if (acceptedResources != null) _resources = acceptedResources;
+    for (var i = 0; i < _participants.length; i++) {
+      _participants[i].restore(preparedHost[i]);
+    }
     _placementWarningIds.clear();
     if (_selection.isNotEmpty) {
       final existing = _document.nodes.map((node) => node.id).toSet();
@@ -527,8 +562,11 @@ class VenueLayoutController extends ChangeNotifier {
       _undo.removeAt(0);
     }
     var bytes = 0;
+    final resourceSnapshots = Set<Map<String, dynamic>>.identity();
     for (var i = _undo.length - 1; i >= 0; i--) {
-      bytes += utf8.encode(jsonEncode(_undo[i].document.toJson())).length;
+      final point = _undo[i];
+      bytes += point.documentBytes;
+      if (resourceSnapshots.add(point.resources)) bytes += point.resourceBytes;
       if (bytes > layoutLimits['historyBytesMax']!) {
         _undo.removeRange(0, i + 1);
         break;
@@ -592,33 +630,35 @@ class VenueLayoutController extends ChangeNotifier {
     if (_disposed) return;
     final point = _gesture;
     if (point != null) {
+      if (!_restore(point)) return;
       _gesture = null;
-      _restore(point);
       error = null;
       notifyListeners();
     }
   }
 
   void undo() {
-    if (canUndo) {
-      if (!_protectedSeatsRemain(_undo.last.document)) return;
-      cancelGesture();
-      _redo.add(_capture());
-      _restore(_undo.removeLast());
-      error = null;
-      notifyListeners();
-    }
+    if (!canUndo) return;
+    cancelGesture();
+    if (_gesture != null) return;
+    final current = _capture(), target = _undo.last;
+    if (!_restore(target)) return;
+    _undo.removeLast();
+    _redo.add(current);
+    error = null;
+    notifyListeners();
   }
 
   void redo() {
-    if (canRedo) {
-      if (!_protectedSeatsRemain(_redo.last.document)) return;
-      cancelGesture();
-      _undo.add(_capture());
-      _restore(_redo.removeLast());
-      error = null;
-      notifyListeners();
-    }
+    if (!canRedo) return;
+    cancelGesture();
+    if (_gesture != null) return;
+    final current = _capture(), target = _redo.last;
+    if (!_restore(target)) return;
+    _redo.removeLast();
+    _undo.add(current);
+    error = null;
+    notifyListeners();
   }
 
   /// Restores an already-confirmed host baseline without replacing the draft.
@@ -714,24 +754,128 @@ class VenueLayoutController extends ChangeNotifier {
     );
   }
 
+  /// SVG import is converted once into the shared path/paint display list.
+  /// The same insertion/transform/history command owns vector and bitmap nodes.
+  bool insertVectorGraphic(
+    LayoutVectorGraphic graphic, {
+    Map<String, dynamic>? originalSource,
+    String label = '',
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+  }) => _insertGraphic(
+    'vector',
+    {'type': 'vector', ...graphic.toJson()},
+    graphic.width,
+    graphic.height,
+    originalSource: originalSource,
+    label: label,
+    x: x,
+    y: y,
+    width: width,
+    height: height,
+  );
+
+  bool insertBitmapAsset(
+    String assetRef, {
+    String label = '',
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+  }) {
+    final asset = (_resources['assets'] as Map?)?[assetRef];
+    if (asset is! Map ||
+        asset['hash'] is! String ||
+        asset['width'] is! num ||
+        asset['height'] is! num) {
+      error = 'asset_unavailable';
+      notifyListeners();
+      return false;
+    }
+    return _insertGraphic(
+      'image',
+      {
+        'type': 'bitmap',
+        'assetRef': assetRef,
+        'hash': asset['hash'],
+        'crop': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+      },
+      (asset['width'] as num).toDouble(),
+      (asset['height'] as num).toDouble(),
+      label: label,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+    );
+  }
+
+  bool _insertGraphic(
+    String kind,
+    Map<String, dynamic> graphic,
+    double nativeWidth,
+    double nativeHeight, {
+    required String label,
+    Map<String, dynamic>? originalSource,
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+  }) {
+    {}
+    final canvas = _document.canvas;
+    final scale = math.min(
+      1.0,
+      math.min(
+        (canvas['width'] as num) * .6 / nativeWidth,
+        (canvas['height'] as num) * .6 / nativeHeight,
+      ),
+    );
+    final node = LayoutNode(
+      id: newLayoutId(),
+      kind: kind,
+      label: label,
+      graphic: graphic,
+      originalSource: originalSource,
+      x: x ?? (canvas['x'] as num).toDouble() + (canvas['width'] as num) / 2,
+      y: y ?? (canvas['y'] as num).toDouble() + (canvas['height'] as num) / 2,
+      width: width ?? nativeWidth * scale,
+      height: height ?? nativeHeight * scale,
+    );
+    final next = moveLayoutLayers(
+      _document.copyWith(nodes: [..._document.nodes, node]),
+      {node.id},
+      toFront: true,
+    );
+    if (!apply(next, label: 'Insert graphic')) return false;
+    select({node.id});
+    return true;
+  }
+
   void insert(
     VenueLayoutDocument fragment, {
     double dx = 0,
     double dy = 0,
     bool fitWithinCanvas = false,
   }) {
-    final fresh = cloneLayout(nameInsertedTables(fragment), dx: dx, dy: dy);
+    final contextual =
+        (!sameLayoutValue(fragment.styles, _document.styles) ||
+            !sameLayoutValue(
+              fragment.seatingDefaults,
+              _document.seatingDefaults,
+            ) ||
+            !sameLayoutValue(fragment.textPolicy, _document.textPolicy))
+        ? materializeFragmentContext(fragment)
+        : fragment;
+    final fresh = cloneLayout(nameInsertedTables(contextual), dx: dx, dy: dy);
     final raw = _document.toJson();
     raw['nodes'] = [
       ..._document.nodes.map((n) => n.toJson()),
       ...fresh.nodes.map((n) => n.toJson()),
     ];
-    for (final key in [
-      'attachments',
-      'generators',
-      'sections',
-      'selectionUnits',
-    ]) {
+    for (final key in ['attachments', 'sections', 'selectionUnits']) {
       raw[key] = [
         ...(raw[key] as List? ?? []),
         ...(fresh.toJson()[key] as List? ?? []),
@@ -790,11 +934,7 @@ class VenueLayoutController extends ChangeNotifier {
     raw['sections'] = _document.sections
         .where((s) => !ids.contains(s['rootId']))
         .toList();
-    raw['generators'] = (raw['generators'] as List? ?? [])
-        .where(
-          (g) => !ids.contains(g['rootId']) && !ids.contains(g['assemblyId']),
-        )
-        .toList();
+    {}
     raw['selectionUnits'] = _document.selectionUnits
         .where((u) => !(u['nodeIds'] as List).any(ids.contains))
         .toList();
@@ -806,6 +946,8 @@ class VenueLayoutController extends ChangeNotifier {
     raw['nodes'] = _document.nodes.where((n) => ids.contains(n.id)).map((n) {
       final m = n.toJson();
       if (!ids.contains(n.parentId)) {
+        if (n.kind == 'seat' && n.parentId != null)
+          m['style'] = materializedNodeStyle(_document, n);
         final world = worldMatrix(_document, n);
         m['parentId'] = null;
         m['transform'] = {
@@ -820,7 +962,7 @@ class VenueLayoutController extends ChangeNotifier {
         .where((a) => ids.contains(a['seatId']) && ids.contains(a['targetId']))
         .toList();
     raw['sections'] = [];
-    raw['generators'] = [];
+    {}
     raw['selectionUnits'] = _document.selectionUnits
         .where((u) => (u['nodeIds'] as List).every(ids.contains))
         .toList();
@@ -831,7 +973,14 @@ class VenueLayoutController extends ChangeNotifier {
 
   void duplicateSelection({double dx = 40, double dy = 40}) {
     if (_selection.isEmpty || readOnly || saving) return;
+    final before = _document;
     insert(_selectionFragment(), dx: dx, dy: dy, fitWithinCanvas: true);
+    if (identical(before, _document)) return;
+    final copied = layoutSubtree(_document, _selection);
+    _placementWarningIds.addAll(
+      placementIssues.expand((issue) => issue.nodeIds).where(copied.contains),
+    );
+    notifyListeners();
   }
 
   /// Portable geometry only: host order, inventory and payment data never enter
@@ -940,7 +1089,15 @@ class VenueLayoutController extends ChangeNotifier {
         attachSeat(_document, seatId, tableId),
         {tableId},
       );
-      return apply(next, label: 'Attach chair to table');
+      return apply(
+        next,
+        label: 'Attach chair to table',
+        intent: LayoutEditIntent(
+          kind: LayoutEditKind.attachSeat,
+          nodeId: seatId,
+          targetId: tableId,
+        ),
+      );
     } catch (e) {
       error = e is StateError ? e.message : e.toString();
       notifyListeners();
@@ -981,11 +1138,29 @@ class VenueLayoutController extends ChangeNotifier {
     }
   }
 
-  void updateNode(LayoutNode node) => apply(
-    _document.copyWith(
-      nodes: _document.nodes.map((n) => n.id == node.id ? node : n).toList(),
-    ),
-  );
+  void updateNode(LayoutNode node) {
+    final previous = _document.nodes.firstWhere((n) => n.id == node.id);
+    apply(
+      _document.copyWith(
+        nodes: [for (final n in _document.nodes) n.id == node.id ? node : n],
+        attachments: node.kind != 'seat'
+            ? _document.attachments
+            : [
+                for (final attachment in _document.attachments)
+                  if (attachment['seatId'] == node.id)
+                    {
+                      ...attachment,
+                      if (node.x != previous.x || node.y != previous.y)
+                        'placement': {'mode': 'free'},
+                      if (node.rotation != previous.rotation)
+                        'rotationMode': 'manual',
+                    }
+                  else
+                    attachment,
+              ],
+      ),
+    );
+  }
 
   /// Keep authored table labels readable using the same font advances and
   /// line-height as the portable renderer. Chair dimensions are independent.
@@ -994,71 +1169,9 @@ class VenueLayoutController extends ChangeNotifier {
     double width,
     double height,
   ) {
-    if (node.kind != 'table' ||
-        !width.isFinite ||
-        !height.isFinite ||
-        width <= 0 ||
-        height <= 0) {
+    {
       return (width: width, height: height);
     }
-    const padding = 16.0;
-    final style = {
-      ..._document.defaultTextStyle,
-      ...effectiveNodeProperties(_document, node),
-    };
-    final size = (style['size'] as num? ?? 24).toDouble();
-    final lineHeight = size * (style['lineHeight'] as num? ?? 1.2);
-    final font = (_resources['fonts'] as Map?)?[style['fontId']] as Map?;
-    final glyphs = font?['glyphs'] as Map? ?? const {};
-    final units = (font?['unitsPerEm'] as num? ?? 1000).toDouble();
-    final lines = node.label
-        .split('\n')
-        .map(
-          (line) => [
-            for (final rune in line.runes)
-              (glyphs[String.fromCharCode(rune)] as Map?)?['advance'] is num
-                  ? ((glyphs[String.fromCharCode(rune)] as Map)['advance']
-                                as num)
-                            .toDouble() *
-                        size /
-                        units
-                  : size * .6,
-          ],
-        )
-        .toList();
-    final widestGlyph = lines.expand((line) => line).fold(0.0, math.max);
-    final minimumWidth = math.max(32.0, widestGlyph + padding);
-    final keepRatio = (width / height - node.width / node.height).abs() < .0001;
-    if (keepRatio) {
-      final textWidth = lines
-          .map((line) => line.fold(0.0, (sum, w) => sum + w))
-          .fold(0.0, math.max);
-      final factor = math.max(
-        1.0,
-        math.max(
-          math.max(minimumWidth, textWidth + padding) / width,
-          math.max(32.0, lines.length * lineHeight + padding) / height,
-        ),
-      );
-      return (width: width * factor, height: height * factor);
-    }
-    width = math.max(width, minimumWidth);
-    var count = 0;
-    for (final line in lines) {
-      count++;
-      var used = 0.0;
-      for (final advance in line) {
-        if (used > 0 && used + advance > width - padding) {
-          count++;
-          used = 0;
-        }
-        used += advance;
-      }
-    }
-    return (
-      width: width,
-      height: math.max(height, math.max(32.0, count * lineHeight + padding)),
-    );
   }
 
   bool resizeObject(String id, double width, double height) {
@@ -1068,7 +1181,9 @@ class VenueLayoutController extends ChangeNotifier {
       width = dimensions.width;
       height = dimensions.height;
       return apply(
-        isCouchNode(_document.nodes.firstWhere((n) => n.id == id))
+        isRowAssemblyNode(node)
+            ? resizeRowAssembly(_document, id, width, height)
+            : isCouchNode(node)
             ? resizeCouchBody(
                 _document,
                 id,
@@ -1089,6 +1204,25 @@ class VenueLayoutController extends ChangeNotifier {
       error = e is StateError ? e.message : e.toString();
       notifyListeners();
       return false;
+    }
+  }
+
+  void restoreAutomaticChairPosition(String seatId) {
+    if (readOnly || saving) return;
+    try {
+      final protected = protectedSeatIds?.call() ?? const <String>{};
+      if (protected.contains(seatId)) throw StateError('protected_spot');
+      final next = setTableSeatPlacement(_document, seatId, const {
+        'mode': 'automatic',
+      }, protectedSeatIds: protected);
+      _apply(
+        next,
+        label: 'Restore automatic position',
+        retainManualChairs: false,
+      );
+    } catch (e) {
+      error = e is StateError ? e.message : e.toString();
+      notifyListeners();
     }
   }
 

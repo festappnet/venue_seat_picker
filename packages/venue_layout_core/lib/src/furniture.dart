@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'model.dart';
+import 'placement.dart';
 
 /// Shared local upholstery geometry; dimensions are in document units.
 const couchGeometry = <String, double>{
@@ -53,14 +54,12 @@ VenueLayoutDocument couchLayout({
     y: y,
     width: width,
     height: height,
-    properties: const {
-      'furniture': 'couch',
-      'shape': 'roundedRect',
-      'fill': '#DED4F0FF',
-    },
+    properties: {'furniture': 'couch', 'shape': 'roundedRect'},
+    style: const {'fill': '#DED4F0FF'},
+    assembly: {'kind': 'couch', 'seats': count},
   );
   return _rebuild(
-    VenueLayoutDocument(nodes: [root]),
+    VenueLayoutDocument(schemaVersion: 2, nodes: [root]),
     root,
     const [],
     count,
@@ -187,12 +186,12 @@ VenueLayoutDocument _rebuild(
   // Persist the initial physical footprint so enlarging and shrinking later
   // does not progressively change the minimum or squeeze source-scale seats.
   final minWidth =
-      (root.properties['seatWidth'] as num?)?.toDouble() ??
+      (((root.assembly?['minSeatWidth'])) as num?)?.toDouble() ??
       (seats.isEmpty
           ? couchGeometry['minSeatWidth']!
           : seats.map((n) => n.width).reduce(math.min));
   final minHeight =
-      (root.properties['seatHeight'] as num?)?.toDouble() ??
+      (((root.assembly?['minSeatHeight'])) as num?)?.toDouble() ??
       (seats.isEmpty
           ? couchGeometry['minSeatHeight']!
           : seats.map((n) => n.height).reduce(math.min));
@@ -223,22 +222,27 @@ VenueLayoutDocument _rebuild(
                   kind: 'seat',
                   parentId: root.id,
                   label: '${i + 1}',
-                  properties: const {
+                  style: const {
                     'fill': '#F8FAFCFF',
-                    'size': 12,
-                    'align': 'center',
+                    'label': {'size': 12, 'align': 'center'},
                   },
+                  properties: const {},
                 ))
           .copyWith(
-            x: -width / 2 + side + seatWidth / 2 + i * (seatWidth + gap),
-            y: (couchGeometry['backInset']! - couchGeometry['frontInset']!) / 2,
-            rotation: 0,
+            x: i < seats.length && seatPlacementFree(d, seats[i])
+                ? seats[i].x
+                : -width / 2 + side + seatWidth / 2 + i * (seatWidth + gap),
+            y: i < seats.length && seatPlacementFree(d, seats[i])
+                ? seats[i].y
+                : (couchGeometry['backInset']! - couchGeometry['frontInset']!) /
+                      2,
+            rotation: i < seats.length && seatRotationManual(d, seats[i])
+                ? seats[i].rotation
+                : 0,
             width: seatWidth,
             height: seatHeight,
             properties: {
-              ...(i < seats.length
-                  ? seats[i].properties
-                  : const {'fill': '#F8FAFCFF', 'size': 12, 'align': 'center'}),
+              ...(i < seats.length ? seats[i].properties : const {}),
               'furniture': 'cushion',
               'shape': 'roundedRect',
               'slot': i,
@@ -256,12 +260,13 @@ VenueLayoutDocument _rebuild(
           root.copyWith(
             width: width,
             height: height,
-            properties: {
-              ...root.properties,
+            assembly: {
+              'kind': 'couch',
               'seats': count,
-              'seatWidth': seats.isEmpty ? seatWidth : minWidth,
-              'seatHeight': seats.isEmpty ? seatHeight : minHeight,
+              'minSeatWidth': seats.isEmpty ? seatWidth : minWidth,
+              'minSeatHeight': seats.isEmpty ? seatHeight : minHeight,
             },
+            properties: {...root.properties},
           )
         else if (!oldIds.contains(n.id))
           n,
@@ -275,22 +280,20 @@ VenueLayoutDocument _rebuild(
         'nodeIds': nextSeats.map((n) => n.id).toList(),
       },
     ],
-    attachments: d.attachments
-        .where(
-          (a) =>
-              !removed.contains(a['seatId']) &&
-              !removed.contains(a['targetId']),
-        )
-        .toList(),
-    generators: [
-      for (final g in d.generators)
-        {
-          ...g,
-          if (g['nodeIds'] is List)
-            'nodeIds': (g['nodeIds'] as List)
-                .where((id) => !removed.contains(id))
-                .toList(),
-        },
+    attachments: [
+      ...d.attachments.where(
+        (a) =>
+            !removed.contains(a['seatId']) && !removed.contains(a['targetId']),
+      ),
+      for (final seat in nextSeats)
+        if (!d.attachments.any((a) => a['seatId'] == seat.id))
+          {
+            'id': newLayoutId(),
+            'seatId': seat.id,
+            'targetId': root.id,
+            'placement': {'mode': 'automatic'},
+            'rotationMode': 'auto',
+          },
     ],
   );
   final issues = validateDocument(result);

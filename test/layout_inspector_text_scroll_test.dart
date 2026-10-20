@@ -31,7 +31,7 @@ Future<void> mountInspector(
 
 void main() {
   testWidgets(
-    'scroll over a focused number never changes the plan or undo history',
+    'scroll over an unfocused number never changes the plan or undo history',
     (tester) async {
       final table = LayoutNode(
         id: newLayoutId(),
@@ -41,6 +41,7 @@ void main() {
         y: 300,
         width: 180,
         height: 100,
+        surface: const {'type': 'rect'},
       );
       final c = VenueLayoutController(
         VenueLayoutDocument.empty().copyWith(nodes: [table]),
@@ -51,6 +52,8 @@ void main() {
       final field = find.widgetWithText(TextField, 'Font size');
       await tester.ensureVisible(field);
       await tester.tap(field);
+      await tester.pump();
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
       final before = c.document;
       var notifications = 0;
@@ -86,13 +89,14 @@ void main() {
     },
   );
 
-  for (final kind in ['table', 'shape', 'text', 'capacityArea', 'group']) {
+  for (final kind in ['table', 'shape', 'text', 'capacityArea']) {
     testWidgets(
       '$kind exposes working font size and bold without geometry changes',
       (tester) async {
         final node = LayoutNode(
           id: newLayoutId(),
           kind: kind,
+          surface: kind == 'table' ? const {'type': 'rect'} : null,
           label: 'Label',
           x: 300,
           y: 300,
@@ -107,12 +111,16 @@ void main() {
           label: 'Label',
           width: 180,
           height: 100,
+          surface: const {'type': 'rect'},
         );
         final target = kind == 'group' ? child : node;
         final doc = VenueLayoutDocument.empty().copyWith(
           nodes: [node, if (kind == 'group') child],
         );
-        final c = VenueLayoutController(doc);
+        final c = VenueLayoutController(
+          doc,
+          resources: (await tester.runAsync(loadLayoutFixtureResources))!,
+        );
         addTearDown(c.dispose);
         c.select({node.id});
         await mountInspector(tester, c);
@@ -126,8 +134,8 @@ void main() {
         await tester.tap(bold);
         await tester.pumpAndSettle();
         final updated = c.document.nodes.firstWhere((n) => n.id == target.id);
-        expect(updated.properties['size'], 32);
-        expect(updated.properties['bold'], isTrue);
+        expect(updated.style['label']['size'], 32);
+        expect(updated.style['label']['weight'], 700);
         expect(
           [updated.x, updated.y, updated.width, updated.height, updated.label],
           [target.x, target.y, target.width, target.height, target.label],
@@ -138,15 +146,15 @@ void main() {
         expect(
           c.document.nodes
               .firstWhere((n) => n.id == target.id)
-              .properties['italic'],
+              .style['label']['italic'],
           isTrue,
         );
         await tester.tap(bold);
         await tester.pumpAndSettle();
         final combination = c.document.nodes
             .firstWhere((n) => n.id == target.id)
-            .properties;
-        expect(combination['bold'], isFalse);
+            .style['label'];
+        expect(combination['weight'], 400);
         expect(combination['italic'], isTrue);
         c.undo();
         c.undo();

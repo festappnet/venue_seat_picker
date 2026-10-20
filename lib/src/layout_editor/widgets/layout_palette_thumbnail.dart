@@ -22,25 +22,79 @@ class LayoutPaletteThumbnail extends StatefulWidget {
 class _ThumbnailState extends State<LayoutPaletteThumbnail> {
   VenueLayoutDocument? _document;
   Map<String, dynamic>? _resources;
+  Brightness? _brightness;
   late Map<String, dynamic> _scene;
   late Rect _bounds;
 
   @override
   Widget build(BuildContext context) {
+    // A tool icon is schematic, not authored document text. It must not depend
+    // on a prepared whole-text path for the current document font.
+    if (widget.kind == 'Text') {
+      return ExcludeSemantics(
+        child: Center(
+          child: SizedBox(
+            width: 54,
+            height: 34,
+            child: Center(
+              child: Text(
+                'Aa',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 28,
+                  height: 1,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    final brightness = Theme.of(context).brightness;
     if (!identical(_document, widget.document) ||
-        !identical(_resources, widget.resources)) {
+        !identical(_resources, widget.resources) ||
+        _brightness != brightness) {
       final b = selectionBounds(
         widget.document,
         widget.document.nodes.map((n) => n.id).toSet(),
       );
       _bounds = Rect.fromLTWH(b['x']!, b['y']!, b['width']!, b['height']!);
-      _scene = compileScene(widget.document, resources: widget.resources);
+      final preview = brightness == Brightness.dark
+          ? widget.document.copyWith(
+              nodes: [
+                for (final node in widget.document.nodes)
+                  if ({
+                    'Line',
+                    'Arrow',
+                    'Polyline',
+                    'Text',
+                  }.contains(widget.kind))
+                    node.copyWith(
+                      style: {
+                        ...node.style,
+                        if (node.kind != 'text') 'stroke': '#CBD5E1FF',
+                        if (node.kind == 'text')
+                          'label': {
+                            ...node.style['label'] as Map? ?? {},
+                            'color': '#E2E8F0FF',
+                          },
+                      },
+                    )
+                  else
+                    node,
+              ],
+            )
+          : widget.document;
+      _scene = compileScene(preview, resources: widget.resources);
+      _brightness = brightness;
       _document = widget.document;
       _resources = widget.resources;
     }
     final extent = switch (widget.kind) {
-      'Seat' => const Size(32, 32),
-      'Round table' => const Size(56, 56),
+      'Seat' => const Size(40, 40),
+      'Round table' => const Size(68, 68),
       'Couch' => const Size(66, 44),
       'Bar' => const Size(82, 46),
       'Standing' || 'Rectangle' || 'Ellipse' || 'Polygon' => const Size(62, 40),
@@ -67,7 +121,26 @@ class _ThumbnailState extends State<LayoutPaletteThumbnail> {
                   child: CustomPaint(
                     size: extent,
                     painter: LayoutScenePainter(
-                      scene: _scene,
+                      scene: {
+                        ..._scene,
+                        'items': [
+                          for (final item in _scene['items'] as List)
+                            if ({
+                              'Line',
+                              'Arrow',
+                              'Polyline',
+                            }.contains(widget.kind))
+                              {
+                                ...Map<String, dynamic>.from(item as Map),
+                                'strokeWidth': math.max(
+                                  (item['strokeWidth'] as num? ?? 0).toDouble(),
+                                  1.5 / scale,
+                                ),
+                              }
+                            else
+                              item,
+                        ],
+                      },
                       resources: widget.resources,
                       selected: const {},
                       scale: scale,

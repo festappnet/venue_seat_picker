@@ -2,7 +2,7 @@ import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
 void main() {
-  for (final shape in ['roundedRect', 'ellipse']) {
+  for (final shape in ['rect', 'circle']) {
     test(
       '$shape shrink removes only surplus free seats and keeps retained identities/styles',
       () {
@@ -18,13 +18,19 @@ void main() {
               .map(
                 (n) => n.kind == 'seat'
                     ? n.copyWith(
-                        properties: {...n.properties, 'fill': '#123456FF'},
+                        properties: {...n.properties},
+                        style: {'fill': '#123456FF'},
                       )
                     : n,
               )
               .toList(),
         );
-        final result = resizeNode(decorated, table.id, 120, 100),
+        final result = resizeNode(
+              decorated,
+              table.id,
+              120,
+              shape == 'circle' ? 120 : 100,
+            ),
             capacity = tableCapacity(
               result.nodes.firstWhere((n) => n.id == table.id),
             );
@@ -41,7 +47,7 @@ void main() {
             (n) =>
                 n.width == 40 &&
                 n.height == 40 &&
-                n.properties['fill'] == '#123456FF',
+                n.style['fill'] == '#123456FF',
           ),
           isTrue,
         );
@@ -73,7 +79,7 @@ void main() {
               original,
               table.id,
               120,
-              100,
+              shape == 'circle' ? 120 : 100,
               protectedSeatIds: protected,
             ),
             retained = result.nodes
@@ -102,7 +108,7 @@ void main() {
             original,
             table.id,
             120,
-            100,
+            shape == 'circle' ? 120 : 100,
             protectedSeatIds: seats.map((n) => n.id).toSet(),
           ),
           throwsA(
@@ -160,16 +166,8 @@ void main() {
         selectionUnits: [
           {
             'id': newLayoutId(),
+            'kind': 'atomic',
             'nodeIds': [seats[6].id, seats[7].id],
-          },
-        ],
-        generators: [
-          {
-            'id': newLayoutId(),
-            'kind': 'table',
-            'rootId': table.id,
-            'nodeIds': seats.map((n) => n.id).toList(),
-            'parameters': {'count': 8, 'width': 240, 'height': 160},
           },
         ],
       );
@@ -182,8 +180,6 @@ void main() {
       expect(remaining.length, lessThan(8));
       expect(remaining.contains(seats[6].id), remaining.contains(seats[7].id));
       expect(result.presets, document.presets);
-      expect(result.generators.single['parameters']['count'], remaining.length);
-      expect((result.generators.single['nodeIds'] as List).toSet(), remaining);
       expect(validateDocument(result), isEmpty);
     },
   );

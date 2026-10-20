@@ -20,9 +20,13 @@ void main() {
         y: 200,
         width: 400,
         height: 60,
-        properties: {'text': 'Stage', 'size': 24},
+        properties: {'text': 'Stage'},
+        style: {
+          'label': {'size': 24},
+        },
       ),
       LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         x: 600,
@@ -50,7 +54,7 @@ void main() {
     );
   });
   test(
-    'table labels default to screen orientation; source labels can follow the object',
+    'canonical labels follow the object and an explicit screen orientation stays upright',
     () {
       final resources =
           jsonDecode(
@@ -60,6 +64,7 @@ void main() {
               )
               as Map<String, dynamic>;
       final node = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         x: 300,
@@ -68,13 +73,19 @@ void main() {
         height: 100,
         rotation: 270,
         label: 'Stůl 16',
-        properties: {'shape': 'rect', 'size': 60},
+        properties: {},
+        style: {
+          'label': {'size': 60},
+        },
       );
       final plain = VenueLayoutDocument(nodes: [node]);
       final doc = plain.copyWith(
         nodes: [
           node.copyWith(
-            properties: {...node.properties, 'labelOrientation': 'object'},
+            properties: {...node.properties},
+            style: {
+              'label': {...node.style['label'] as Map, 'orientation': 'screen'},
+            },
           ),
         ],
       );
@@ -85,8 +96,8 @@ void main() {
                 (item) => item['id'] == '${node.id}:text',
               )
               as Map;
-      expect(label(plain)['matrix'], [1, 0, 0, 1, 300, 400]);
-      expect(label(doc)['matrix'], worldMatrix(doc, doc.nodes.single));
+      expect(label(plain)['matrix'], worldMatrix(plain, node));
+      expect(label(doc)['matrix'], [1, 0, 0, 1, 300, 400]);
       expect(
         compileSceneNodes(doc, {node.id}, resources: resources)['items'],
         (compileScene(doc, resources: resources)['items'] as List)
@@ -96,14 +107,15 @@ void main() {
       final bad = doc.copyWith(
         nodes: [
           node.copyWith(
-            properties: {...node.properties, 'labelOrientation': 'random'},
+            properties: {...node.properties},
+            style: {
+              'label': {'orientation': 'random'},
+            },
           ),
         ],
       );
       expect(
-        validateDocument(
-          bad,
-        ).any((i) => i.reason == 'invalid_label_orientation'),
+        validateDocument(bad).any((i) => i.reason == 'invalid_value'),
         isTrue,
       );
     },

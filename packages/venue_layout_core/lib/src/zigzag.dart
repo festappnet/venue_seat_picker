@@ -19,14 +19,15 @@ LayoutNode zigzagLine(
   double amplitude = 12,
   String? id,
   Map<String, dynamic> properties = const {},
+  Map<String, dynamic>? style,
 }) => shapeFromPoints(
   'polyline',
   _points([startX, startY], [endX, endY], teeth, amplitude),
   id: id,
+  style:
+      style ??
+      const {'fill': '#00000000', 'stroke': '#334155FF', 'strokeWidth': 2},
   properties: {
-    'fill': '#00000000',
-    'stroke': '#334155FF',
-    'strokeWidth': 2,
     ...properties,
     'pathPattern': 'zigzag',
     'zigzagTeeth': teeth,

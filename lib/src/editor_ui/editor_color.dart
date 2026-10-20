@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'editor_image_palette.dart';
+import 'editor_dialog.dart';
 
 /// RGB plus unquantized opacity. Only RGBA serialization rounds alpha to a byte.
 @immutable
@@ -128,6 +129,8 @@ class EditorColorDialog extends StatefulWidget {
     this.validator,
     this.previewBuilder,
     this.onPreview,
+    this.dialogBuilder,
+    this.basicColors,
   });
   final EditorColorValue value;
   final EditorColorValue? secondaryValue;
@@ -139,6 +142,8 @@ class EditorColorDialog extends StatefulWidget {
   final String? Function(EditorColorResult)? validator;
   final Widget Function(BuildContext, EditorColorResult)? previewBuilder;
   final ValueChanged<EditorColorResult>? onPreview;
+  final Widget Function(BuildContext, AlertDialog)? dialogBuilder;
+  final List<String>? basicColors;
   @override
   State<EditorColorDialog> createState() => _EditorColorDialogState();
 }
@@ -227,33 +232,35 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
         children: [
           Text(tr(title), style: Theme.of(context).textTheme.labelMedium),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final hex in colors)
-                Tooltip(
-                  message: '#$hex',
-                  child: Semantics(
-                    label: '${tr('Set color')} #$hex',
-                    button: true,
-                    child: InkWell(
-                      key: ValueKey('editor-color-$title-$hex'),
-                      borderRadius: BorderRadius.circular(6),
-                      onTap: () => _change(
-                        EditorColorValue(hex: hex, opacity: _active.opacity),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: EditorColorSwatch(
-                          value: EditorColorValue(hex: hex),
-                          selected: hex == _active.hex,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              spacing: 6,
+              children: [
+                for (final hex in colors)
+                  Tooltip(
+                    message: '#$hex',
+                    child: Semantics(
+                      label: '${tr('Set color')} #$hex',
+                      button: true,
+                      child: InkWell(
+                        key: ValueKey('editor-color-$title-$hex'),
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => _change(
+                          EditorColorValue(hex: hex, opacity: _active.opacity),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: EditorColorSwatch(
+                            value: EditorColorValue(hex: hex),
+                            selected: hex == _active.hex,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -263,7 +270,7 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
   @override
   Widget build(BuildContext context) {
     final error = _inputError ?? widget.validator?.call(_result);
-    return AlertDialog(
+    final dialog = AlertDialog(
       title: Text(tr(widget.title)),
       content: SizedBox(
         width: 360,
@@ -272,6 +279,27 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              _palette('Used colors', widget.usedColors),
+              _palette('From artwork', _artwork),
+              _palette(
+                'Basic colors',
+                widget.basicColors ??
+                    const [
+                      '182230',
+                      '667085',
+                      'CBD5E1',
+                      'FFFFFF',
+                      '2563EB',
+                      '0F766E',
+                      '16A34A',
+                      'F59E0B',
+                      'DC2626',
+                      'DB2777',
+                      '7C3AED',
+                      '000000',
+                    ],
+              ),
+
               if (_secondary != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -389,22 +417,6 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
                   ),
                 ),
               ],
-              _palette('Used colors', widget.usedColors),
-              _palette('From artwork', _artwork),
-              _palette('Basic colors', const [
-                '182230',
-                '667085',
-                'CBD5E1',
-                'FFFFFF',
-                '2563EB',
-                '0F766E',
-                '16A34A',
-                'F59E0B',
-                'DC2626',
-                'DB2777',
-                '7C3AED',
-                '000000',
-              ]),
               if (widget.previewBuilder != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 16),
@@ -440,5 +452,7 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
         ),
       ],
     );
+    return widget.dialogBuilder?.call(context, dialog) ??
+        EditorDialogDismissal(child: dialog);
   }
 }

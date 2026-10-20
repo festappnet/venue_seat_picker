@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'editor_dialog.dart';
 
 @immutable
 class EditorFontOption {
@@ -47,7 +48,7 @@ class EditorFontPicker extends StatefulWidget {
     Widget? catalogFooter,
   }) async {
     if (!enabled) return;
-    await showDialog<void>(
+    await showEditorDialog<void>(
       context: context,
       builder: (context) => _FontChoices(
         options: options,

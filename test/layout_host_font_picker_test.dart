@@ -16,7 +16,11 @@ void main() {
         label: 'Table',
         x: 400,
         y: 300,
-        properties: {'size': 40.64},
+        properties: {},
+        surface: const {'type': 'rect'},
+        style: {
+          'label': {'size': 40.64},
+        },
       );
       final controller = VenueLayoutController(
         VenueLayoutDocument.empty().copyWith(nodes: [node]),
@@ -42,7 +46,7 @@ void main() {
       expect(calls, greaterThan(0));
       expect(find.text('Host full font catalog'), findsOneWidget);
       expect(find.byType(EditorFontPicker), findsNothing);
-      expect(find.byType(LayoutFontSizeControl), findsOneWidget);
+      expect(find.text('Font size'), findsOneWidget);
       expect(find.byTooltip('Bold'), findsOneWidget);
       expect(find.byTooltip('Italic'), findsOneWidget);
       final beforeView = calls;

@@ -1,11 +1,11 @@
+import 'text_contract.dart';
 import 'dart:math';
 import 'model.dart';
 import 'material_families.dart';
 import 'scene_floor.dart';
 import 'geometry.dart';
 import 'node_outline.dart';
-export 'node_outline.dart'
-    show ScenePath, nodePath, nodeOutlineContours, tableSeatFacingRotation;
+export 'node_outline.dart' show ScenePath, nodePath, nodeOutlineContours;
 
 // Offset each contour towards the filled surface. Unlike scaling a bounding
 // box, this keeps the rim inside concave branches and outside authored holes.
@@ -106,86 +106,6 @@ ScenePath _polygonMaterialPath(LayoutNode n, {required bool wood}) {
 
 ScenePath _qpath(ScenePath p) =>
     p.map((c) => [c[0], ...c.skip(1).map((v) => quantize(v as num))]).toList();
-ScenePath _glyphs(
-  LayoutNode n,
-  String text,
-  Map<String, dynamic> style,
-  Map<String, dynamic> resources,
-  List<Map<String, dynamic>> issues,
-) {
-  final fontId = style['fontId'] ?? 'fixture:sans',
-      font = (resources['fonts'] as Map?)?[fontId] as Map?;
-  void issue(String reason, [String? glyph]) => issues.add({
-    'reason': reason,
-    'path': 'resources.fonts.$fontId',
-    'nodeId': n.id,
-    if (glyph != null) 'glyph': glyph,
-  });
-  if (font == null) {
-    issue('font_unavailable');
-    return [];
-  }
-  final glyphs = font['glyphs'] as Map? ?? {},
-      units = (font['unitsPerEm'] as num? ?? 1000).toDouble(),
-      size = (style['size'] as num? ?? 24).toDouble(),
-      scale = size / units,
-      ascent = (font['ascent'] as num? ?? 800).toDouble(),
-      lineHeight = size * (style['lineHeight'] as num? ?? 1.2);
-  final lines = <List<String>>[[]];
-  final widths = <double>[0];
-  for (final rune in text.runes) {
-    final ch = String.fromCharCode(rune);
-    if (ch == '\n') {
-      lines.add([]);
-      widths.add(0);
-      continue;
-    }
-    final glyph = glyphs[ch] as Map?;
-    if (glyph == null) {
-      issue('glyph_unavailable', ch);
-      return [];
-    }
-    final advance = (glyph['advance'] as num? ?? 0) * scale;
-    if (widths.last + advance > n.width && lines.last.isNotEmpty) {
-      lines.add([]);
-      widths.add(0);
-    }
-    lines.last.add(ch);
-    widths[widths.length - 1] += advance;
-  }
-  if (lines.length * lineHeight > n.height + 0.001) issue('text_overflow');
-  final out = <List<dynamic>>[];
-  final align = style['align'] ?? 'left',
-      italic = style['italic'] == true || style['fontStyle'] == 'italic',
-      shear = italic ? 0.21255656167 : 0.0;
-  for (var l = 0; l < lines.length; l++) {
-    var cursor =
-        -n.width / 2 +
-        (align == 'center'
-            ? (n.width - widths[l]) / 2
-            : align == 'right'
-            ? n.width - widths[l]
-            : 0);
-    final baseline = -n.height / 2 + ascent * scale + l * lineHeight;
-    for (final ch in lines[l]) {
-      final glyph = glyphs[ch] as Map;
-      for (final raw in glyph['path'] as List? ?? []) {
-        final c = raw as List;
-        final command = <dynamic>[c[0]];
-        for (var i = 1; i + 1 < c.length; i += 2) {
-          final gx = (c[i] as num).toDouble(),
-              gy = (c[i + 1] as num).toDouble();
-          command.add(cursor + (gx + shear * gy) * scale);
-          command.add(baseline - gy * scale);
-        }
-        out.add(command);
-      }
-      cursor += (glyph['advance'] as num? ?? 0) * scale;
-    }
-  }
-  return _qpath(out);
-}
-
 final _sceneGeometryCache = Expando<_SceneGeometry>();
 
 class _SceneGeometry {
@@ -215,29 +135,6 @@ class _SceneGeometry {
   }
 }
 
-ScenePath _centerLabelVertically(ScenePath path) {
-  final points = <List<double>>[];
-  for (final command in path) {
-    for (var i = 1; i + 1 < command.length; i += 2) {
-      points.add([
-        (command[i] as num).toDouble(),
-        (command[i + 1] as num).toDouble(),
-      ]);
-    }
-  }
-  if (points.isEmpty) return path;
-  final bounds = boundsOfPoints(points),
-      dy = -bounds['y']! - bounds['height']! / 2;
-  return [
-    for (final c in path)
-      [
-        c.first,
-        for (var i = 1; i < c.length; i++)
-          quantize((c[i] as num) + (i.isEven ? dy : 0)),
-      ],
-  ];
-}
-
 Map<String, dynamic> compileSceneNodes(
   VenueLayoutDocument document,
   Set<String> nodeIds, {
@@ -263,6 +160,16 @@ Map<String, dynamic> _compileScene(
   Set<String>? nodeIds,
   bool includeCanvas = false,
 }) {
+  if (document.schemaVersion != 2) {
+    return {
+      'protocol': 1,
+      'canvas': document.canvas,
+      'items': <Map<String, dynamic>>[],
+      'issues': [
+        {'reason': 'canonical_document_required', 'path': 'schemaVersion'},
+      ],
+    };
+  }
   final cached = _sceneGeometryCache[document] ??= _SceneGeometry(document);
   final issues = cached.issues.toList(), items = <Map<String, dynamic>>[];
   if (issues.isNotEmpty)
@@ -344,7 +251,7 @@ Map<String, dynamic> _compileScene(
             : status == 'occupied'
             ? '#94A3B8FF'
             : n.kind == 'seat'
-            ? '#DCFCE7FF'
+            ? layoutDefaultSeatFill
             : n.kind == 'table'
             ? '#E2E8F0FF'
             : n.kind == 'capacityArea'
@@ -357,14 +264,107 @@ Map<String, dynamic> _compileScene(
         parent?.kind == 'furniture' &&
         parent?.properties['furniture'] == 'couch';
     final matrix = matrices[n.id]!.map(quantize).toList();
+    if (n.kind == 'vector' || n.kind == 'image') {
+      final graphic = n.graphic!;
+      final bounds = boundsOfPoints(worldHull(n, matrices[n.id]!));
+      void media(Map<String, dynamic> value) => items.add({
+        'id': '${n.id}:graphic:${items.length - firstItem}',
+        'nodeId': n.id,
+        'matrix': matrix,
+        'cullingBounds': bounds,
+        ...value,
+        'paintOrder': [cached.paintRanks[n.id]!, items.length - firstItem],
+      });
+      if (n.kind == 'vector') {
+        final w = (graphic['width'] as num).toDouble(),
+            h = (graphic['height'] as num).toDouble();
+        final local = <double>[
+          n.width / w,
+          0,
+          0,
+          n.height / h,
+          -n.width / 2,
+          -n.height / 2,
+        ];
+        final transform = multiplyMatrix(
+          matrices[n.id]!,
+          local,
+        ).map(quantize).toList();
+        media({
+          'kind': 'vectorClip',
+          'matrix': transform,
+          'path': [
+            ['M', 0, 0],
+            ['L', w, 0],
+            ['L', w, h],
+            ['L', 0, h],
+            ['Z'],
+          ],
+          'fillRule': 'nonzero',
+        });
+        media({
+          'kind': 'vectorLayer',
+          'opacity': resolveNodeAppearance(document, n).values['opacity'] ?? 1,
+        });
+        for (final raw in graphic['commands'] as List) {
+          final command = Map<String, dynamic>.from(raw as Map),
+              op = command.remove('op');
+          media({
+            'kind': switch (op) {
+              'path' => 'vectorPath',
+              'clip' => 'vectorClip',
+              'layer' => 'vectorLayer',
+              _ => 'vectorRestore',
+            },
+            'matrix': transform,
+            ...command,
+          });
+        }
+        media({'kind': 'vectorRestore'});
+        media({'kind': 'vectorRestore'});
+      } else {
+        final asset = (resources['assets'] as Map?)?[graphic['assetRef']];
+        if (asset is! Map ||
+            asset['hash'] != graphic['hash'] ||
+            asset['width'] is! num ||
+            asset['height'] is! num) {
+          issues.add({'reason': 'asset_unavailable', 'nodeId': n.id});
+          continue;
+        }
+        final crop = graphic['crop'] as Map,
+            w = asset['width'] as num,
+            h = asset['height'] as num;
+        media({
+          'kind': 'image',
+          'assetRef': graphic['assetRef'],
+          'width': w,
+          'height': h,
+          'opacity': resolveNodeAppearance(document, n).values['opacity'] ?? 1,
+          'sourceRect': {
+            'x': crop['x'] * w,
+            'y': crop['y'] * h,
+            'width': crop['width'] * w,
+            'height': crop['height'] * h,
+          },
+          'destinationRect': {
+            'x': -n.width / 2,
+            'y': -n.height / 2,
+            'width': n.width,
+            'height': n.height,
+          },
+        });
+      }
+      continue;
+    }
     if (n.kind != 'text') {
+      final pattern = props['strokePattern'] as Map?;
+      final strokeType = pattern?['type'];
+      final authoredDash = pattern?['lengths'];
       final dash =
-          (props['dash'] as List?)
-              ?.map((v) => (v as num).toDouble())
-              .toList() ??
-          (props['strokeStyle'] == 'dashed'
+          (authoredDash as List?)?.map((v) => (v as num).toDouble()).toList() ??
+          (strokeType == 'dashed'
               ? <double>[8, 5]
-              : props['strokeStyle'] == 'dotted'
+              : strokeType == 'dotted'
               ? <double>[2, 4]
               : <double>[]);
       final styledNode = identical(props, n.properties)
@@ -432,8 +432,8 @@ Map<String, dynamic> _compileScene(
     }
     final seatStyle = chairStyle(n.copyWith(properties: props));
     final objectStyle =
-        layoutMaterialFamilies[props['objectStyle']]?['construction'] ??
-        props['objectStyle'] ??
+        layoutMaterialFamilies[props['material']]?['construction'] ??
+        props['material'] ??
         'simple';
     final materialState =
         selected ||
@@ -527,11 +527,13 @@ Map<String, dynamic> _compileScene(
         if (curved) {
           // A restrained round construction mark above the centered label.
           final radius = min(n.width, n.height) * .045;
-          final markCenter = transformPoint(
-            inverseMatrix(matrix),
-            matrix[4],
-            matrix[5] - min(n.width, n.height) * .28,
-          );
+          final markCenter = props['orientation'] == 'object'
+              ? <double>[0, -min(n.width, n.height) * .28]
+              : transformPoint(
+                  inverseMatrix(matrix),
+                  matrix[4],
+                  matrix[5] - min(n.width, n.height) * .28,
+                );
           final mark = n.copyWith(
             width: radius * 2,
             height: radius * 2,
@@ -682,70 +684,30 @@ Map<String, dynamic> _compileScene(
         ? '${props['text'] ?? ''}'
         : '${state['label'] ?? n.label}';
     if (text.isNotEmpty) {
-      final style = {
-        ...document.defaultTextStyle,
-        ...props,
-        if (n.kind != 'text') 'align': 'center',
-      };
-      final rawPath = _glyphs(n, text, style, resources, issues);
-      final path = n.kind == 'text' ? rawPath : _centerLabelVertically(rawPath);
-      final labelMatrix =
-          n.kind == 'text' || props['labelOrientation'] == 'object'
-          ? matrix
-          : <double>[1, 0, 0, 1, matrix[4], matrix[5]];
-      if (n.kind == 'table' && props['shape'] == 'polygon') {
-        final polygon = localHull(n);
-        var longest = 0.0;
-        List<double>? anchor;
-        var area = 0.0;
-        for (var i = 0; i < polygon.length; i++) {
-          final a = polygon[i], b = polygon[(i + 1) % polygon.length];
-          area += a[0] * b[1] - b[0] * a[1];
-        }
-        for (var i = 0; i < polygon.length; i++) {
-          final a = polygon[i],
-              b = polygon[(i + 1) % polygon.length],
-              dx = b[0] - a[0],
-              dy = b[1] - a[1],
-              length = sqrt(dx * dx + dy * dy);
-          if (length <= longest) continue;
-          final inset = min(28.0, min(n.width, n.height) * .14);
-          final p = [
-            (a[0] + b[0]) / 2 + (area > 0 ? -dy : dy) / length * inset,
-            (a[1] + b[1]) / 2 + (area > 0 ? dx : -dx) / length * inset,
-          ];
-          if (pointInPolygon(polygon, p[0], p[1])) {
-            longest = length;
-            anchor = p;
-          }
-        }
-        if (anchor != null) {
-          final world = transformPoint(matrix, anchor[0], anchor[1]);
-          labelMatrix[4] = world[0];
-          labelMatrix[5] = world[1];
-        }
+      final prepared = preparedNodeText(
+        document,
+        n,
+        resources,
+        issues,
+        text: text,
+      );
+      if (prepared != null) {
+        final label = resolveNodeAppearance(document, n).label;
+        items.add({
+          'id': '${n.id}:text',
+          'nodeId': n.id,
+          'kind': 'glyphs',
+          'minZoom': 0,
+          'matrix': labelRenderMatrix(n, label, matrix),
+          'path': prepared['path'],
+          'localClip': prepared['clip'],
+          'fill': label['color'],
+          'stroke': '#00000000',
+          'strokeWidth': 0,
+          'label': text,
+          'textResourceId': prepared['id'],
+        });
       }
-      items.add({
-        'id': '${n.id}:text',
-        'nodeId': n.id,
-        'kind': 'glyphs',
-        // Authored labels are part of the plan, including at whole-canvas fit.
-        // Viewport culling still excludes labels outside the visible area.
-        'minZoom': 0,
-        'matrix': labelMatrix,
-        'path': path,
-        'fill': style['color'] ?? '#222222FF',
-        'stroke':
-            (n.kind == 'text' ? props['stroke'] : null) ??
-            (style['bold'] == true
-                ? style['color'] ?? '#222222FF'
-                : '#00000000'),
-        'strokeWidth':
-            (n.kind == 'text' ? props['strokeWidth'] : null) ??
-            (style['bold'] == true ? (style['size'] as num? ?? 24) * 0.025 : 0),
-        if (props['opacity'] != null) 'opacity': props['opacity'],
-        'label': text,
-      });
     }
     if (selected ||
         pending ||
@@ -791,7 +753,6 @@ Map<String, dynamic> _compileScene(
     }
     final capacity = state['capacity'] ?? cached.furnitureCapacity[n.id];
     if (!isCouch && capacity is num && capacity > 1) {
-      final badge = n.copyWith(width: 64, height: 24);
       final outlineBounds = boundsOfPoints(worldHull(n, matrices[n.id]!));
       items.add({
         'id': '${n.id}:badge',
@@ -806,14 +767,12 @@ Map<String, dynamic> _compileScene(
           quantize(outlineBounds['x']! + outlineBounds['width']! / 2),
           quantize(outlineBounds['y']! + outlineBounds['height']! + 16),
         ],
-        'path': _centerLabelVertically(
-          _glyphs(
-            badge,
-            '×$capacity',
-            {...document.defaultTextStyle, 'size': 16, 'align': 'center'},
-            resources,
-            issues,
-          ),
+        'path': canonicalNumberPath(
+          document,
+          capacity,
+          resources,
+          issues,
+          n.id,
         ),
         'fill': '#222222FF',
         'label': '$capacity places',
@@ -824,7 +783,7 @@ Map<String, dynamic> _compileScene(
     }
   }
   for (final item in items) {
-    item['bounds'] = sceneItemBounds(item);
+    item['bounds'] = item['cullingBounds'] ?? sceneItemBounds(item);
   }
   return {
     'protocol': 1,
@@ -912,7 +871,10 @@ bool sceneItemVisible(
   double zoom = 1,
 }) {
   if (zoom < (item['minZoom'] as num? ?? 0)) return false;
-  final b = item['bounds'] as Map? ?? sceneItemBounds(item);
+  final b =
+      item['cullingBounds'] as Map? ??
+      item['bounds'] as Map? ??
+      sceneItemBounds(item);
   return b['x'] + b['width'] >= viewport['x']! &&
       b['y'] + b['height'] >= viewport['y']! &&
       b['x'] <= viewport['x']! + viewport['width']! &&
@@ -1000,7 +962,8 @@ Map<String, dynamic> interpolateScene(
       'opacity': lerp(a['opacity'] as num? ?? 1, b['opacity'] as num? ?? 1),
     };
     final ap = a['path'] as List?, bp = b['path'] as List?;
-    if (ap != null &&
+    if (b['kind'] != 'glyphs' &&
+        ap != null &&
         bp != null &&
         ap.length == bp.length &&
         List.generate(
@@ -1018,7 +981,7 @@ Map<String, dynamic> interpolateScene(
           ],
       ];
     }
-    item['bounds'] = sceneItemBounds(item);
+    item['bounds'] = item['cullingBounds'] ?? sceneItemBounds(item);
     items[entry.key] = item;
   }
   return {...to, 'items': items};

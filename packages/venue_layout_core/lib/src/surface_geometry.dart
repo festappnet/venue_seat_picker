@@ -2,6 +2,7 @@ import 'dart:math';
 import 'model.dart';
 import 'table_seating.dart';
 import 'geometry.dart';
+import 'grid_surface.dart';
 
 /// Editable footprints use the same polygon contract as ordinary vector shapes.
 List<List<double>> surfacePresetPoints(
@@ -166,15 +167,26 @@ LayoutNode sketchSurface(
   final points = [...left, ...right.reversed];
   if (polygonSelfIntersects(points))
     throw StateError('The surface outline cannot cross itself.');
-  return shapeFromPoints(
-    'polygon',
-    points,
-    id: id,
-    properties: {
-      'fill': '#E2E8F0FF',
-      'stroke': '#475569FF',
-      'strokeWidth': 1,
-      if (bar) ...{'furniture': 'bar', 'guestSide': 'bottom'},
-    },
-  ).copyWith(kind: 'table');
+  {
+    final outline = shapeFromPoints('polygon', points, id: id);
+    final geometry = outline.copyWith(
+      kind: 'table',
+      properties: {
+        'shape': 'polygon',
+        'points': outline.properties['points'],
+        if (bar) ...{'furniture': 'bar', 'guestSide': 'bottom'},
+      },
+    );
+    final brush = GridSurfaceBrush.fromNode(geometry, snap: true);
+    return gridSurfaceReplacement(
+      geometry.copyWith(
+        surface: const {'type': 'rect'},
+        seating: const TableSeating().record,
+        properties: bar
+            ? const {'furniture': 'bar', 'guestSide': 'bottom'}
+            : const {},
+      ),
+      brush,
+    );
+  }
 }

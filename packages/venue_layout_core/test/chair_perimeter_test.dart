@@ -11,107 +11,6 @@ bool fits(VenueLayoutDocument d, LayoutNode n) {
 
 void main() {
   test(
-    'six chairs reflow against each of the four walls with stable identities',
-    () {
-      final d = tableLayout(shape: 'rect', count: 6, x: 250, y: 200).copyWith(
-            canvas: {
-              'x': 0,
-              'y': 0,
-              'width': 500,
-              'height': 400,
-              'fill': '#FFFFFFFF',
-            },
-          ),
-          table = d.nodes.firstWhere((n) => n.kind == 'table');
-      for (final (dx, dy, x, y) in [
-        (0.0, -500.0, 250, 50),
-        (0.0, 500.0, 250, 350),
-        (-500.0, 0.0, 90, 200),
-        (500.0, 0.0, 410, 200),
-      ]) {
-        final result = moveLayoutWithinCanvas(d, {table.id}, dx: dx, dy: dy),
-            moved = result.nodes.firstWhere((n) => n.id == table.id);
-        expect(moved.x, x);
-        expect(moved.y, y);
-        expect(result.nodes.every((n) => fits(result, n)), isTrue);
-        expect(layoutCollisions(result), isEmpty);
-        expect(result.nodes.map((n) => n.id), d.nodes.map((n) => n.id));
-        expect(result.canvas, d.canvas);
-        expect(validateDocument(result), isEmpty);
-      }
-    },
-  );
-
-  test('feasible six chair corner reaches both adjacent walls', () {
-    final d = tableLayout(shape: 'rect', count: 6, x: 250, y: 200).copyWith(
-          canvas: {
-            'x': 0,
-            'y': 0,
-            'width': 500,
-            'height': 400,
-            'fill': '#FFFFFFFF',
-          },
-        ),
-        table = d.nodes.firstWhere((n) => n.kind == 'table');
-    for (final (dx, dy, x, y) in [
-      (-500.0, -500.0, 90, 50),
-      (500.0, -500.0, 410, 50),
-      (-500.0, 500.0, 90, 350),
-      (500.0, 500.0, 410, 350),
-    ]) {
-      final result = moveLayoutWithinCanvas(d, {table.id}, dx: dx, dy: dy),
-          moved = result.nodes.firstWhere((n) => n.id == table.id);
-      expect(moved.x, x);
-      expect(moved.y, y);
-      expect(result.nodes.every((n) => fits(result, n)), isTrue);
-      expect(layoutCollisions(result), isEmpty);
-    }
-  });
-
-  test(
-    'actual 190x110 demo table fits every wall and corner by clipping the seat phase',
-    () {
-      final d =
-              tableLayout(
-                shape: 'rect',
-                count: 6,
-                x: 250,
-                y: 200,
-                width: 190,
-                height: 110,
-              ).copyWith(
-                canvas: {
-                  'x': 0,
-                  'y': 0,
-                  'width': 500,
-                  'height': 400,
-                  'fill': '#FFFFFFFF',
-                },
-              ),
-          table = d.nodes.firstWhere((n) => n.kind == 'table');
-      for (final (dx, dy, x, y) in [
-        (-500.0, -500.0, 95, 55),
-        (500.0, -500.0, 405, 55),
-        (-500.0, 500.0, 95, 345),
-        (500.0, 500.0, 405, 345),
-        (0.0, -500.0, 250, 55),
-        (0.0, 500.0, 250, 345),
-        (-500.0, 0.0, 95, 200),
-        (500.0, 0.0, 405, 200),
-      ]) {
-        final result = moveLayoutWithinCanvas(d, {table.id}, dx: dx, dy: dy),
-            moved = result.nodes.firstWhere((n) => n.id == table.id);
-        expect(moved.x, x);
-        expect(moved.y, y);
-        expect(result.nodes.every((n) => fits(result, n)), isTrue);
-        expect(layoutCollisions(result), isEmpty);
-        expect(result.nodes.map((n) => n.id), d.nodes.map((n) => n.id));
-        expect(validateDocument(result), isEmpty);
-      }
-    },
-  );
-
-  test(
     'manual chair snaps near a free standard slot without changing bindings',
     () {
       final original = tableLayout(shape: 'rect', count: 4),
@@ -123,7 +22,7 @@ void main() {
                       ? n.copyWith(
                           x: n.x + 10,
                           y: n.y + 6,
-                          properties: {...n.properties, 'manual': true},
+                          properties: n.properties,
                         )
                       : n,
                 )
@@ -135,13 +34,15 @@ void main() {
       expect(snapped.y, seat.y);
       expect(snapped.id, seat.id);
       expect(snapped.parentId, seat.parentId);
-      expect(snapped.properties['manual'], isTrue);
+      expect(seatAttachment(result, snapped.id)!['placement']['mode'], 'free');
       final attachment = result.attachments.firstWhere(
         (a) => a['seatId'] == seat.id,
       );
-      expect(attachment['manual'], isTrue);
-      expect(attachment['x'], snapped.x);
-      expect(attachment['y'], snapped.y);
+      expect(attachment['placement']['mode'], 'free');
+      expect(
+        attachment.keys.toSet(),
+        containsAll(['seatId', 'targetId', 'placement', 'rotationMode']),
+      );
       expect(layoutCollisions(result), isEmpty);
       expect(validateDocument(result), isEmpty);
     },

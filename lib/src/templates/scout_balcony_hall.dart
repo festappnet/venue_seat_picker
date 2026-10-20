@@ -31,19 +31,12 @@ VenueLayoutDocument scoutBalconyHall() {
         width: w,
         height: h,
         z: z,
-        properties: {
-          'shape': 'rect',
+        properties: {'shape': 'rect', 'role': 'decoration'},
+        style: {
           'fill': fill,
           'stroke': stroke,
           'strokeWidth': 3.52,
           'cornerRadius': 0,
-          'role': 'decoration',
-          'appearanceOverrides': [
-            'fill',
-            'stroke',
-            'strokeWidth',
-            'cornerRadius',
-          ],
         },
       ),
     );
@@ -69,14 +62,14 @@ VenueLayoutDocument scoutBalconyHall() {
         height: size * 1.3,
         rotation: rotation,
         label: value,
-        properties: {
-          'text': value,
-          'size': size,
-          'align': 'center',
-          'bold': true,
-          'color': '#000000FF',
-          'role': 'decoration',
-          'appearanceOverrides': ['color'],
+        properties: {'text': value, 'role': 'decoration'},
+        style: {
+          'label': {
+            'size': size,
+            'align': 'center',
+            'weight': 700,
+            'color': '#000000FF',
+          },
         },
       ),
     );
@@ -124,17 +117,22 @@ VenueLayoutDocument scoutBalconyHall() {
       height: vertical ? r.$4 - r.$2 : r.$5 - r.$3,
       rotation: vertical ? 270 : 0,
       label: 'Stůl ${r.$1}',
-      properties: {
-        'seatWidth': 77.5,
-        'seatHeight': 77.5,
-        'seatGap': 11.25,
-        'seatSpacing': 22.5,
-        'seatEdgePadding': 0,
-        'shape': 'rect',
-        'size': 98,
-        'labelOrientation': 'object',
-        'lineHeight': 1,
-        'bold': true,
+      surface: const {'type': 'rect'},
+      seating: const {
+        'width': 77.5,
+        'height': 77.5,
+        'gap': 11.25,
+        'spacing': 22.5,
+        'edgePadding': 0,
+      },
+      properties: const {},
+      style: {
+        'label': {
+          'size': 98,
+          'orientation': 'object',
+          'lineHeight': 1,
+          'weight': 700,
+        },
       },
     );
     nodes.add(table);
@@ -159,11 +157,19 @@ VenueLayoutDocument scoutBalconyHall() {
         width: referenceHallSeatSize,
         height: referenceHallSeatSize,
         label: s.$2,
-        properties: {'symbol': 'chair', 'manual': true},
+        properties: {'symbol': 'chair'},
       ),
     );
   }
   final document = VenueLayoutDocument(
+    schemaVersion: 2,
+    seatingDefaults: const {
+      'width': 77.5,
+      'height': 77.5,
+      'gap': 11.25,
+      'spacing': 22.5,
+      'edgePadding': 0,
+    },
     canvas: {
       'x': 0,
       'y': 0,
@@ -178,17 +184,21 @@ VenueLayoutDocument scoutBalconyHall() {
       {'id': newLayoutId(), 'title': 'Sál', 'rootId': hall},
       {'id': newLayoutId(), 'title': 'Balkón', 'rootId': balcony},
     ],
-    appearance: {
-      'table': {
-        'objectStyle': 'simple',
-        'fill': '#D0D5C9FF',
-        'stroke': '#666666FF',
-        'strokeWidth': 3.61,
-        'cornerRadius': 15,
-        'color': '#000000FF',
+    styles: {
+      'kinds': {
+        'table': {
+          'material': 'simple',
+          'fill': '#D0D5C9FF',
+          'stroke': '#666666FF',
+          'strokeWidth': 3.61,
+          'cornerRadius': 15,
+          'label': {'color': '#000000FF'},
+        },
+        'seat': referenceHallSeatStyle,
+        'text': {
+          'label': {'color': '#000000FF'},
+        },
       },
-      'seat': referenceHallSeatAppearance,
-      'text': {'color': '#000000FF'},
     },
   );
   return document;

@@ -28,10 +28,47 @@ class ExampleApp extends StatelessWidget {
   );
 }
 
-class DemoPrices implements LayoutHistoryParticipant {
+class DemoPrices extends LayoutHistoryParticipant {
   Map<String, dynamic> values = {};
   @override
   Object capture() => jsonDecode(jsonEncode(values));
+  @override
+  Object? prepare(
+    VenueLayoutDocument before,
+    VenueLayoutDocument after,
+    Object? checkpoint, {
+    required bool restoring,
+    required LayoutEditIntent intent,
+  }) {
+    final proposed = restoring ? checkpoint : capture();
+    if (proposed is! Map)
+      throw const FormatException('Invalid price checkpoint');
+    final ids = {
+      for (final n in after.nodes)
+        if (const {
+          'seat',
+          'table',
+          'group',
+          'furniture',
+          'capacityArea',
+        }.contains(n.kind))
+          n.id,
+    };
+    final next = <String, dynamic>{};
+    for (final entry in proposed.entries) {
+      if (entry.key is! String ||
+          entry.value is! int ||
+          entry.value < 0 ||
+          entry.value > 100000000)
+        throw const FormatException('Invalid sample price');
+      if (ids.contains(entry.key))
+        next[entry.key as String] = entry.value;
+      else if (restoring)
+        throw const FormatException('Orphaned price checkpoint');
+    }
+    return frozenMap(next);
+  }
+
   @override
   void restore(Object? checkpoint) {
     values = Map<String, dynamic>.from(checkpoint as Map);
@@ -119,13 +156,11 @@ class _ExamplePageState extends State<ExamplePage> {
             'Local storage unavailable or draft invalid. File export remains available.';
       }
       resources = await _decodeImages(resources);
-      doc = repairLegacyRowTangents(localizeLayoutDefaultLabels(doc, demoText));
+      doc = localizeLayoutDefaultLabels(doc, demoText);
       _attach(doc);
       baseline = recoveredBaseline == null
           ? doc
-          : repairLegacyRowTangents(
-              localizeLayoutDefaultLabels(recoveredBaseline, demoText),
-            );
+          : localizeLayoutDefaultLabels(recoveredBaseline, demoText);
       baselinePrices = recoveredPrices ?? Map.from(prices.values);
       controller.setSavedBaseline(
         baseline!,
@@ -189,7 +224,7 @@ class _ExamplePageState extends State<ExamplePage> {
         }
         final asset = entry.value as Map;
         final image = await _decodeImage(
-          base64Decode(asset['data'] as String),
+          Uri.parse(asset['url'] as String).data!.contentAsBytes(),
           width: asset['width'] as int?,
           height: asset['height'] as int?,
         );
@@ -218,7 +253,7 @@ class _ExamplePageState extends State<ExamplePage> {
       );
       if (file == null) return;
       if (await file.length() > DemoBundle.maxAssetBytes) {
-        throw const FormatException('Background exceeds 8 MiB');
+        throw const FormatException('Background exceeds 800 KiB');
       }
       final bytes = await file.readAsBytes();
       final hash = sha256.convert(bytes).toString(), ref = 'image:$hash';
@@ -233,10 +268,17 @@ class _ExamplePageState extends State<ExamplePage> {
         resources['assets'] as Map? ?? {},
       );
       assets[ref] = {
-        'data': base64Encode(bytes),
-        'size': bytes.length,
-        'sha256': hash,
-        'mime': file.name.toLowerCase().endsWith('png')
+        'hash': hash,
+        'byteLength': bytes.length,
+        'url': Uri.dataFromBytes(
+          bytes,
+          mimeType: file.name.toLowerCase().endsWith('png')
+              ? 'image/png'
+              : file.name.toLowerCase().endsWith('webp')
+              ? 'image/webp'
+              : 'image/jpeg',
+        ).toString(),
+        'mimeType': file.name.toLowerCase().endsWith('png')
             ? 'image/png'
             : file.name.toLowerCase().endsWith('webp')
             ? 'image/webp'
@@ -565,23 +607,25 @@ class _ExamplePageState extends State<ExamplePage> {
       final imported = DemoBundle.decode(
         await file.readAsBytes(),
       ); // Validate everything before mutation.
-      final oldFonts = resources['fonts'] as Map? ?? {};
-      final newFonts = imported.resources['fonts'] as Map? ?? {};
-      for (final id in newFonts.keys) {
-        if (oldFonts[id] is Map &&
-            oldFonts[id]['hash'] != newFonts[id]['hash']) {
-          throw const FormatException('Font identity collision');
-        }
-      }
       final importedResources = <String, dynamic>{
         ...resources,
         ...imported.resources,
       };
-      for (final key in ['fonts', 'assets']) {
-        importedResources[key] = {
-          ...resources[key] as Map? ?? {},
-          ...imported.resources[key] as Map? ?? {},
-        };
+      for (final key in [
+        'fontFamilies',
+        'fontFaces',
+        'textLayouts',
+        'numberSymbols',
+        'assets',
+      ]) {
+        final old = resources[key] as Map? ?? {},
+            next = imported.resources[key] as Map? ?? {};
+        for (final id in next.keys)
+          if (old.containsKey(id) &&
+              canonicalContractJson(old[id]) != canonicalContractJson(next[id]))
+            throw FormatException('Immutable resource collision: $key/$id');
+        if (old.isNotEmpty || next.isNotEmpty)
+          importedResources[key] = {...old, ...next};
       }
       DemoBundle(imported.document, importedResources, imported.host).encode();
       if (!await _protectDraft() || !mounted) return;
@@ -895,7 +939,13 @@ class _ExamplePageState extends State<ExamplePage> {
     final original = resources;
     final staleRequest = ++fontRequest;
     final slow = Future<void>.delayed(const Duration(milliseconds: 160), () {
-      if (staleRequest == fontRequest) controller.setResources({'fonts': {}});
+      if (staleRequest == fontRequest)
+        controller.setResources({
+          'protocol': 2,
+          'fontFamilies': {},
+          'textLayouts': {},
+          'numberSymbols': {},
+        });
     });
     final latestRequest = ++fontRequest;
     await Future<void>.delayed(const Duration(milliseconds: 20));

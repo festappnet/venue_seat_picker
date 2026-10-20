@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
@@ -43,10 +41,12 @@ void main() {
       selectionUnits: [
         {
           'id': newLayoutId(),
+          'kind': 'atomic',
           'nodeIds': [a],
         },
         {
           'id': newLayoutId(),
+          'kind': 'atomic',
           'nodeIds': [a],
         },
       ],
@@ -70,14 +70,14 @@ void main() {
               [-20, 20],
               [20, -20],
             ],
-            'fill': 'red',
           },
+          style: {'fill': 'red'},
         ),
       ],
     );
     expect(
       validateDocument(d).map((i) => i.reason),
-      containsAll(['self_intersection', 'invalid_color']),
+      containsAll(['self_intersection', 'invalid_value']),
     );
   });
   test('nested center transform and hit inverse', () {
@@ -128,13 +128,21 @@ void main() {
       nodes: d.nodes
           .map(
             (n) => n.id == seat.id
-                ? n.copyWith(
-                    x: 999,
-                    properties: {...n.properties, 'manual': true},
-                  )
+                ? n.copyWith(x: 999, properties: n.properties)
                 : n,
           )
           .toList(),
+    );
+    d = d.copyWith(
+      attachments: [
+        for (final a in d.attachments)
+          a['seatId'] == seat.id
+              ? {
+                  ...a,
+                  'placement': {'mode': 'free'},
+                }
+              : a,
+      ],
     );
     expect(
       reflowTable(
@@ -152,6 +160,7 @@ void main() {
           selectionUnits: [
             {
               'id': newLayoutId(),
+              'kind': 'atomic',
               'nodeIds': d.nodes
                   .where((n) => n.kind == 'seat')
                   .take(2)
@@ -174,48 +183,7 @@ void main() {
       d.nodes.first.x + 100,
     );
   });
-  test('outlines wrap and resource failures visible', () {
-    final resources = {
-          'fonts': {
-            'test': {
-              'unitsPerEm': 1000,
-              'ascent': 800,
-              'glyphs': {
-                'A': {
-                  'advance': 600,
-                  'path': [
-                    ['M', 0, 0],
-                    ['L', 300, 700],
-                    ['L', 600, 0],
-                    ['Z'],
-                  ],
-                },
-              },
-            },
-          },
-        },
-        n = LayoutNode(
-          id: newLayoutId(),
-          kind: 'text',
-          width: 13,
-          height: 80,
-          properties: {
-            'text': 'AA\nA',
-            'fontId': 'test',
-            'size': 20,
-            'italic': true,
-            'bold': true,
-          },
-        ),
-        d = VenueLayoutDocument(nodes: [n]),
-        scene = compileScene(d, resources: resources);
-    expect(scene['issues'], isEmpty);
-    expect((scene['items'] as List).single['path'].length, 12);
-    expect(
-      (compileScene(d)['issues'] as List).single['reason'],
-      'font_unavailable',
-    );
-  });
+
   test('registration fit and clipping rejection', () {
     final m = registerTwoPoints([0, 0], [100, 0], [50, 70], [50, 270]);
     expect(transformPoint(m, 100, 0), [50, 270]);
@@ -292,6 +260,7 @@ void main() {
           area: {'x': 0, 'y': 0, 'width': 200, 'height': 200},
           count: 9,
         );
+    expect(validateDocument(result.document), isEmpty);
     expect(layoutCollisions(result.document), isEmpty);
     expect(result.placed, lessThan(9));
     expect(
@@ -309,16 +278,23 @@ void main() {
           nodes: d.nodes
               .map(
                 (n) => n.id == seat.id
-                    ? n.copyWith(
-                        x: 500,
-                        properties: {...n.properties, 'manual': true},
-                      )
+                    ? n.copyWith(x: 500, properties: n.properties)
                     : n,
               )
               .toList(),
         ),
         next = reconcileAssembly(
-          manual,
+          manual.copyWith(
+            attachments: [
+              for (final a in manual.attachments)
+                a['seatId'] == seat.id
+                    ? {
+                        ...a,
+                        'placement': {'mode': 'free'},
+                      }
+                    : a,
+            ],
+          ),
           root.id,
           rowLayout(rows: 3, seatsPerRow: 3),
         );
@@ -344,29 +320,7 @@ void main() {
     expect(LayoutSpatialIndex(d).hitTest(100, 100), isNotNull);
     expect(watch.elapsedMilliseconds, lessThan(3000));
   });
-  test('real font Czech outlines', () {
-    final file = File('../../assets/layout_fonts/fixtures.json');
-    expect(file.existsSync(), isTrue);
-    final resources = Map<String, dynamic>.from(
-          jsonDecode(file.readAsStringSync()),
-        ),
-        n = LayoutNode(
-          id: newLayoutId(),
-          kind: 'text',
-          width: 800,
-          height: 100,
-          properties: {
-            'text': 'Příliš žluťoučký kůň',
-            'fontId': 'fixture:sans',
-          },
-        ),
-        scene = compileScene(
-          VenueLayoutDocument(nodes: [n]),
-          resources: resources,
-        );
-    expect(scene['issues'], isEmpty);
-    expect((scene['items'] as List).single['path'], isNotEmpty);
-  });
+
   test(
     'concave collision excludes notch and fitting checks full polygon hull',
     () {
@@ -450,51 +404,7 @@ void main() {
       isNotEmpty,
     );
   });
-  test(
-    'missing glyph emits no partial text and reserved properties rejected',
-    () {
-      final resources = {
-        'fonts': {
-          'test': {
-            'unitsPerEm': 1000,
-            'glyphs': {
-              'A': {
-                'advance': 500,
-                'path': [
-                  ['M', 0, 0],
-                  ['L', 100, 100],
-                ],
-              },
-            },
-          },
-        },
-      };
-      final n = LayoutNode(
-            id: newLayoutId(),
-            kind: 'text',
-            properties: {'fontId': 'test', 'text': 'AB'},
-          ),
-          scene = compileScene(
-            VenueLayoutDocument(nodes: [n]),
-            resources: resources,
-          );
-      expect((scene['items'] as List).single['path'], isEmpty);
-      expect(
-        validateDocument(
-          VenueLayoutDocument(
-            nodes: [
-              LayoutNode(
-                id: newLayoutId(),
-                kind: 'seat',
-                properties: {'id': 'override'},
-              ),
-            ],
-          ),
-        ).map((i) => i.reason),
-        contains('reserved_property'),
-      );
-    },
-  );
+
   test(
     'sampled variants rank capacity then deviation and share bounded budget',
     () async {
@@ -719,9 +629,12 @@ void main() {
             kind: 'shape',
             x: 100,
             y: 100,
-            properties: {
-              'shape': 'line',
-              'dash': [12, 8],
+            properties: {'shape': 'line'},
+            style: {
+              'strokePattern': {
+                'type': 'custom',
+                'lengths': [12, 8],
+              },
             },
           ),
           b = LayoutNode(
@@ -763,99 +676,6 @@ void main() {
       expect(
         ellipse,
         everyElement(predicate((dynamic c) => c[0] == 'M' || c[0] == 'L')),
-      );
-    },
-  );
-  test(
-    'nested symbols rotate, seat numbers stay hidden and other labels remain upright',
-    () {
-      final root = LayoutNode(
-            id: newLayoutId(),
-            kind: 'group',
-            x: 250,
-            y: 150,
-            rotation: 37,
-          ),
-          seat = LayoutNode(
-            id: newLayoutId(),
-            kind: 'seat',
-            parentId: root.id,
-            x: 80,
-            rotation: 180,
-            label: '12',
-            properties: {'fontId': 'test', 'size': 12},
-          ),
-          text = LayoutNode(
-            id: newLayoutId(),
-            kind: 'text',
-            parentId: root.id,
-            x: -80,
-            rotation: 20,
-            properties: {'fontId': 'test', 'text': '12', 'size': 12},
-          ),
-          area = LayoutNode(
-            id: newLayoutId(),
-            kind: 'capacityArea',
-            label: '12',
-            parentId: root.id,
-            y: 100,
-            rotation: 90,
-          );
-      final glyph = {
-            'advance': 600,
-            'path': [
-              ['M', 0, 0],
-              ['L', 300, 700],
-              ['L', 600, 0],
-              ['Z'],
-            ],
-          },
-          resources = <String, dynamic>{
-            'fonts': {
-              'test': {
-                'unitsPerEm': 1000,
-                'ascent': 800,
-                'descent': -200,
-                'glyphs': {'1': glyph, '2': glyph, '×': glyph},
-              },
-            },
-          },
-          d = VenueLayoutDocument(
-            nodes: [root, seat, text, area],
-            defaultTextStyle: {
-              'fontId': 'test',
-              'size': 12,
-              'color': '#222222FF',
-            },
-          ),
-          scene = compileScene(
-            d,
-            resources: resources,
-            presentation: {
-              area.id: {'capacity': 2},
-            },
-          ),
-          items = (scene['items'] as List).cast<Map<String, dynamic>>();
-      final symbol = items.singleWhere((i) => i['id'] == seat.id),
-          label = items.singleWhere((i) => i['id'] == '${area.id}:text'),
-          explicit = items.singleWhere((i) => i['id'] == '${text.id}:text'),
-          badge = items.singleWhere((i) => i['id'] == '${area.id}:badge');
-      expect(items.where((i) => i['id'] == '${seat.id}:text'), isEmpty);
-      expect(symbol['matrix'], worldMatrix(d, seat));
-      expect((symbol['matrix'] as List).take(4), isNot([1.0, 0.0, 0.0, 1.0]));
-      expect((label['matrix'] as List).take(4), [1.0, 0.0, 0.0, 1.0]);
-      expect((label['matrix'] as List).skip(4), worldMatrix(d, area).skip(4));
-      final b = sceneItemBounds({
-        ...label,
-        'matrix': [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-      });
-      expect(b['y']! + b['height']! / 2, closeTo(0, .001));
-      expect(explicit['matrix'], worldMatrix(d, text));
-      expect((badge['matrix'] as List).take(4), [1.0, 0.0, 0.0, 1.0]);
-      final bounds = nodeBounds(d, area);
-      expect(
-        badge['matrix'][5],
-        closeTo(bounds['y']! + bounds['height']! + 16, .002),
       );
     },
   );

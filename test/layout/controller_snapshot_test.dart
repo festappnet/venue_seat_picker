@@ -1,3 +1,4 @@
+import '../../packages/venue_layout_core/test/support/style.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 
@@ -52,16 +53,14 @@ void main() {
       expect(c.dirty, isTrue);
       c.undo();
       expect(c.dirty, isFalse);
-      final themed = setLayoutAppearance(c.document, 'seat', {
-        'seatStyle': 'wood',
-      });
+      final themed = withKindStyle(c.document, 'seat', {'seatStyle': 'wood'});
       expect(c.apply(themed), isTrue);
       expect(c.dirty, isTrue);
       c.markSaved();
       expect(c.dirty, isFalse);
       expect(
         c.apply(
-          setLayoutAppearance(c.document, 'seat', {'seatStyle': 'upholstered'}),
+          withKindStyle(c.document, 'seat', {'seatStyle': 'upholstered'}),
         ),
         isTrue,
       );

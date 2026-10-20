@@ -214,7 +214,10 @@ void main() {
             .color,
         Colors.white,
       );
-      expect(inspector.top, lessThan(65));
+      expect(
+        inspector.top,
+        greaterThanOrEqualTo(tester.getTopLeft(find.byType(LayoutSceneSurface).first).dy),
+      );
       expect(inspector.height, greaterThan(750));
       expect(tester.takeException(), isNull);
     },

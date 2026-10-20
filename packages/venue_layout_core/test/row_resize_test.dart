@@ -18,10 +18,10 @@ void main() {
                     ? n.copyWith(
                         width: 44,
                         height: 36,
-                        properties: {
-                          ...n.properties,
+                        properties: {...n.properties},
+                        style: {
                           'fill': '#123456FF',
-                          'size': 14,
+                          'label': {'size': 14},
                         },
                       )
                     : n,
@@ -180,13 +180,21 @@ void main() {
         nodes: document.nodes
             .map(
               (n) => n.id == seat.id
-                  ? n.copyWith(
-                      x: -150,
-                      properties: {...n.properties, 'manual': true},
-                    )
+                  ? n.copyWith(x: -150, properties: n.properties)
                   : n,
             )
             .toList(),
+      );
+      document = document.copyWith(
+        attachments: [
+          for (final a in document.attachments)
+            a['seatId'] == seat.id
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                  }
+                : a,
+        ],
       );
       final before = rowAssemblyBounds(document, document.nodes.first.id),
           result = resizeRowAssembly(

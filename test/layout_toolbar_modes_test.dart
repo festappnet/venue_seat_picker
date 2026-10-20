@@ -32,6 +32,25 @@ void main() {
       await mount(true);
       final select = tester.getRect(tool('Select'));
       final pan = tester.getRect(tool('Pan'));
+      final toolbar = find.byKey(const ValueKey('layout-editor-toolbar'));
+      expect(
+        find.descendant(of: toolbar, matching: tool('Select')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: toolbar, matching: tool('Pan')),
+        findsOneWidget,
+      );
+      expect(select.center.dy, pan.center.dy);
+      expect(
+        find.descendant(of: toolbar, matching: find.text('Plan style')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: toolbar, matching: find.text('Choose template')),
+        findsNothing,
+      );
+
       expect(
         find.descendant(of: tool('Select'), matching: find.text('Select')),
         findsOneWidget,
@@ -40,13 +59,11 @@ void main() {
         find.descendant(of: tool('Pan'), matching: find.text('Pan')),
         findsOneWidget,
       );
-      expect(tool('Resize'), findsOneWidget);
-      expect(tool('Rotate'), findsOneWidget);
+      expect(tool('Resize'), findsNothing);
+      expect(tool('Rotate'), findsNothing);
       await mount(false);
-      expect(tester.getRect(tool('Select')), select);
-      expect(tester.getRect(tool('Pan')), pan);
-      expect(tool('Select'), findsOneWidget);
-      expect(tool('Pan'), findsOneWidget);
+      expect(tool('Select'), findsNothing);
+      expect(tool('Pan'), findsNothing);
       expect(tool('Resize'), findsNothing);
       expect(tool('Rotate'), findsNothing);
     });

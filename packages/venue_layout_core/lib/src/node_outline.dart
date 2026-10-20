@@ -51,6 +51,8 @@ ScenePath polygonContourPath(List points, {double cornerRadius = 0}) {
 /// Canonical visual outline shared by both renderers and the hit index.
 /// Collision/resize footprints remain the authored width/height hull.
 ScenePath nodePath(LayoutNode n, {LayoutNode? parent}) {
+  if (n.surface != null)
+    n = n.copyWith(properties: surfaceGeometryProperties(n));
   final styled = _chairContours(n, parent);
   if (styled != null) return contoursPath(styled);
   final w = quantize(n.width) / 2,
@@ -97,9 +99,17 @@ ScenePath nodePath(LayoutNode n, {LayoutNode? parent}) {
             (b[0] as num) - (a[0] as num),
           );
       result.addAll([
-        ['M', b[0] - headLength * cos(angle - 0.5), b[1] - headLength * sin(angle - 0.5)],
+        [
+          'M',
+          b[0] - headLength * cos(angle - 0.5),
+          b[1] - headLength * sin(angle - 0.5),
+        ],
         ['L', b[0], b[1]],
-        ['L', b[0] - headLength * cos(angle + 0.5), b[1] - headLength * sin(angle + 0.5)],
+        [
+          'L',
+          b[0] - headLength * cos(angle + 0.5),
+          b[1] - headLength * sin(angle + 0.5),
+        ],
       ]);
     }
     return result;
@@ -138,7 +148,7 @@ ScenePath nodePath(LayoutNode n, {LayoutNode? parent}) {
 
 String chairStyle(LayoutNode node) =>
     node.properties['seatStyle'] as String? ??
-    switch (node.properties['objectStyle']) {
+    switch (node.properties['material']) {
       'wood' || 'hall' => 'wood',
       'lounge' => 'upholstered',
       'round' => 'round',
@@ -150,54 +160,6 @@ String chairStyle(LayoutNode node) =>
 bool _cushion(LayoutNode node, LayoutNode? parent) =>
     node.properties['furniture'] == 'cushion' ||
     parent?.kind == 'furniture' && parent?.properties['furniture'] == 'couch';
-
-/// Attached chairs face the tabletop. Local +Y is the backrest direction;
-/// manual placement changes position, not the attachment's facing constraint.
-/// A detached chair retains its authored rotation.
-double tableSeatFacingRotation(LayoutNode seat, LayoutNode? table) {
-  if (seat.kind != 'seat' ||
-      table?.kind != 'table' ||
-      seat.properties['manualRotation'] == true)
-    return seat.rotation;
-  var dx = seat.x, dy = seat.y;
-  if (!const [
-    'circle',
-    'round',
-    'ellipse',
-    'oval',
-  ].contains(table!.properties['shape'])) {
-    final points = table.properties['points'];
-    if (table.properties['shape'] == 'polygon' &&
-        points is List &&
-        points.length >= 3) {
-      var best = double.infinity;
-      for (var i = 0; i < points.length; i++) {
-        final a = points[i] as List,
-            b = points[(i + 1) % points.length] as List;
-        final ax = (a[0] as num).toDouble(), ay = (a[1] as num).toDouble();
-        final vx = (b[0] as num) - ax, vy = (b[1] as num) - ay;
-        final length = vx * vx + vy * vy;
-        final t = length == 0
-            ? 0.0
-            : ((seat.x - ax) * vx + (seat.y - ay) * vy) / length;
-        final x = seat.x - ax - vx * t.clamp(0, 1),
-            y = seat.y - ay - vy * t.clamp(0, 1);
-        final distance = x * x + y * y;
-        if (distance < best) {
-          best = distance;
-          dx = x;
-          dy = y;
-        }
-      }
-    } else {
-      dx -= seat.x.clamp(-table.width / 2, table.width / 2);
-      dy -= seat.y.clamp(-table.height / 2, table.height / 2);
-    }
-  }
-  return dx.abs() + dy.abs() < .000001
-      ? seat.rotation
-      : quantize(atan2(-dx, dy) * 180 / pi);
-}
 
 List<List<List<double>>>? _chairContours(LayoutNode node, LayoutNode? parent) {
   if (isStoolNode(node, parent: parent)) {
@@ -222,7 +184,7 @@ List<List<List<double>>>? _chairContours(LayoutNode node, LayoutNode? parent) {
     ];
   }
   if (node.kind == 'seat' && _cushion(node, parent)) {
-    if ((node.properties['objectStyle'] ?? parent?.properties['objectStyle']) ==
+    if ((node.properties['material'] ?? parent?.properties['material']) ==
         'lounge') {
       final w = quantize(node.width) * .42, h = quantize(node.height) * .42;
       // Inset pillowy cushions leave the lounge's thicker arms/back visible;

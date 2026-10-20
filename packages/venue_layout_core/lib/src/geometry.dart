@@ -43,7 +43,7 @@ Map<String, List<double>> worldMatrices(VenueLayoutDocument d) {
     if (cache[n.id] != null) return cache[n.id]!;
     if (!visiting.add(n.id)) throw ArgumentError('Parent cycle');
     final p = nodes[n.parentId];
-    final rotation = tableSeatFacingRotation(n, p);
+    final rotation = n.rotation;
     final local = localMatrix(
       rotation == n.rotation ? n : n.copyWith(rotation: rotation),
     );
@@ -63,6 +63,8 @@ Map<String, List<double>> worldMatrices(VenueLayoutDocument d) {
 List<double> worldMatrix(VenueLayoutDocument d, LayoutNode n) =>
     worldMatrices(d)[n.id]!.map(quantize).toList();
 List<List<double>> localHull(LayoutNode n) {
+  if (n.surface != null)
+    n = n.copyWith(properties: surfaceGeometryProperties(n));
   final shape = n.properties['shape'];
   if (shape == 'polygon' && n.properties['points'] is List)
     return (n.properties['points'] as List)
@@ -338,7 +340,8 @@ class LayoutSpatialIndex {
       if (_openPath(n)) {
         final padding = max(
           3.0,
-          (n.properties['strokeWidth'] as num? ?? 1) / 2,
+          (effectiveNodeProperties(document, n)['strokeWidth'] as num? ?? 1) /
+              2,
         );
         b['x'] = b['x']! - padding;
         b['y'] = b['y']! - padding;
@@ -396,12 +399,15 @@ class LayoutSpatialIndex {
               pow(
                 max(
                   tolerance ?? 3,
-                  (n.properties['strokeWidth'] as num? ?? 1) / 2,
+                  (effectiveNodeProperties(document, n)['strokeWidth']
+                              as num? ??
+                          1) /
+                      2,
                 ),
                 2,
               ))
             return n.properties['role'] == 'decoration' &&
-                    _nodes[n.parentId]?.properties['assembly'] != null
+                    _nodes[n.parentId]?.assembly != null
                 ? n.parentId
                 : n.id;
         }
@@ -414,7 +420,7 @@ class LayoutSpatialIndex {
           ),
         );
         if (contours.any((contour) => pointInPolygon(contour, p[0], p[1])) &&
-            !(n.properties['holes'] as List? ?? const []).any(
+            !(surfaceGeometryProperties(n)['holes'] as List? ?? const []).any(
               (h) => pointInPolygon(
                 (h as List)
                     .map(
@@ -428,7 +434,7 @@ class LayoutSpatialIndex {
               ),
             ))
           return n.properties['role'] == 'decoration' &&
-                  _nodes[n.parentId]?.properties['assembly'] != null
+                  _nodes[n.parentId]?.assembly != null
               ? n.parentId
               : n.id;
       }
@@ -687,6 +693,7 @@ LayoutNode shapeFromPoints(
   List<List<double>> points, {
   String? id,
   Map<String, dynamic> properties = const {},
+  Map<String, dynamic> style = const {},
 }) {
   if (points.length < 2) throw ArgumentError('At least two points required');
   final b = boundsOfPoints(points),
@@ -695,6 +702,7 @@ LayoutNode shapeFromPoints(
   return LayoutNode(
     id: id ?? newLayoutId(),
     kind: 'shape',
+    style: style,
     x: cx,
     y: cy,
     width: max(1, b['width']!),

@@ -4,7 +4,7 @@ import 'package:venue_layout_core/venue_layout_core.dart';
 void main() {
   for (final explicitNull in [false, true]) {
     test(
-      'v1 ${explicitNull ? 'null' : 'omitted'} unit kind canonicalizes to atomic',
+      'v1 ${explicitNull ? 'null' : 'omitted'} unit kind is rejected by canonical admission',
       () {
         final a = LayoutNode(id: newLayoutId(), kind: 'seat', x: 200, y: 200),
             b = LayoutNode(id: newLayoutId(), kind: 'seat', x: 260, y: 200);
@@ -17,27 +17,16 @@ void main() {
           nodes: [a, b],
           selectionUnits: [source],
         );
-        expect(document.selectionUnits.single['kind'], 'atomic');
         expect(source.containsKey('kind'), explicitNull);
-        expect(validateDocument(document), isEmpty);
-        final json = document.toJson();
-        final encodedUnit = (json['selectionUnits'] as List).single as Map;
-        if (explicitNull) {
-          encodedUnit['kind'] = null;
-        } else {
-          encodedUnit.remove('kind');
-        }
-        final imported = VenueLayoutDocument.fromJson(json);
-        expect(imported.selectionUnits.single['kind'], 'atomic');
         expect(
-          (imported.toJson()['selectionUnits'] as List).single['kind'],
-          'atomic',
+          validateDocument(document).map((i) => i.reason),
+          contains('invalid_selection_unit_kind'),
         );
-        expect(imported.copyWith().selectionUnits.single['kind'], 'atomic');
-        expect(cloneLayout(imported).selectionUnits.single['kind'], 'atomic');
+        final json = VenueLayoutDocument(nodes: [a, b]).toJson();
+        json['selectionUnits'] = [source];
         expect(
-          () => imported.selectionUnits.single['kind'] = 'partial',
-          throwsUnsupportedError,
+          () => VenueLayoutDocument.fromJson(json),
+          throwsA(isA<InvalidLayoutDocument>()),
         );
       },
     );

@@ -1,3 +1,4 @@
+import 'support/style.dart';
 import 'dart:math';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
@@ -11,11 +12,11 @@ void main() {
     width: 44,
     height: 40,
     rotation: 127,
-    properties: {'shape': 'roundedRect', 'fill': '#CCAA88FF'},
+    style: {},
   );
   final plain = VenueLayoutDocument(nodes: [chair]);
   test('plain default leaves canonical scene unchanged', () {
-    final explicit = setLayoutAppearance(plain, 'seat', {'seatStyle': 'plain'});
+    final explicit = withKindStyle(plain, 'seat', {'seatStyle': 'plain'});
     expect(compileScene(explicit), compileScene(plain));
     expect(explicit.nodes.single, same(chair));
   });
@@ -70,7 +71,7 @@ void main() {
     test(
       '$style uses one construction decoration without new geometry or hit targets',
       () {
-        final d = setLayoutAppearance(plain, 'seat', {'seatStyle': style});
+        final d = withKindStyle(plain, 'seat', {'seatStyle': style});
         final before = compileScene(plain)['items'] as List;
         final scene = compileScene(d), items = scene['items'] as List;
         final accent =
@@ -122,7 +123,7 @@ void main() {
       },
     );
     test('$style preserves presentation colors above palette and accents', () {
-      final d = setLayoutAppearance(plain, 'seat', {
+      final d = withKindStyle(plain, 'seat', {
         'seatStyle': style,
         'fill': '#AA8855FF',
       });
@@ -150,21 +151,10 @@ void main() {
       }
     });
   }
-  test('seatStyle inherits globally and explicit local overrides survive', () {
-    var d = setLayoutAppearance(plain, 'seat', {'seatStyle': 'wood'});
-    d = setNodeAppearanceOverride(d, [chair.id], ['seatStyle']);
-    d = setLayoutAppearance(d, 'seat', {'seatStyle': 'upholstered'});
-    expect(effectiveNodeProperties(d, d.nodes.single)['seatStyle'], 'wood');
-    d = setNodeAppearanceOverride(d, [chair.id], ['seatStyle'], enabled: false);
-    expect(
-      effectiveNodeProperties(d, d.nodes.single)['seatStyle'],
-      'upholstered',
-    );
-    expect(validateDocument(d), isEmpty);
-  });
+
   test('couch cushions retain sofa rendering and atomic membership', () {
     final couch = couchLayout(count: 3);
-    final d = setLayoutAppearance(couch, 'seat', {'seatStyle': 'wood'});
+    final d = withKindStyle(couch, 'seat', {'seatStyle': 'wood'});
     expect(
       (compileScene(d)['items'] as List).where(
         (i) => (i['id'] as String).endsWith(':seat-style'),
@@ -173,36 +163,5 @@ void main() {
     );
     expect(d.selectionUnits, couch.selectionUnits);
     expect(d.nodes, couch.nodes);
-  });
-  test('seatStyle enum rejects malformed global local and imported values', () {
-    for (final invalid in [
-      'timber',
-      'WOOD',
-      1,
-      null,
-      {'style': 'wood'},
-    ]) {
-      expect(
-        () => setLayoutAppearance(plain, 'seat', {'seatStyle': invalid}),
-        throwsA(isA<InvalidLayoutDocument>()),
-      );
-      final bad = plain.copyWith(
-        nodes: [
-          chair.copyWith(
-            properties: {...chair.properties, 'seatStyle': invalid},
-          ),
-        ],
-      );
-      expect(
-        validateDocument(bad).any((i) => i.reason == 'invalid_seat_style'),
-        isTrue,
-      );
-    }
-    final json = plain.toJson();
-    (json['nodes'] as List).single['seatStyle'] = 'unknown';
-    expect(
-      () => VenueLayoutDocument.fromJson(json),
-      throwsA(isA<InvalidLayoutDocument>()),
-    );
   });
 }

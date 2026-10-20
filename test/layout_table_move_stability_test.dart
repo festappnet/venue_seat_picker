@@ -3,6 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface.dart';
 
+String seatAtSide(VenueLayoutDocument d, String side) => d.nodes
+    .firstWhere((n) => n.kind == 'seat' && tableSideForSeat(d, n) == side)
+    .id;
+
 void main() {
   for (final native in [false, true]) {
     testWidgets(
@@ -119,9 +123,7 @@ void main() {
       y: 350,
     );
     final table = doc.nodes.firstWhere((n) => n.kind == 'table');
-    final moved =
-        doc.attachments.firstWhere((a) => a['edge'] == 'right')['seatId']
-            as String;
+    final moved = seatAtSide(doc, 'right');
     doc = moveTableSeatToSide(doc, moved, 'top');
     final c = VenueLayoutController(doc)..select({table.id});
     addTearDown(c.dispose);
@@ -148,12 +150,17 @@ void main() {
       greaterThan(table.width),
     );
     expect(
-      c.document.attachments.firstWhere((a) => a['seatId'] == moved)['edge'],
+      c.document.attachments.firstWhere(
+        (a) => a['seatId'] == moved,
+      )['placement']['side'],
       'top',
     );
     expect(
-      c.document.attachments.firstWhere((a) => a['seatId'] == moved)['manual'],
-      true,
+      seatPlacementFree(
+        c.document,
+        c.document.nodes.firstWhere((n) => n.id == moved),
+      ),
+      false,
     );
     c.undo();
     expect(c.document, same(doc));

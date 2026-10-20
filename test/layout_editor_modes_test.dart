@@ -6,6 +6,42 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 
 void main() {
   testWidgets(
+    'double-click retains a selected group instead of editing its child',
+    (tester) async {
+      final group = LayoutNode(id: newLayoutId(), kind: 'group', x: 0, y: 0);
+      final table = LayoutNode(
+        id: newLayoutId(),
+        kind: 'table',
+        parentId: group.id,
+        x: 200,
+        y: 200,
+        width: 160,
+        height: 100,
+        surface: const {'type': 'rect'},
+      );
+      final c = VenueLayoutController(
+        VenueLayoutDocument(nodes: [group, table]),
+      )..select({group.id});
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(controller: c, showGallery: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester
+          .widget<LayoutSceneSurface>(find.byType(LayoutSceneSurface))
+          .onDoubleTapAt!(const Offset(250, 240));
+      await tester.pumpAndSettle();
+      expect(c.selection, {group.id});
+      expect(c.canUndo, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'viewing cannot edit geometry and explicit editing retains the draft',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1440, 900));
@@ -106,7 +142,7 @@ void main() {
       c.updateNode(seat.copyWith(x: 240));
       await tester.pump();
       final draft = c.document;
-      await tester.tap(find.byTooltip('Resize'));
+      await tester.tap(find.byTooltip('Pan'));
       setHostState(() => editing = false);
       await tester.pumpAndSettle();
       expect(surface().onHandleStart, isNull);

@@ -1,3 +1,4 @@
+import 'support/style.dart';
 import 'dart:math';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
@@ -12,17 +13,19 @@ Map item(
         )
         as Map;
 VenueLayoutDocument family(VenueLayoutDocument d, String name) => d.copyWith(
-  appearance: {
-    for (final kind in layoutAppearanceKinds)
-      kind: {
-        'objectStyle': name,
-        if (kind == 'seat')
-          'seatStyle': name == 'wood'
-              ? 'wood'
-              : name == 'lounge'
-              ? 'upholstered'
-              : 'plain',
-      },
+  styles: {
+    'kinds': {
+      for (final kind in layoutAppearanceKinds)
+        kind: {
+          if (kind != 'text') 'material': name,
+          if (kind == 'seat')
+            'seatStyle': name == 'wood'
+                ? 'wood'
+                : name == 'lounge'
+                ? 'upholstered'
+                : 'plain',
+        },
+    },
   },
 );
 void main() {
@@ -93,56 +96,52 @@ void main() {
       }
     }
   });
-  test('attached manual chair always faces its table after a move', () {
-    for (final tableRotation in [0.0, 63.0]) {
-      final source = family(
-        tableLayout(shape: 'circle', count: 4, width: 180, height: 180),
-        'lounge',
-      );
-      final table = source.nodes.first.copyWith(rotation: tableRotation);
-      final original = source.nodes.firstWhere((n) => n.kind == 'seat');
-      final seat = original.copyWith(
-        x: -240,
-        y: -60,
-        rotation: 270,
-        properties: {
-          ...original.properties,
-          'manual': true,
-          'seatStyle': 'roundUpholstered',
-        },
-      );
-      final d = source.copyWith(
-        nodes: [
-          for (final n in source.nodes)
-            n.id == seat.id
-                ? seat
-                : n.id == table.id
-                ? table
-                : n,
-        ],
-      );
-      for (final doc in [
-        d,
-        transformNodes(d, {seat.id}, dx: 30, dy: 20),
-      ]) {
-        final current = doc.nodes.firstWhere((n) => n.id == seat.id);
-        final m = worldMatrix(doc, current), t = worldMatrix(doc, table);
-        final dx = m[4] - t[4], dy = m[5] - t[5];
-        final length = sqrt(dx * dx + dy * dy);
-        expect(
-          (m[2] * dx + m[3] * dy) / length,
-          closeTo(1, .0015),
-          reason:
-              'Backrest faces away from the table, including manual positions',
+  test(
+    'moving a free chair preserves its stored facing and detaching preserves the world pose',
+    () {
+      for (final tableRotation in [0.0, 63.0]) {
+        final source = family(
+          tableLayout(shape: 'circle', count: 4, width: 180, height: 180),
+          'lounge',
         );
-        expect(item(doc, seat.id)['matrix'], m.map(quantize).toList());
-        final detached = detachSeat(doc, seat.id);
-        final free = detached.nodes.firstWhere((n) => n.id == seat.id);
-        final freeMatrix = worldMatrix(detached, free);
-        for (var i = 0; i < 6; i++) expect(freeMatrix[i], closeTo(m[i], .001));
+        final table = source.nodes.first.copyWith(rotation: tableRotation);
+        final original = source.nodes.firstWhere((n) => n.kind == 'seat');
+        final seat = original.copyWith(
+          x: -240,
+          y: -60,
+          rotation: 270,
+          properties: original.properties,
+          style: {'seatStyle': 'roundUpholstered'},
+        );
+        final d = source.copyWith(
+          nodes: [
+            for (final n in source.nodes)
+              n.id == seat.id
+                  ? seat
+                  : n.id == table.id
+                  ? table
+                  : n,
+          ],
+        );
+        for (final doc in [
+          d,
+          transformNodes(d, {seat.id}, dx: 30, dy: 20),
+        ]) {
+          final current = doc.nodes.firstWhere((n) => n.id == seat.id);
+          final m = worldMatrix(doc, current), t = worldMatrix(doc, table);
+          final dx = m[4] - t[4], dy = m[5] - t[5];
+          final length = sqrt(dx * dx + dy * dy);
+          expect(current.rotation, 270);
+          expect(item(doc, seat.id)['matrix'], m.map(quantize).toList());
+          final detached = detachSeat(doc, seat.id);
+          final free = detached.nodes.firstWhere((n) => n.id == seat.id);
+          final freeMatrix = worldMatrix(detached, free);
+          for (var i = 0; i < 6; i++)
+            expect(freeMatrix[i], closeTo(m[i], .001));
+        }
       }
-    }
-  });
+    },
+  );
   test(
     'explicit rotation overrides automatic facing and survives later movement',
     () {
@@ -154,8 +153,8 @@ void main() {
       final before = worldMatrix(d, seat);
       final rotated = transformNodes(d, {seat.id}, rotation: 37);
       final node = rotated.nodes.firstWhere((n) => n.id == seat.id);
-      expect(node.properties['manualRotation'], true);
-      final expected = tableSeatFacingRotation(seat, d.nodes.first) + 37;
+      expect(seatAttachment(rotated, node.id)!['rotationMode'], 'manual');
+      final expected = seat.rotation + 37;
       expect(node.rotation, closeTo(expected, .001));
       final moved = transformNodes(rotated, {seat.id}, dx: -60, dy: 45);
       final current = moved.nodes.firstWhere((n) => n.id == seat.id);
@@ -179,16 +178,9 @@ void main() {
       final d = tableLayout(shape: 'ellipse', count: 8), table = d.nodes.first;
       final seat = d.nodes
           .firstWhere((n) => n.kind == 'seat')
-          .copyWith(
-            rotation: 37,
-            properties: {
-              'manual': true,
-              'manualRotation': true,
-              'seatStyle': 'wood',
-            },
-          );
-      final explicit = nodePath(seat, parent: table),
-          standalone = nodePath(seat);
+          .copyWith(rotation: 37, properties: {}, style: {'seatStyle': 'wood'});
+      final resolved=seat.copyWith(properties:effectiveNodeProperties(d,seat));
+      final explicit=nodePath(resolved,parent:table),standalone=nodePath(resolved);
       expect(explicit, standalone);
       final updated = d.copyWith(
         nodes: [for (final n in d.nodes) n.id == seat.id ? seat : n],
@@ -204,10 +196,14 @@ void main() {
         final basic = item(d, table.id)['path'];
         for (final style in ['wood', 'lounge']) {
           final themed = family(d, style);
-          expect(item(themed, table.id)['path'], basic);
+          if(shape!='rect')expect(item(themed,table.id)['path'],basic);
+          expect(themed.nodes.first.surface,table.surface);
           final rim = item(themed, '${table.id}:table-style');
           expect((rim['path'] as List).length, greaterThan(4));
-          expect(themed.nodes.first.properties['shape'], shape);
+          expect(
+            themed.nodes.first.surface!['type'],
+            shape == 'rect' ? 'rect' : 'circle',
+          );
           expect(themed.nodes.first.width, table.width);
         }
       }
@@ -265,21 +261,22 @@ void main() {
         expect(frame['stroke'], '#FFFFFF80');
       }
       expect(
-        () => setLayoutAppearance(d, 'seat', {'objectStyle': 'photo'}),
-        throwsA(isA<InvalidLayoutDocument>()),
+        validateDocument(withKindStyle(d, 'seat', {'material': 'photo'})),
+        isNotEmpty,
       );
       final malformed = d.copyWith(
         nodes: [
           for (final n in d.nodes)
             n.id == seat.id
-                ? n.copyWith(properties: {...n.properties, 'objectStyle': 3})
+                ? n.copyWith(
+                    properties: {...n.properties},
+                    style: {'material': 3},
+                  )
                 : n,
         ],
       );
       expect(
-        validateDocument(
-          malformed,
-        ).any((i) => i.reason == 'invalid_object_style'),
+        validateDocument(malformed).any((i) => i.reason == 'invalid_value'),
         isTrue,
       );
     },

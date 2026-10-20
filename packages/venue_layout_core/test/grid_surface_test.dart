@@ -71,7 +71,7 @@ void main() {
       }
       final n = brush.node(id: newLayoutId()),
           d = VenueLayoutDocument(nodes: [n]);
-      expect(n.properties['holes'], hasLength(1));
+      expect(n.surface!['holes'], hasLength(1));
       expect(validateDocument(d), isEmpty);
       expect(hitTest(d, 350, 350), isNull);
       expect(hitTest(d, 200, 350), n.id);
@@ -86,7 +86,7 @@ void main() {
       final invalid = n.copyWith(
         properties: {
           ...n.properties,
-          'holes': [(n.properties['holes'] as List).first.reversed.toList()],
+          'holes': [(n.surface!['holes'] as List).first.reversed.toList()],
         },
       );
       expect(validateDocument(d.copyWith(nodes: [invalid])), isNotEmpty);

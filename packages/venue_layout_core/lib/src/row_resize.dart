@@ -2,13 +2,14 @@ import 'dart:math' as math;
 
 import 'geometry.dart';
 import 'model.dart';
+import 'placement.dart' show seatPlacementFree, seatRotationManual;
 import 'operations.dart' show layoutSubtree, rowLayoutParameters;
 
 /// Actual descendant geometry in the row root's coordinate system.
 /// The root's own placeholder box does not participate.
 Map<String, double> rowAssemblyBounds(VenueLayoutDocument document, String id) {
   final root = document.nodes.firstWhere((node) => node.id == id);
-  if (root.kind != 'group' || root.properties['assembly'] != 'rows') {
+  if (root.kind != 'group' || ((root.assembly?['kind'])) != 'rows') {
     throw ArgumentError('Not a row assembly');
   }
   final descendants = layoutSubtree(document, {id})..remove(id);
@@ -49,7 +50,7 @@ VenueLayoutDocument resizeRowAssembly(
   final root = index[id];
   if (root == null ||
       root.kind != 'group' ||
-      root.properties['assembly'] != 'rows') {
+      ((root.assembly?['kind'])) != 'rows') {
     throw ArgumentError('Not a row assembly');
   }
   final subtree = layoutSubtree(document, {id});
@@ -77,8 +78,7 @@ VenueLayoutDocument resizeRowAssembly(
   final half = (columns - 1) / 2;
   final slots = <String, (int, int, int)>{};
   for (final node in document.nodes.where(
-    (n) =>
-        n.parentId == id && n.kind == 'seat' && n.properties['manual'] != true,
+    (n) => n.parentId == id && n.kind == 'seat',
   )) {
     final components = '${node.properties['slot']}'
         .split(':')
@@ -167,28 +167,32 @@ VenueLayoutDocument resizeRowAssembly(
         final slot = slots[node.id];
         if (slot != null) {
           return node.copyWith(
-            x:
-                slot.$2 * (columns * actualSpacing + actualAisle) +
-                slot.$3 * actualSpacing,
-            y:
-                slot.$1 * actualRowSpacing +
-                actualArc * math.pow(slot.$3 - half, 2),
-            rotation:
-                math.atan(2 * actualArc * (slot.$3 - half) / actualSpacing) *
-                180 /
-                math.pi,
+            x: seatPlacementFree(document, node)
+                ? node.x
+                : slot.$2 * (columns * actualSpacing + actualAisle) +
+                      slot.$3 * actualSpacing,
+            y: seatPlacementFree(document, node)
+                ? node.y
+                : slot.$1 * actualRowSpacing +
+                      actualArc * math.pow(slot.$3 - half, 2),
+            rotation: seatRotationManual(document, node)
+                ? node.rotation
+                : math.atan(2 * actualArc * (slot.$3 - half) / actualSpacing) *
+                      180 /
+                      math.pi,
           );
         }
         if (node.id == id)
           return node.copyWith(
-            properties: {
-              ...node.properties,
+            assembly: {
+              'kind': 'rows',
               ...params,
               'spacing': actualSpacing,
               'rowSpacing': actualRowSpacing,
               'aisle': actualAisle,
               'arc': actualArc,
             },
+            properties: node.properties,
           );
         return node;
       }).toList(),
@@ -230,6 +234,7 @@ VenueLayoutDocument resizeRowAssembly(
         .toList(),
   );
   final local = VenueLayoutDocument(
+    schemaVersion: document.schemaVersion,
     nodes: result.nodes
         .where((n) => subtree.contains(n.id))
         .map(

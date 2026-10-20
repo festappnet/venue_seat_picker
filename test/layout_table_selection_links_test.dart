@@ -56,6 +56,30 @@ void main() {
       }
     },
   );
+  test(
+    'selected manual chair shows its own attachment without sibling links',
+    () {
+      var doc = tableLayout(shape: 'rect', count: 6, x: 400, y: 400);
+      final table = doc.nodes.firstWhere((n) => n.kind == 'table');
+      final chair = doc.nodes.firstWhere((n) => n.kind == 'seat');
+      doc = setTableSeatPlacement(doc, chair.id, {'mode': 'free'});
+      doc = doc.copyWith(
+        nodes: [
+          for (final n in doc.nodes)
+            n.id == chair.id ? n.copyWith(x: -350, y: 200) : n,
+        ],
+      );
+      final before = doc.toJson();
+      final links = tableSeatLinks(doc, {chair.id});
+      expect(links.single.seatId, chair.id);
+      expect(
+        (links.single.tablePoint - links.single.seatPoint).distance,
+        greaterThan(100),
+      );
+      expect(tableSeatLinks(doc, {table.id, chair.id}), hasLength(6));
+      expect(doc.toJson(), before);
+    },
+  );
   testWidgets(
     'reservation selection highlights the tabletop instead of its chair assembly',
     (tester) async {
@@ -303,7 +327,12 @@ void main() {
       final document = VenueLayoutDocument(
         nodes: [
           group,
-          LayoutNode(id: newLayoutId(), kind: 'table', parentId: group.id),
+          LayoutNode(
+            id: newLayoutId(),
+            kind: 'table',
+            parentId: group.id,
+            surface: const {'type': 'rect'},
+          ),
           LayoutNode(
             id: newLayoutId(),
             kind: 'shape',
@@ -321,24 +350,21 @@ void main() {
       for (final bar in [false, true]) {
         final width = bar ? 180.0 : 200.0;
         final height = bar ? 120.0 : 200.0;
-        final table = LayoutNode(
-          id: newLayoutId(),
-          kind: 'table',
-          x: 400,
-          y: 300,
-          width: width,
-          height: height,
-          properties: {
-            'shape': 'polygon',
-            if (bar) 'furniture': 'bar',
-            if (bar) 'guestSide': 'bottom',
-            'points': [
-              [-width / 2, -height / 2],
-              [width / 2, -height / 2],
-              [width / 2, height / 2],
-              [-width / 2, height / 2],
-            ],
-          },
+        final table = snapTableSurfaceToGrid(
+          LayoutNode(
+            id: newLayoutId(),
+            kind: 'table',
+            x: 400,
+            y: 300,
+            width: width,
+            height: height,
+            surface: const {'type': 'rect'},
+            properties: {
+              if (bar) 'furniture': 'bar',
+              if (bar) 'guestSide': 'bottom',
+            },
+          ),
+          preset: 'rectangle',
         );
         final document = VenueLayoutDocument(nodes: [table]);
         final before = document.toJson();

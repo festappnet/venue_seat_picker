@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import '../layout_scene_cache.dart';
+import '../layout_native_text.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 
 // Matrix4's 3D maximum includes the unchanged z-axis (1), so it cannot
@@ -28,6 +29,7 @@ class LayoutSceneSurface extends StatefulWidget {
     required this.document,
     this.resources = const {},
     this.presentation = const {},
+    this.retainPendingTextPreview = false,
     this.selected = const {},
     this.showSeatSelectionChecks = true,
     this.highlightedIds = const {},
@@ -35,6 +37,7 @@ class LayoutSceneSurface extends StatefulWidget {
     this.canvasSelected = false,
     this.transientForegroundIds = const {},
     this.warningIds = const {},
+    this.blockedPlacementHulls = const [],
     this.snapGuides = const [],
     this.onViewportScaleChanged,
     this.onTap,
@@ -61,7 +64,10 @@ class LayoutSceneSurface extends StatefulWidget {
     this.marquee,
     this.inlineNode,
     this.onInlineSubmit,
+    this.inlineTextStyleBuilder,
     this.onInlineCancel,
+    this.onInlineUndo,
+    this.onInlineRedo,
     this.onDoubleTapAt,
     this.onContextMenu,
   });
@@ -73,6 +79,7 @@ class LayoutSceneSurface extends StatefulWidget {
   final bool showSeatSelectionChecks;
   final Set<String>? selectableIds;
   final Set<String> transientForegroundIds, warningIds;
+  final List<List<List<double>>> blockedPlacementHulls;
   final List<Map<String, dynamic>> snapGuides;
   final ValueChanged<double>? onViewportScaleChanged;
   final ValueChanged<Offset>? onTap, onDragStart, onDragUpdate;
@@ -80,6 +87,7 @@ class LayoutSceneSurface extends StatefulWidget {
   final List<Offset> pathPoints;
   final VoidCallback? onDragEnd, onDragCancel;
   final bool pan, showControls, animate;
+  final bool retainPendingTextPreview;
   final bool compactZoomControls;
   final bool showGrid;
   final double gridStep;
@@ -88,7 +96,9 @@ class LayoutSceneSurface extends StatefulWidget {
   final Rect? marquee;
   final LayoutNode? inlineNode;
   final ValueChanged<String>? onInlineSubmit;
+  final Future<TextStyle> Function(LayoutNode)? inlineTextStyleBuilder;
   final VoidCallback? onInlineCancel;
+  final VoidCallback? onInlineUndo, onInlineRedo;
   final ValueChanged<Offset>? onDoubleTapAt;
   final void Function(Offset world, Offset global)? onContextMenu;
   final void Function(String, Offset)? onHandleStart, onDropPreview, onDrop;
@@ -100,7 +110,14 @@ class LayoutSceneSurface extends StatefulWidget {
 
 class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
     with SingleTickerProviderStateMixin {
+  // Edge topology changes while painting a strip. Retain the original handle
+  // list until pointer-up so its recognizer is never replaced mid-drag.
+  VenueLayoutDocument? _edgeHandleDocument;
+  LayoutNode? _edgeHandleNode;
+
   List<List<double>>? _vertexPoints(LayoutNode node) {
+    if (node.kind == 'table')
+      return node.surface?['type'] == 'grid' ? localHull(node) : null;
     final points = node.properties['points'];
     if (points is List) {
       return points
@@ -119,29 +136,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         : null;
   }
 
-  bool _orthogonalSurface(LayoutNode node) {
-    final points = _vertexPoints(node);
-    if (node.kind != 'table' ||
-        node.properties['shape'] != 'polygon' ||
-        points == null) {
-      return false;
-    }
-    final step = isBarNode(node)
-        ? barSurfaceModuleSize
-        : tableSurfaceModuleSize;
-    bool aligned(double value) =>
-        (value / step - (value / step).round()).abs() < 1e-5;
-    if (!aligned(node.width) || !aligned(node.height)) return false;
-    for (var i = 0; i < points.length; i++) {
-      final a = points[i], b = points[(i + 1) % points.length];
-      if (!aligned(a[0] + node.width / 2) ||
-          !aligned(a[1] + node.height / 2) ||
-          ((a[0] - b[0]).abs() > 1e-6 && (a[1] - b[1]).abs() > 1e-6)) {
-        return false;
-      }
-    }
-    return true;
-  }
+  bool _orthogonalSurface(LayoutNode node) =>
+      node.kind == 'table' && node.surface?['type'] == 'grid';
 
   final _camera = TransformationController();
   String? _hoverMessage, _hoverNodeId;
@@ -231,6 +227,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   void didUpdateWidget(LayoutSceneSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!widget.animate ||
+        (oldWidget.retainPendingTextPreview &&
+            !widget.retainPendingTextPreview) ||
         (MediaQuery.maybeOf(context)?.disableAnimations ?? false)) {
       _motion.stop();
       _motion.value = 1;
@@ -359,10 +357,77 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
   Map<String, dynamic>? _frame;
   Size? _size;
   final _sceneCache = LayoutSceneCache();
+  final _nativeText = LayoutNativeTextCache();
+  final _nativeFonts = <String, TextStyle>{};
+  final _nativeFontLoads = <String>{};
+  final _nativeFontErrors = <String>{};
+  Set<String> _activeNativeFontKeys = {};
+  String _nativeFontKey(LayoutNode node) {
+    final label = resolveNodeAppearance(widget.document, node).label;
+    final family =
+        (widget.resources['fontFamilies'] as Map?)?[label['fontFamilyId']]
+            as Map?;
+    final face =
+        (family?['faces']
+            as Map?)?['${label['weight']}:${label['italic'] == true ? 'italic' : 'normal'}'];
+    return '${label['fontFamilyId']}:${label['weight']}:${label['italic']}:$face';
+  }
+
+  bool _usesNativeText(LayoutNode node) {
+    if (const {'seat', 'group', 'image', 'vector'}.contains(node.kind) ||
+        isCouchNode(node) ||
+        isBarNode(node))
+      return false;
+    final text = node.kind == 'text'
+        ? '${node.properties['text'] ?? ''}'
+        : '${(widget.presentation[node.id] as Map?)?['label'] ?? node.label}';
+    return text.isNotEmpty;
+  }
+
+  void _loadNativeFonts() {
+    final nodes = widget.document.nodes.where(_usesNativeText).toList();
+    final active = nodes.map(_nativeFontKey).toSet();
+    for (final key in _nativeFontErrors.difference(active)) {
+      _nativeFontLoads.remove(key);
+      _nativeFontErrors.remove(key);
+    }
+    _activeNativeFontKeys = active;
+    for (final node in nodes) {
+      final key = _nativeFontKey(node);
+      if (!_nativeFontLoads.add(key)) continue;
+      widget.inlineTextStyleBuilder!(node)
+          .then((style) {
+            if (mounted)
+              setState(() {
+                _nativeFonts[key] = style;
+                _nativeFontErrors.remove(key);
+              });
+          })
+          .catchError((Object error) {
+            if (!mounted) return;
+            // A late failure from a dismissed font preview must not poison the
+            // current face. Returning to that face starts a fresh request.
+            if (_activeNativeFontKeys.contains(key)) {
+              setState(() => _nativeFontErrors.add(key));
+            } else {
+              _nativeFontLoads.remove(key);
+            }
+          });
+    }
+  }
+
+  void _retryNativeFonts() => setState(() {
+    final failed = _nativeFontErrors.intersection(_activeNativeFontKeys);
+    _nativeFontLoads.removeAll(failed);
+    _nativeFontErrors.removeAll(failed);
+  });
+
+  final _textPreviewCache = LayoutTextPreviewCache();
   Map<String, dynamic>? _scene;
 
   @override
   void dispose() {
+    _nativeText.dispose();
     _stopAutopan();
     _stopContextMenu();
     _motion.dispose();
@@ -468,13 +533,51 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                     'fill': layoutSelectedSeatFill,
                   },
             };
-      _scene = _sceneCache.update(
+      _scene = _textPreviewCache.update(
+        _sceneCache.update(
+          widget.document,
+          resources: widget.resources,
+          presentation: presentation,
+        ),
         widget.document,
-        resources: widget.resources,
-        presentation: presentation,
+        enabled: widget.retainPendingTextPreview,
       );
+      final nativeEditing =
+          widget.retainPendingTextPreview &&
+          widget.inlineTextStyleBuilder != null;
+      if (nativeEditing) {
+        _loadNativeFonts();
+        _scene = _nativeText.update(
+          _scene!,
+          widget.document,
+          _nativeFonts,
+          _nativeFontKey,
+          presentation: presentation,
+        );
+      }
+      final fontFailed =
+          nativeEditing &&
+          _nativeFontErrors.intersection(_activeNativeFontKeys).isNotEmpty;
+      if (fontFailed)
+        _scene = {
+          ..._scene!,
+          'issues': [
+            ..._scene!['issues'] as List,
+            {'reason': 'Font unavailable'},
+          ],
+        };
       final scene = _scene!;
       final issues = scene['issues'] as List? ?? const [];
+      final textWaiting =
+          widget.retainPendingTextPreview &&
+          issues.isNotEmpty &&
+          issues.every(
+            (issue) => const {
+              'text_layout_unavailable',
+              'font_family_unavailable',
+              'font_face_unavailable',
+            }.contains(issue['reason']),
+          );
       Offset globalWorld(Offset p) =>
           world((context.findRenderObject()! as RenderBox).globalToLocal(p));
       void dragAt(Offset global, [String? kind]) {
@@ -498,6 +601,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           .map((node) => tabletopSelectionNode(widget.document, node))
           .toList();
       final resizeSelection = selectedNodes.firstOrNull;
+      final edgeSelection = _edgeHandleNode == null
+          ? selectedNodes
+          : [_edgeHandleNode!];
       final resizeBounds = resizeSelection?.kind == 'group'
           ? selectionBounds(widget.document, {resizeSelection!.id})
           : {
@@ -546,7 +652,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           // Keep group controls outside the chairs on the selection boundary.
           if (mode.startsWith('Resize') &&
               resizeSelection?.kind == 'group' &&
-              resizeSelection!.properties['assembly'] == null) {
+              resizeSelection!.assembly?['kind'] == null) {
             final direction = mode == 'Resize' ? 'se' : mode.substring(7);
             final outset = target / 2 + 2;
             screen += Offset(
@@ -563,6 +669,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
             );
           }
           return Positioned(
+            key: ValueKey('layout-handle-$mode'),
             left: screen.dx - target / 2,
             top: screen.dy - target / 2,
             child: Semantics(
@@ -574,18 +681,34 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   cursor: cursor,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onPanStart: (e) => widget.onHandleStart?.call(
-                      mode,
-                      globalWorld(e.globalPosition),
-                    ),
+                    onPanStart: (e) {
+                      if (mode.startsWith('Extend edge ')) {
+                        _edgeHandleDocument = widget.document;
+                        _edgeHandleNode = selectedNodes.single;
+                      }
+                      widget.onHandleStart?.call(
+                        mode,
+                        globalWorld(e.globalPosition),
+                      );
+                    },
                     onPanUpdate: (e) => dragAt(e.globalPosition),
                     onPanEnd: (_) {
                       _stopAutopan();
                       widget.onDragEnd?.call();
+                      if (_edgeHandleNode != null)
+                        setState(() {
+                          _edgeHandleNode = null;
+                          _edgeHandleDocument = null;
+                        });
                     },
                     onPanCancel: () {
                       _stopAutopan();
                       widget.onDragCancel?.call();
+                      if (_edgeHandleNode != null)
+                        setState(() {
+                          _edgeHandleNode = null;
+                          _edgeHandleDocument = null;
+                        });
                     },
                     child: SizedBox(
                       width: target,
@@ -669,28 +792,31 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           final angle =
               math.atan2(matrix[1], matrix[0]) +
               math.atan2(_camera.value.entry(1, 0), _camera.value.entry(0, 0));
-          final font =
-              (widget.resources['fonts'] as Map?)?[node.properties['fontId']];
           // Native text input lays out in viewport pixels. Only rotation needs
           // a paint transform; camera zoom never scales the editable subtree.
-          final editor = LayoutInlineLabel(
+          Widget input(TextStyle? nativeStyle) => LayoutInlineLabel(
             key: ValueKey(node.id),
             value: node.kind == 'text'
                 ? '${node.properties['text'] ?? node.label}'
                 : node.label,
             style: TextStyle(
-              fontFamily: font is Map ? font['family'] as String? : null,
+              fontFamily: nativeStyle?.fontFamily,
               fontSize: fontSize * zoom,
               color: LayoutScenePainter.color(
                 node.properties['color'],
                 const Color(0xff202830),
               ),
-              fontWeight: node.properties['bold'] == true
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-              fontStyle: node.properties['italic'] == true
-                  ? FontStyle.italic
-                  : FontStyle.normal,
+              fontWeight:
+                  nativeStyle?.fontWeight ??
+                  (node.properties['weight'] == 700
+                      ? FontWeight.bold
+                      : FontWeight.normal),
+              fontStyle:
+                  nativeStyle?.fontStyle ??
+                  (node.properties['italic'] == true
+                      ? FontStyle.italic
+                      : FontStyle.normal),
+              height: (node.properties['lineHeight'] as num?)?.toDouble(),
             ),
             textAlign:
                 node.kind == 'text' && node.properties['align'] != 'center'
@@ -704,7 +830,26 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
             ),
             onSubmit: (value) => widget.onInlineSubmit?.call(value),
             onCancel: () => widget.onInlineCancel?.call(),
+            onUndo: widget.onInlineUndo,
+            onRedo: widget.onInlineRedo,
           );
+          final editor = widget.inlineTextStyleBuilder == null
+              ? input(null)
+              : FutureBuilder<TextStyle>(
+                  key: ValueKey(
+                    '${node.id}:${node.properties['fontFamilyId']}:${node.properties['weight']}:${node.properties['italic']}',
+                  ),
+                  future: widget.inlineTextStyleBuilder!(widget.inlineNode!),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError)
+                      return const Center(
+                        child: LayoutText('Font unavailable'),
+                      );
+                    if (!snapshot.hasData)
+                      return const Center(child: CircularProgressIndicator());
+                    return input(snapshot.data);
+                  },
+                );
           return Positioned(
             left: center.dx - width / 2,
             top: center.dy - height / 2,
@@ -723,7 +868,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
             : selectedNodes.map((node) => node.id).toSet(),
       );
       Map<String, double> localBounds(LayoutNode node) {
-        if (node.properties['assembly'] != 'rows') {
+        if (node.assembly?['kind'] != 'rows') {
           return {
             'x': -node.width / 2,
             'y': -node.height / 2,
@@ -738,11 +883,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
         for (final node in selectedNodes) node.id: localBounds(node),
       };
       List<double> handlePoint(LayoutNode node, double dx, double dy) {
-        if ((node.kind == 'group' && node.properties['assembly'] == null) ||
-            const [
-              'bus',
-              'compartments',
-            ].contains(node.properties['assembly'])) {
+        if ((node.kind == 'group' && node.assembly?['kind'] == null) ||
+            const ['bus', 'compartments'].contains(node.assembly?['kind'])) {
           final b = selectionBounds(widget.document, {node.id});
           return [
             b['x']! + b['width']! * (dx + 1) / 2,
@@ -755,6 +897,17 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
           b['x']! + b['width']! * (dx + 1) / 2,
           b['y']! + b['height']! * (dy + 1) / 2,
         );
+      }
+
+      Offset rotationOutset(LayoutNode node) {
+        if (node.kind == 'group') return const Offset(0, -24);
+        final m = worldMatrix(widget.document, node);
+        final normal =
+            MatrixUtils.transformPoint(_camera.value, Offset(-m[2], -m[3])) -
+            MatrixUtils.transformPoint(_camera.value, Offset.zero);
+        return normal.distance < 1e-9
+            ? const Offset(0, -24)
+            : normal / normal.distance * 24;
       }
 
       return Listener(
@@ -953,6 +1106,8 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                               gridOrigin: widget.gridOrigin,
                               transientForegroundIds:
                                   widget.transientForegroundIds,
+                              blockedPlacementHulls:
+                                  widget.blockedPlacementHulls,
                               warningHulls: [
                                 for (final node in widget.document.nodes)
                                   if (widget.warningIds.contains(node.id))
@@ -972,8 +1127,9 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                       ];
                                     })(),
                               ],
-                              emphasizeSelection:
-                                  widget.showSeatSelectionChecks,
+                              // Strong selection bounds are independent of the
+                              // commercial check marker presentation.
+                              emphasizeSelection: true,
                               selectionHulls: [
                                 for (final node in widget.document.nodes.where(
                                   (n) => widget.highlightedIds.contains(n.id),
@@ -1165,7 +1321,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                     !const [
                       'bus',
                       'compartments',
-                    ].contains(selectedNodes.single.properties['assembly']))
+                    ].contains(selectedNodes.single.assembly?['kind']))
                   for (final direction in <String, List<double>>{
                     'n': [0, -1],
                     'e': [1, 0],
@@ -1196,24 +1352,26 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   'Rotate',
                   handlePoint(selectedNodes.single, 0, -1),
                   Icons.rotate_right,
-                  screenOffset: const Offset(0, -24),
+                  screenOffset: rotationOutset(selectedNodes.single),
                   cursor: SystemMouseCursors.grab,
                 ),
-                if ((selectedNodes.single.kind == 'table'
-                        ? _orthogonalSurface(selectedNodes.single)
-                        : widget.selected.contains(selectedNodes.single.id)) &&
-                    !isZigzagNode(selectedNodes.single) &&
-                    const [
-                      'polyline',
-                      'polygon',
-                    ].contains(selectedNodes.single.properties['shape']) &&
-                    _vertexPoints(selectedNodes.single) != null)
+                if ((edgeSelection.single.kind == 'table'
+                        ? _orthogonalSurface(edgeSelection.single)
+                        : widget.selected.contains(edgeSelection.single.id)) &&
+                    !isZigzagNode(edgeSelection.single) &&
+                    (edgeSelection.single.kind == 'table' ||
+                        const [
+                          'polyline',
+                          'polygon',
+                        ].contains(edgeSelection.single.properties['shape'])) &&
+                    _vertexPoints(edgeSelection.single) != null)
                   for (
                     var i = 0;
                     i <
-                        _vertexPoints(selectedNodes.single)!.length -
-                            (selectedNodes.single.properties['shape'] ==
-                                    'polygon'
+                        _vertexPoints(edgeSelection.single)!.length -
+                            (edgeSelection.single.kind == 'table' ||
+                                    edgeSelection.single.properties['shape'] ==
+                                        'polygon'
                                 ? 0
                                 : 1);
                     i++
@@ -1221,16 +1379,19 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                     for (
                       var cell = 0;
                       cell <
-                          (selectedNodes.single.kind == 'table'
+                          (edgeSelection.single.kind == 'table'
                               ? (() {
                                   final points = _vertexPoints(
-                                    selectedNodes.single,
+                                    edgeSelection.single,
                                   )!;
                                   final a = points[i],
                                       b = points[(i + 1) % points.length];
-                                  final step = isBarNode(selectedNodes.single)
-                                      ? barSurfaceModuleSize
-                                      : tableSurfaceModuleSize;
+                                  final step =
+                                      (edgeSelection
+                                                  .single
+                                                  .surface!['moduleSize']
+                                              as num)
+                                          .toDouble();
                                   return ((a[0] - b[0]).abs() +
                                           (a[1] - b[1]).abs()) ~/
                                       step;
@@ -1239,23 +1400,28 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                       cell++
                     )
                       handle(
-                        selectedNodes.single.kind == 'table'
+                        edgeSelection.single.kind == 'table'
                             ? 'Extend edge $i cell $cell'
                             : 'Insert vertex $i',
                         (() {
-                          final points = _vertexPoints(selectedNodes.single)!;
+                          final points = _vertexPoints(edgeSelection.single)!;
                           final a = points[i],
                               b = points[(i + 1) % points.length];
-                          final step = isBarNode(selectedNodes.single)
-                              ? barSurfaceModuleSize
-                              : tableSurfaceModuleSize;
+                          final step = edgeSelection.single.kind == 'table'
+                              ? (edgeSelection.single.surface!['moduleSize']
+                                        as num)
+                                    .toDouble()
+                              : 1.0;
                           final length =
                               (a[0] - b[0]).abs() + (a[1] - b[1]).abs();
-                          final t = selectedNodes.single.kind == 'table'
+                          final t = edgeSelection.single.kind == 'table'
                               ? (cell + .5) * step / length
                               : .5;
                           return transformPoint(
-                            worldMatrix(widget.document, selectedNodes.single),
+                            worldMatrix(
+                              _edgeHandleDocument ?? widget.document,
+                              edgeSelection.single,
+                            ),
                             a[0] + (b[0] - a[0]) * t,
                             a[1] + (b[1] - a[1]) * t,
                           );
@@ -1424,14 +1590,31 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                   top: 8,
                   right: 8,
                   child: Material(
-                    color: Theme.of(context).colorScheme.errorContainer,
+                    color: textWaiting
+                        ? Theme.of(context).colorScheme.secondaryContainer
+                        : Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
                       padding: const EdgeInsets.all(8),
-                      child: LayoutText(
-                        'Rendering issue: ${issues.first}',
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: LayoutText(
+                              fontFailed
+                                  ? 'The selected font could not be loaded.'
+                                  : textWaiting
+                                  ? 'Text is not ready yet.'
+                                  : 'Part of the plan could not be displayed.',
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (fontFailed)
+                            TextButton(
+                              onPressed: _retryNativeFonts,
+                              child: const LayoutText('Retry font'),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -1463,13 +1646,16 @@ class LayoutScenePainter extends CustomPainter {
     this.selectionHulls = const [],
     this.emphasizeSelection = false,
     this.warningHulls = const [],
+    this.blockedPlacementHulls = const [],
     this.snapGuides = const [],
     this.transientForegroundIds = const {},
   }) : super(repaint: Listenable.merge([camera, motion]));
   final Map<String, dynamic> scene, resources;
   final Set<String> selected;
   final List<TableSeatLink> seatLinks;
-  final List<List<List<double>>> selectionHulls, warningHulls;
+  final List<List<List<double>>> selectionHulls,
+      warningHulls,
+      blockedPlacementHulls;
   final List<Map<String, dynamic>> snapGuides;
   final Set<String> transientForegroundIds;
   final double scale;
@@ -1625,6 +1811,37 @@ class LayoutScenePainter extends CustomPainter {
         paintGrid();
         gridPainted = true;
       }
+      if (item['kind'] == 'vectorRestore') {
+        canvas.restore();
+        continue;
+      }
+      if (item['kind'] == 'vectorLayer') {
+        canvas.saveLayer(
+          null,
+          Paint()
+            ..color = Colors.white.withValues(
+              alpha: (item['opacity'] as num).toDouble(),
+            ),
+        );
+        continue;
+      }
+      if (item['kind'] == 'vectorClip') {
+        canvas.save();
+        final m = item['matrix'] as List;
+        final transform = Matrix4.identity()
+          ..setEntry(0, 0, (m[0] as num).toDouble())
+          ..setEntry(1, 0, (m[1] as num).toDouble())
+          ..setEntry(0, 1, (m[2] as num).toDouble())
+          ..setEntry(1, 1, (m[3] as num).toDouble())
+          ..setEntry(0, 3, (m[4] as num).toDouble())
+          ..setEntry(1, 3, (m[5] as num).toDouble());
+        final p = path(item['path'] as List)
+          ..fillType = item['fillRule'] == 'evenodd'
+              ? PathFillType.evenOdd
+              : PathFillType.nonZero;
+        canvas.clipPath(p.transform(transform.storage));
+        continue;
+      }
       canvas.save();
       final clip = item['clip'] as Map?;
       if (clip != null) {
@@ -1665,11 +1882,81 @@ class LayoutScenePainter extends CustomPainter {
           1,
         ).storage,
       );
+      final localClip = item['localClip'] as Map?;
+      if (localClip != null)
+        canvas.clipRect(
+          Rect.fromLTWH(
+            (localClip['x'] as num).toDouble(),
+            (localClip['y'] as num).toDouble(),
+            (localClip['width'] as num).toDouble(),
+            (localClip['height'] as num).toDouble(),
+          ),
+        );
+      if (item['kind'] == 'nativeText') {
+        (item['nativeParagraph'] as TextPainter).paint(
+          canvas,
+          item['nativeOffset'] as Offset,
+        );
+        canvas.restore();
+        continue;
+      }
+      ui.Shader? shader(Object? raw) {
+        if (raw is! Map) return null;
+        final colors = (raw['colors'] as List)
+                .map((v) => itemColor(v))
+                .toList(),
+            stops = (raw['stops'] as List)
+                .map((v) => (v as num).toDouble())
+                .toList();
+        Offset point(Object? v) => Offset(
+          ((v as List)[0] as num).toDouble(),
+          (v[1] as num).toDouble(),
+        );
+        final tile = switch (raw['spread']) {
+          'repeat' => TileMode.repeated,
+          'reflect' => TileMode.mirror,
+          _ => TileMode.clamp,
+        };
+        if (raw['type'] == 'linear')
+          return ui.Gradient.linear(
+            point(raw['from']),
+            point(raw['to']),
+            colors,
+            stops,
+            tile,
+          );
+        final m = raw['matrix'] as List;
+        final matrix = Matrix4.identity()
+          ..setEntry(0, 0, (m[0] as num).toDouble())
+          ..setEntry(1, 0, (m[1] as num).toDouble())
+          ..setEntry(0, 1, (m[2] as num).toDouble())
+          ..setEntry(1, 1, (m[3] as num).toDouble())
+          ..setEntry(0, 3, (m[4] as num).toDouble())
+          ..setEntry(1, 3, (m[5] as num).toDouble());
+        return ui.Gradient.radial(
+          point(raw['center']),
+          (raw['radius'] as num).toDouble(),
+          colors,
+          stops,
+          tile,
+          matrix.storage,
+          raw['focal'] == null ? null : point(raw['focal']),
+        );
+      }
+
       final commands = item['path'] as List?;
       if (commands != null) {
-        final p = _paths[item] ??= path(commands);
+        final p = _paths[item] ??= (path(commands)
+          ..fillType = item['fillRule'] == 'evenodd'
+              ? PathFillType.evenOdd
+              : PathFillType.nonZero);
         if (item['fill'] != null) {
-          canvas.drawPath(p, Paint()..color = itemColor(item['fill']));
+          canvas.drawPath(
+            p,
+            Paint()
+              ..color = itemColor(item['fill'])
+              ..shader = shader(item['fillGradient']),
+          );
         }
         final strokeWidth = (item['strokeWidth'] as num? ?? 0).toDouble();
         if (item['stroke'] != null && strokeWidth > 0) {
@@ -1677,16 +1964,24 @@ class LayoutScenePainter extends CustomPainter {
             p,
             Paint()
               ..style = PaintingStyle.stroke
-              ..strokeCap = item['kind'] == 'state'
+              ..strokeCap =
+                  item['kind'] == 'state' || item['strokeCap'] == 'round'
                   ? StrokeCap.round
+                  : item['strokeCap'] == 'square'
+                  ? StrokeCap.square
                   : StrokeCap.butt
-              ..strokeJoin = item['kind'] == 'state'
+              ..strokeJoin =
+                  item['kind'] == 'state' || item['strokeJoin'] == 'round'
                   ? StrokeJoin.round
+                  : item['strokeJoin'] == 'bevel'
+                  ? StrokeJoin.bevel
                   : StrokeJoin.miter
+              ..strokeMiterLimit = (item['miterLimit'] as num? ?? 4).toDouble()
               ..strokeWidth = item['kind'] == 'floor'
                   ? strokeWidth / zoom
                   : strokeWidth
-              ..color = itemColor(item['stroke']),
+              ..color = itemColor(item['stroke'])
+              ..shader = shader(item['strokeGradient']),
           );
         }
       }
@@ -1783,6 +2078,24 @@ class LayoutScenePainter extends CustomPainter {
       }
       canvas.restore();
     }
+    // Rejected translation stays outside the document/history, but its target
+    // footprint remains visible at the pointer like a blocked palette drop.
+    for (final hull in blockedPlacementHulls) {
+      if (hull.isEmpty) continue;
+      final path = Path()..moveTo(hull.first[0], hull.first[1]);
+      for (final p in hull.skip(1)) {
+        path.lineTo(p[0], p[1]);
+      }
+      path.close();
+      canvas.drawPath(path, Paint()..color = const Color(0x20DC2626));
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = const Color(0xFFDC2626)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2 / zoom,
+      );
+    }
     final outline = Paint()
       ..color = selectionColor
       ..style = PaintingStyle.stroke
@@ -1797,6 +2110,9 @@ class LayoutScenePainter extends CustomPainter {
         path.lineTo(p[0], p[1]);
       }
       path.close();
+      if (warningHulls.contains(hull)) {
+        canvas.drawPath(path, Paint()..color = const Color(0x20DC2626));
+      }
       if (emphasizeSelection && !warningHulls.contains(hull)) {
         canvas.drawPath(
           path,
@@ -1845,6 +2161,8 @@ class LayoutScenePainter extends CustomPainter {
       oldDelegate.seatLinks.isNotEmpty ||
       selectionHulls.isNotEmpty ||
       oldDelegate.selectionHulls.isNotEmpty ||
+      blockedPlacementHulls.isNotEmpty ||
+      oldDelegate.blockedPlacementHulls.isNotEmpty ||
       warningHulls.isNotEmpty ||
       oldDelegate.warningHulls.isNotEmpty ||
       snapGuides.isNotEmpty ||

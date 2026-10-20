@@ -224,7 +224,8 @@ void main() {
       kind: 'shape',
       x: 100,
       y: 100,
-      properties: {'fill': '#CBD5E1FF'},
+      properties: {},
+      style: {'fill': '#CBD5E1FF'},
     );
     final controller = VenueLayoutController(
       VenueLayoutDocument.empty().copyWith(nodes: [node]),
@@ -238,10 +239,8 @@ void main() {
         ),
       ),
     );
-    await tester.ensureVisible(find.text('Object appearance'));
-    await tester.tap(find.text('Object appearance'));
     await tester.pumpAndSettle();
-    final well = find.byTooltip('Choose color').first;
+    final well = find.byKey(const ValueKey('canonical-style-fill'));
     await tester.ensureVisible(well);
     await tester.tap(well);
     await tester.pumpAndSettle();
@@ -249,12 +248,12 @@ void main() {
       find.byKey(const ValueKey('editor-color-Basic colors-2563EB')),
     );
     await tester.pump();
-    expect(controller.document.nodes.single.properties['fill'], '#CBD5E1FF');
+    expect(controller.document.nodes.single.style['fill'], '#CBD5E1FF');
     await tester.tap(find.widgetWithText(FilledButton, 'Apply'));
     await tester.pumpAndSettle();
-    expect(controller.document.nodes.single.properties['fill'], '#2563EBFF');
+    expect(controller.document.nodes.single.style['fill'], '#2563EBFF');
     controller.undo();
-    expect(controller.document.nodes.single.properties['fill'], '#CBD5E1FF');
+    expect(controller.document.nodes.single.style['fill'], '#CBD5E1FF');
     expect(controller.canUndo, isFalse);
   });
 
@@ -306,6 +305,10 @@ void main() {
           expect(validateDocument(preview.document), isEmpty, reason: kind);
           expect(preview.document.canvas['fill'], '#00000000');
           expect(preview.document.nodes.every((n) => n.label.isEmpty), true);
+          if (kind == 'Text') {
+            expect(find.descendant(of: find.byWidget(preview), matching: find.text('Aa')), findsOneWidget);
+            continue;
+          }
           final paint = find.descendant(
             of: find.byWidget(preview),
             matching: find.byType(CustomPaint),
@@ -353,18 +356,20 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('Geometry'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Position and size'));
+    await tester.tap(find.text('Position and size'));
     await tester.pumpAndSettle();
     final field = find.byWidgetPredicate(
       (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Rotation °',
+          widget is TextField && widget.decoration?.labelText == 'Rotation',
     );
     await tester.ensureVisible(field);
     await tester.enterText(field, '37');
     final textField = tester.widget<TextField>(field);
     // Browser pointer-down blur and suffix activation can precede one rebuild.
     textField.onTapOutside!(const PointerDownEvent());
-    (textField.decoration!.suffixIcon! as IconButton).onPressed!();
+    textField.onSubmitted!(textField.controller!.text);
     await tester.pump();
     expect(controller.document.nodes.single.rotation, 37);
     controller.undo();
@@ -540,9 +545,9 @@ void main() {
         ),
       ),
     );
-    final field = find.widgetWithText(TextField, 'Before');
+    final field = find.byWidgetPredicate((w) => w is TextField && w.decoration?.labelText == 'Text');
     await tester.enterText(field, 'First line\nSecond line');
-    await tester.tap(find.byTooltip('Apply Text'));
+    tester.widget<TextField>(field).onEditingComplete!();
     await tester.pump();
     expect(
       controller.document.nodes.single.properties['text'],
@@ -566,7 +571,8 @@ void main() {
             width: 2400,
             height: 1600,
             z: 900,
-            properties: const {'shape': 'rect', 'fill': '#FFFFFFFF'},
+            properties: const {'shape': 'rect'},
+            style: const {'fill': '#FFFFFFFF'},
           ),
         ],
       );
@@ -745,13 +751,13 @@ void main() {
       );
       await tester.tap(find.text('Align and distribute'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Align left'));
+      await tester.tap(find.byTooltip('Align left'));
       await tester.pumpAndSettle();
       expect(controller.document.nodes.map((n) => n.x).toSet(), {200.0});
       controller.undo();
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Distribute horizontally'));
-      await tester.tap(find.text('Distribute horizontally'));
+      await tester.ensureVisible(find.byTooltip('Distribute horizontally'));
+      await tester.tap(find.byTooltip('Distribute horizontally'));
       await tester.pumpAndSettle();
       expect(controller.document.nodes.map((n) => n.x).toList()..sort(), [
         200.0,
@@ -793,14 +799,18 @@ void main() {
       final controller = VenueLayoutController(
         document,
         resources: {
-          'protocol': 1,
-          'fonts': <String, dynamic>{},
+          'protocol': 2,
+          'fontFamilies': <String, dynamic>{},
+          'textLayouts': <String, dynamic>{},
+          'numberSymbols': <String, dynamic>{},
           'assets': {
-            'wide': {
+            'image:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa': {
               'width': 200,
               'height': 100,
-              'mime': 'image/png',
-              'sha256':
+              'mimeType': 'image/png',
+              'byteLength': 100,
+              'url': 'https://example.invalid/wide.png',
+              'hash':
                   'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             },
           },
@@ -819,7 +829,11 @@ void main() {
       await tester.ensureVisible(find.text('Choose image'));
       await tester.tap(find.text('Choose image'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('wide'));
+      await tester.tap(
+        find.text(
+          'image:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Keep layout and canvas'));
       await tester.pumpAndSettle();

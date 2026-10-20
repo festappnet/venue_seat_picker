@@ -1,9 +1,9 @@
+import 'placement.dart';
+import 'grid_surface.dart' show snapTableSurfaceToGrid;
 import 'dart:math';
 import 'model.dart';
 import 'geometry.dart';
-import 'node_outline.dart' show tableSeatFacingRotation;
 import 'table_seating.dart';
-import 'table_side_placement.dart';
 export 'table_seating.dart';
 import 'zigzag.dart';
 import 'surface_geometry.dart';
@@ -11,6 +11,8 @@ export 'surface_geometry.dart';
 export 'transport.dart';
 
 int tableCapacity(LayoutNode n) {
+  if (n.surface != null)
+    n = n.copyWith(properties: surfaceGeometryProperties(n));
   final seating = TableSeating.fromTable(n),
       pitch = seating.pitch,
       inset = seating.edgePadding * 2,
@@ -52,10 +54,31 @@ VenueLayoutDocument tableLayout({
     x: x,
     y: y,
     width: width,
-    height: height,
-    properties: {'shape': shape, if (seating != null) ...seating.properties},
+    height: const {'round', 'circle', 'ellipse'}.contains(shape)
+        ? width
+        : height,
+    surface: {
+      'type': const {'round', 'circle', 'ellipse'}.contains(shape)
+          ? 'circle'
+          : 'rect',
+    },
+    seating: (seating ?? const TableSeating()).record,
+    properties: const {},
   );
-  return reflowTable(VenueLayoutDocument(nodes: [table]), table.id, count);
+  if (!const {
+    'round',
+    'circle',
+    'ellipse',
+    'rectangle',
+    'rect',
+    'roundedRect',
+  }.contains(shape))
+    throw ArgumentError('Unsupported table surface');
+  return reflowTable(
+    VenueLayoutDocument(schemaVersion: 2, nodes: [table]),
+    table.id,
+    count,
+  );
 }
 
 List<Map<String, dynamic>> _anchors(LayoutNode table, int count) {
@@ -149,7 +172,7 @@ List<Map<String, dynamic>> _anchors(LayoutNode table, int count) {
       out.add({
         'x': px + safeOffset * cos(angle),
         'y': py + safeOffset * sin(angle),
-        'rotation': angle * 180 / pi + 90,
+        'rotation': angle * 180 / pi - 90,
         'kind': 'perimeter',
         't': i / count,
       });
@@ -226,11 +249,12 @@ VenueLayoutDocument reflowTable(
   bool constrainToCanvas = false,
   Set<String> protectedSeatIds = const {},
 }) {
-  d = reflowPreferredTableSides(d, tableId);
+  d = reflowCanonicalPins(d, tableId);
   final originalTable = d.nodes.firstWhere((n) => n.id == tableId);
   final seating = TableSeating.fromDocument(d, originalTable);
   final table = originalTable.copyWith(
-    properties: {...originalTable.properties, ...seating.properties},
+    properties: {...surfaceGeometryProperties(originalTable)},
+    seating: seating.record,
   );
   if (table.kind != 'table') throw ArgumentError('Target must be a table');
   final nodeIndex = {for (final n in d.nodes) n.id: n};
@@ -248,8 +272,8 @@ VenueLayoutDocument reflowTable(
   final attachments = {for (final a in d.attachments) a['seatId']: a};
   bool fixed(LayoutNode n) =>
       n.locked ||
-      n.properties['manual'] == true ||
-      attachments[n.id]?['manual'] == true;
+      ((attachments[n.id] != null &&
+          attachments[n.id]?['placement']?['mode'] != 'automatic'));
   final seats =
       d.nodes.where((n) => n.kind == 'seat' && n.parentId == tableId).toList()
         ..sort((a, b) {
@@ -323,8 +347,7 @@ VenueLayoutDocument reflowTable(
             label: '${i + 1}',
             properties: {
               'symbol': 'chair',
-              'size': 16,
-              'align': 'center',
+
               if (isBarNode(table)) 'furniture': 'stool',
             },
           ),
@@ -419,7 +442,7 @@ VenueLayoutDocument reflowTable(
         final candidate = seat.copyWith(
               x: (a['x'] as num).toDouble(),
               y: (a['y'] as num).toDouble(),
-              rotation: seat.properties['manualRotation'] == true
+              rotation: seatRotationManual(d, seat)
                   ? seat.rotation
                   : (a['rotation'] as num).toDouble(),
             ),
@@ -455,7 +478,7 @@ VenueLayoutDocument reflowTable(
         next[i].copyWith(
           x: (selectedAnchors[next[i].id]!['x'] as num).toDouble(),
           y: (selectedAnchors[next[i].id]!['y'] as num).toDouble(),
-          rotation: next[i].properties['manualRotation'] == true
+          rotation: seatRotationManual(d, next[i])
               ? next[i].rotation
               : (selectedAnchors[next[i].id]!['rotation'] as num).toDouble(),
           properties: {...next[i].properties, 'slot': i},
@@ -466,34 +489,16 @@ VenueLayoutDocument reflowTable(
     nodes: [
       ...d.nodes
           .where((n) => !removed.contains(n.id))
-          .map((n) => n.id == tableId ? table : n),
+          .map(
+            (n) => n.id == tableId
+                ? (originalTable.copyWith(seating: seating.record))
+                : n,
+          ),
       ...placed,
     ],
     selectionUnits: d.selectionUnits
         .where((u) => !(u['nodeIds'] as List).any(deletedIds.contains))
         .toList(),
-    generators: d.generators.map((g) {
-      final tableRoot = (g['rootId'] ?? g['assemblyId']) == tableId;
-      return <String, dynamic>{
-        ...g,
-        if (g['nodeIds'] is List)
-          'nodeIds': tableRoot
-              ? placed.map((n) => n.id).toList()
-              : (g['nodeIds'] as List)
-                    .where((id) => !deletedIds.contains(id))
-                    .toList(),
-        if (tableRoot && g['parameters'] is Map)
-          'parameters': {
-            ...Map<String, dynamic>.from(g['parameters']),
-            if ((g['parameters'] as Map).containsKey('count'))
-              'count': placed.length,
-            if ((g['parameters'] as Map).containsKey('width'))
-              'width': table.width,
-            if ((g['parameters'] as Map).containsKey('height'))
-              'height': table.height,
-          },
-      };
-    }).toList(),
     attachments: [
       ...d.attachments.where(
         (a) => a['targetId'] != tableId && !deletedIds.contains(a['seatId']),
@@ -503,180 +508,15 @@ VenueLayoutDocument reflowTable(
           attachments[seat.id]!
         else
           {
-            ...?attachments[seat.id],
+            if (attachments[seat.id]?['id'] != null)
+              'id': attachments[seat.id]!['id'],
             'seatId': seat.id,
             'targetId': tableId,
-            ...(selectedAnchors[seat.id] ?? preferred[placed.indexOf(seat)]),
-            'x': seat.x,
-            'y': seat.y,
-            'rotation': seat.rotation,
-            'gap': seating.gap,
+            'rotationMode': attachments[seat.id]?['rotationMode'] ?? 'auto',
+            'placement': {'mode': 'automatic'},
           },
     ],
   );
-}
-
-// The table seating pitch can use the ends of a side as well as
-// its centered count layout. Total chair capacity remains a separate contract.
-List<Map<String, dynamic>> _chairPerimeterSlots(LayoutNode table, int count) {
-  final seating = TableSeating.fromTable(table),
-      pitch = seating.pitch,
-      offset = seating.offset;
-  if (table.properties['shape'] == 'polygon')
-    return [...polygonSurfaceSlots(table)];
-  if (isBarNode(table)) return _anchors(table, tableCapacity(table));
-  final capacity = min(tableCapacity(table), max(16, count * 2)),
-      slots = _anchors(table, capacity),
-      round = const [
-        'round',
-        'circle',
-        'ellipse',
-        'oval',
-      ].contains(table.properties['shape']);
-  if (round) {
-    slots.addAll(_anchors(table, capacity * 4));
-  } else {
-    for (var edge = 0; edge < 4; edge++) {
-      if (isBarNode(table) &&
-          ['top', 'right', 'bottom', 'left'][edge] != _barSide(table))
-        continue;
-      final horizontal = edge.isEven,
-          length = horizontal ? table.width : table.height,
-          cells = min((length / pitch).floor() + 1, max(8, count + 2)),
-          span = (cells - 1) * pitch,
-          slack = length - span;
-      for (final phase in [-slack / 2, 0.0, slack / 2]) {
-        for (var i = 0; i < cells; i++) {
-          final coordinate = i * pitch - span / 2 + phase;
-          slots.add({
-            'x': horizontal
-                ? coordinate
-                : (edge == 1
-                      ? table.width / 2 + offset
-                      : -table.width / 2 - offset),
-            'y': horizontal
-                ? (edge == 0
-                      ? -table.height / 2 - offset
-                      : table.height / 2 + offset)
-                : coordinate,
-            'rotation': <double>[180, 270, 0, 90][edge],
-            'kind': 'edge',
-            'edge': ['top', 'right', 'bottom', 'left'][edge],
-            't': ((coordinate + length / 2) / length).clamp(0, 1),
-          });
-        }
-      }
-    }
-  }
-  final unique = <String, Map<String, dynamic>>{};
-  for (final slot in slots) {
-    unique.putIfAbsent(
-      '${quantize(slot['x'] as num)}:${quantize(slot['y'] as num)}',
-      () => slot,
-    );
-  }
-  return unique.values.toList();
-}
-
-// Anchor a regular side sequence to the actual canvas clipping interval.
-// Fixed centered/end phases alone miss valid layouts for dimensions such as
-// the demo's 190x110 table, whose first chair center must align at -75.
-List<Map<String, dynamic>> _canvasChairPerimeterSlots(
-  VenueLayoutDocument d,
-  LayoutNode table,
-  List<double> matrix,
-  List<LayoutNode> seats,
-) {
-  if (const [
-    'polygon',
-    'round',
-    'circle',
-    'ellipse',
-    'oval',
-  ].contains(table.properties['shape']))
-    return [];
-  final seating = TableSeating.fromTable(table),
-      pitch = seating.pitch,
-      offset = seating.offset;
-  final out = <Map<String, dynamic>>[],
-      left = (d.canvas['x'] as num).toDouble(),
-      top = (d.canvas['y'] as num).toDouble(),
-      right = left + (d.canvas['width'] as num),
-      bottom = top + (d.canvas['height'] as num),
-      sizes = <String>{};
-  for (final seat in seats) {
-    if (!sizes.add('${seat.width}:${seat.height}')) continue;
-    for (var edge = 0; edge < 4; edge++) {
-      if (isBarNode(table) &&
-          ['top', 'right', 'bottom', 'left'][edge] != _barSide(table))
-        continue;
-      final horizontal = edge.isEven,
-          length = horizontal ? table.width : table.height,
-          rotation = <double>[180, 270, 0, 90][edge],
-          perpendicular = horizontal
-              ? (edge == 0
-                    ? -table.height / 2 - offset
-                    : table.height / 2 + offset)
-              : (edge == 1
-                    ? table.width / 2 + offset
-                    : -table.width / 2 - offset),
-          base = transformPoint(
-            matrix,
-            horizontal ? 0 : perpendicular,
-            horizontal ? perpendicular : 0,
-          ),
-          direction = horizontal
-              ? [matrix[0], matrix[1]]
-              : [matrix[2], matrix[3]],
-          centered = seat.copyWith(x: 0, y: 0, rotation: rotation),
-          footprint = boundsOfPoints(
-            worldHull(centered, multiplyMatrix(matrix, localMatrix(centered))),
-          );
-      var low = -length / 2, high = length / 2, valid = true;
-      void clip(double origin, double slope, double lower, double upper) {
-        if (slope.abs() < 1e-12) {
-          if (origin < lower - 1e-7 || origin > upper + 1e-7) valid = false;
-          return;
-        }
-        final a = (lower - origin) / slope, b = (upper - origin) / slope;
-        low = max(low, min(a, b));
-        high = min(high, max(a, b));
-      }
-
-      clip(
-        base[0],
-        direction[0],
-        left - (footprint['x']! - matrix[4]),
-        right - (footprint['x']! + footprint['width']! - matrix[4]),
-      );
-      clip(
-        base[1],
-        direction[1],
-        top - (footprint['y']! - matrix[5]),
-        bottom - (footprint['y']! + footprint['height']! - matrix[5]),
-      );
-      if (!valid || high < low - 1e-7) continue;
-      final cells = min(
-            ((high - low + 1e-7) / pitch).floor() + 1,
-            max(8, seats.length + 2),
-          ),
-          span = (cells - 1) * pitch;
-      for (final start in [low, (low + high - span) / 2, high - span]) {
-        for (var i = 0; i < cells; i++) {
-          final coordinate = start + i * pitch;
-          out.add({
-            'x': horizontal ? coordinate : perpendicular,
-            'y': horizontal ? perpendicular : coordinate,
-            'rotation': rotation,
-            'kind': 'edge',
-            'edge': ['top', 'right', 'bottom', 'left'][edge],
-            't': ((coordinate + length / 2) / length).clamp(0, 1),
-          });
-        }
-      }
-    }
-  }
-  return out;
 }
 
 bool _chairObstacle(LayoutNode n) =>
@@ -734,455 +574,18 @@ VenueLayoutDocument reflowTablesAtCanvasEdges(
   Set<String> tableIds,
 ) {
   if (tableIds.isEmpty) return d;
-  return _reflowTablesAtCanvasEdges(d, tableIds, LayoutSpatialIndex(d));
-}
-
-VenueLayoutDocument _reflowTablesAtCanvasEdges(
-  VenueLayoutDocument d,
-  Set<String> tableIds,
-  LayoutSpatialIndex spatial,
-) {
-  final byId = {for (final n in d.nodes) n.id: n};
-  final matrices = spatial.matrices,
-      attachments = {for (final a in d.attachments) a['seatId']: a},
-      replacements = <String, LayoutNode>{},
-      nextAttachments = <String, Map<String, dynamic>>{},
-      left = (d.canvas['x'] as num).toDouble(),
-      top = (d.canvas['y'] as num).toDouble(),
-      right = (d.canvas['x'] as num) + (d.canvas['width'] as num),
-      bottom = (d.canvas['y'] as num) + (d.canvas['height'] as num);
-  var obstacles = <List<List<double>>>[];
-  bool inside(LayoutNode seat, List<double> tableMatrix) =>
-      !obstacles.any(
-        (h) => polygonsOverlap(h, worldHull(seat, localMatrix(seat))),
-      ) &&
-      worldHull(seat, multiplyMatrix(tableMatrix, localMatrix(seat))).every(
-        (p) =>
-            p[0] >= left - 1e-7 &&
-            p[0] <= right + 1e-7 &&
-            p[1] >= top - 1e-7 &&
-            p[1] <= bottom + 1e-7,
+  {
+    for (final id in tableIds)
+      d = reflowTable(
+        d,
+        id,
+        d.nodes.where((n) => n.parentId == id && n.kind == 'seat').length,
+        constrainToCanvas: true,
       );
-
-  for (final table in d.nodes.where(
-    (n) => n.kind == 'table' && tableIds.contains(n.id),
-  )) {
-    final seats =
-        d.nodes
-            .where((n) => n.kind == 'seat' && n.parentId == table.id)
-            .toList()
-          ..sort((a, b) {
-            final order = (a.properties['slot'] as num? ?? 0).compareTo(
-              b.properties['slot'] as num? ?? 0,
-            );
-            return order != 0 ? order : a.id.compareTo(b.id);
-          });
-    final seating = TableSeating.fromDocument(d, table),
-        pitchStep = seating.pitch,
-        offset = seating.offset;
-    final matrix = matrices[table.id]!;
-    final inverse = inverseMatrix(matrix);
-    final own = layoutSubtree(d, {table.id});
-    // Query only nearby physical objects; labels and distant rows do not enter
-    // the per-anchor collision loop. Earlier moved tables use their new chairs.
-    final search = boundsOfPoints(worldHull(table, matrix));
-    final near = spatial.query({
-      'x':
-          search['x']! -
-          (max(seating.width, seating.height) + seating.gap + seating.spacing),
-      'y':
-          search['y']! -
-          (max(seating.width, seating.height) + seating.gap + seating.spacing),
-      'width':
-          search['width']! +
-          2 *
-              (max(seating.width, seating.height) +
-                  seating.gap +
-                  seating.spacing),
-      'height':
-          search['height']! +
-          2 *
-              (max(seating.width, seating.height) +
-                  seating.gap +
-                  seating.spacing),
-    });
-    obstacles = [
-      for (final id in near)
-        if (!own.contains(id) && _chairObstacle(byId[id]!))
-          worldHull(
-            replacements[id] ?? byId[id]!,
-            multiplyMatrix(
-              inverse,
-              replacements.containsKey(id)
-                  ? multiplyMatrix(
-                      matrices[byId[id]!.parentId] ?? [1, 0, 0, 1, 0, 0],
-                      localMatrix(replacements[id]!),
-                    )
-                  : matrices[id]!,
-            ),
-          ),
-    ];
-    bool movableAtEdge(LayoutNode n) =>
-        !n.locked &&
-        attachments[n.id]?['targetId'] == table.id &&
-        ((n.properties['manual'] != true &&
-                attachments[n.id]?['manual'] != true) ||
-            !inside(n, matrix));
-    final movable = seats.where(movableAtEdge).toList();
-    final round = const [
-      'round',
-      'circle',
-      'ellipse',
-      'oval',
-    ].contains(table.properties['shape']);
-    if (round &&
-        seats.isNotEmpty &&
-        movable.length == seats.length &&
-        seats.asMap().entries.any((entry) {
-          final old = attachments[entry.value.id]!;
-          return old['kind'] != 'perimeter' ||
-              ((old['t'] as num? ?? -1) - entry.key / seats.length).abs() >
-                  .00001;
-        })) {
-      // Pressure has gone away: try the regular perimeter before retaining a
-      // previously compressed layout. No fallback search on the normal path.
-      final preferred = _anchors(
-        table.copyWith(
-          properties: {...table.properties, ...seating.properties},
-        ),
-        seats.length,
-      );
-      final regular = <LayoutNode>[];
-      var clear = true;
-      for (var i = 0; i < seats.length; i++) {
-        final seat = seats[i], anchor = preferred[i];
-        final candidate = seat.copyWith(
-          x: (anchor['x'] as num).toDouble(),
-          y: (anchor['y'] as num).toDouble(),
-          rotation: seat.properties['manualRotation'] == true
-              ? seat.rotation
-              : (anchor['rotation'] as num).toDouble(),
-        );
-        final hull = worldHull(candidate, localMatrix(candidate));
-        if (!inside(candidate, matrix) ||
-            polygonsOverlap(hull, localHull(table)) ||
-            regular.any(
-              (other) =>
-                  polygonsOverlap(hull, worldHull(other, localMatrix(other))),
-            )) {
-          clear = false;
-          break;
-        }
-        regular.add(candidate);
-      }
-      if (clear) {
-        for (var i = 0; i < regular.length; i++) {
-          final seat = regular[i];
-          replacements[seat.id] = seat;
-          nextAttachments[seat.id] = {
-            ...attachments[seat.id]!,
-            ...preferred[i],
-            'x': seat.x,
-            'y': seat.y,
-            'rotation': seat.rotation,
-          };
-        }
-        continue;
-      }
-    }
-    if (movable.every((n) => inside(n, matrix))) {
-      final body = boundsOfPoints(worldHull(table, matrix)),
-          rectangular = !const [
-            'round',
-            'circle',
-            'ellipse',
-            'oval',
-          ].contains(table.properties['shape']),
-          touchesWall =
-              (body['x']! - left).abs() <= .001 ||
-              (body['y']! - top).abs() <= .001 ||
-              (body['x']! + body['width']! - right).abs() <= .001 ||
-              (body['y']! + body['height']! - bottom).abs() <= .001;
-      // Older drafts may already fit at a wall but retain an untidy greedy
-      // arrangement. Reapplying the same bounded move should normalize it.
-      if (!rectangular || !touchesWall) continue;
-    }
-
-    final anchors = [
-      ..._chairPerimeterSlots(table, seats.length),
-      ..._canvasChairPerimeterSlots(d, table, matrix, seats),
-    ];
-    // Once fitting is established, give each side one regular centered row.
-    // Canvas clipping can shift the row, but must never introduce random gaps.
-    bool regularize(
-      Map<String, LayoutNode> chosen,
-      Map<String, Map<String, dynamic>> assigned,
-    ) {
-      if (const [
-        'polygon',
-        'round',
-        'circle',
-        'ellipse',
-        'oval',
-      ].contains(table.properties['shape']))
-        return false;
-      final regular = {...chosen}, regularAnchors = {...assigned};
-      const edges = ['top', 'right', 'bottom', 'left'];
-      for (var edgeIndex = 0; edgeIndex < edges.length; edgeIndex++) {
-        final edge = edges[edgeIndex],
-            horizontal = edgeIndex.isEven,
-            along = horizontal ? 'x' : 'y',
-            length = horizontal ? table.width : table.height,
-            group = chosen.values
-                .where((n) => assigned[n.id]?['edge'] == edge)
-                .toList();
-        if (group.isEmpty) continue;
-        // Fixed manual/locked positions remain authoritative on their side.
-        if (seats.any(
-          (n) =>
-              !chosen.containsKey(n.id) && attachments[n.id]?['edge'] == edge,
-        ))
-          continue;
-        group.sort((a, b) {
-          final order = (horizontal ? a.x : a.y).compareTo(
-            horizontal ? b.x : b.y,
-          );
-          return order != 0
-              ? order
-              : seats.indexOf(a).compareTo(seats.indexOf(b));
-        });
-        final rotation = <double>[180, 270, 0, 90][edgeIndex],
-            perpendicular = horizontal
-                ? (edgeIndex == 0
-                      ? -table.height / 2 - offset
-                      : table.height / 2 + offset)
-                : (edgeIndex == 1
-                      ? table.width / 2 + offset
-                      : -table.width / 2 - offset);
-        var low = -length / 2, high = length / 2;
-        for (final seat in group) {
-          final available = anchors
-              .where(
-                (a) =>
-                    a['edge'] == edge &&
-                    inside(
-                      seat.copyWith(
-                        x: (a['x'] as num).toDouble(),
-                        y: (a['y'] as num).toDouble(),
-                        rotation: rotation,
-                      ),
-                      matrix,
-                    ),
-              )
-              .toList();
-          if (available.isEmpty) return false;
-          low = max(
-            low,
-            available.map((a) => (a[along] as num).toDouble()).reduce(min),
-          );
-          high = min(
-            high,
-            available.map((a) => (a[along] as num).toDouble()).reduce(max),
-          );
-        }
-        var pitch = max(
-              pitchStep,
-              (length - seating.edgePadding * 2) / group.length,
-            ),
-            span = pitch * (group.length - 1);
-        if (span > high - low + 1e-7) {
-          pitch = pitchStep;
-          span = pitch * (group.length - 1);
-        }
-        if (span > high - low + 1e-7) return false;
-        final center = 0.0.clamp(
-          low + span / 2,
-          max(low + span / 2, high - span / 2),
-        );
-        for (var i = 0; i < group.length; i++) {
-          final coordinate = center + (i - (group.length - 1) / 2) * pitch,
-              seat = group[i].copyWith(
-                x: horizontal ? coordinate : perpendicular,
-                y: horizontal ? perpendicular : coordinate,
-                rotation: rotation,
-              );
-          regular[seat.id] = seat;
-          regularAnchors[seat.id] = {
-            ...assigned[seat.id]!,
-            'kind': 'edge',
-            'edge': edge,
-            'x': seat.x,
-            'y': seat.y,
-            'rotation': rotation,
-            't': ((coordinate + length / 2) / length).clamp(0, 1),
-          };
-        }
-      }
-      final all = seats.map((n) => regular[n.id] ?? n).toList();
-      for (var i = 0; i < all.length; i++) {
-        final seat = all[i], hull = worldHull(seat, localMatrix(seat));
-        if (!inside(seat, matrix) || polygonsOverlap(hull, localHull(table)))
-          return false;
-        for (var j = 0; j < i; j++) {
-          if (polygonsOverlap(hull, worldHull(all[j], localMatrix(all[j]))))
-            return false;
-        }
-      }
-      chosen
-        ..clear()
-        ..addAll(regular);
-      assigned
-        ..clear()
-        ..addAll(regularAnchors);
-      return true;
-    }
-
-    void commit(
-      Map<String, LayoutNode> chosen,
-      Map<String, Map<String, dynamic>> assigned,
-    ) {
-      replacements.addAll(chosen);
-      for (final entry in assigned.entries) {
-        nextAttachments[entry.key] = {
-          ...attachments[entry.key]!,
-          ...entry.value,
-        };
-      }
-    }
-
-    // Keep the rows that still fit on their original sides. Prefer transferring
-    // an obstructed end row to its opposite end over adding chairs to long rows.
-    final opposite = {
-          'top': 'bottom',
-          'bottom': 'top',
-          'left': 'right',
-          'right': 'left',
-        },
-        sideChosen = <String, LayoutNode>{},
-        sideAnchors = <String, Map<String, dynamic>>{};
-    for (final seat in movable) {
-      final old = attachments[seat.id]!, edge = old['edge'];
-      if (edge is! String || !opposite.containsKey(edge)) {
-        sideChosen.clear();
-        break;
-      }
-      if (isBarNode(table) && !inside(seat, matrix)) {
-        sideChosen.clear();
-        break;
-      }
-      sideChosen[seat.id] = seat;
-      sideAnchors[seat.id] = {
-        ...old,
-        'edge': inside(seat, matrix) ? edge : opposite[edge],
-      };
-    }
-    if (sideChosen.length == movable.length &&
-        regularize(sideChosen, sideAnchors)) {
-      commit(sideChosen, sideAnchors);
-      continue;
-    }
-    bool pack(List<LayoutNode> changing, {bool compact = false}) {
-      final changingIds = changing.map((n) => n.id).toSet(),
-          fixed = seats.where((n) => !changingIds.contains(n.id)).toList(),
-          occupied = [...fixed],
-          chosen = <String, LayoutNode>{},
-          chosenAnchors = <String, Map<String, dynamic>>{};
-      final candidates = <String, List<(LayoutNode, Map<String, dynamic>)>>{};
-      for (final seat in changing) {
-        final choices = <(LayoutNode, Map<String, dynamic>)>[];
-        for (final anchor in anchors) {
-          final next = seat.copyWith(
-            x: (anchor['x'] as num).toDouble(),
-            y: (anchor['y'] as num).toDouble(),
-            rotation: (anchor['rotation'] as num).toDouble(),
-          );
-          if (!inside(next, matrix)) continue;
-          final hull = worldHull(next, localMatrix(next));
-          if (polygonsOverlap(hull, localHull(table)) ||
-              fixed.any(
-                (other) =>
-                    polygonsOverlap(hull, worldHull(other, localMatrix(other))),
-              ))
-            continue;
-          choices.add((next, anchor));
-        }
-        choices.sort((a, b) {
-          if (compact) {
-            const edges = ['top', 'right', 'bottom', 'left'];
-            final edge = edges
-                .indexOf('${a.$2['edge']}')
-                .compareTo(edges.indexOf('${b.$2['edge']}'));
-            if (edge != 0) return edge;
-            final along = a.$2['edge'] == 'left' || a.$2['edge'] == 'right'
-                ? 'y'
-                : 'x';
-            final coordinate = (a.$2[along] as num).compareTo(
-              b.$2[along] as num,
-            );
-            if (coordinate != 0) return coordinate;
-          }
-          double distance(LayoutNode n) =>
-              pow(n.x - seat.x, 2).toDouble() + pow(n.y - seat.y, 2).toDouble();
-          final order = distance(a.$1).compareTo(distance(b.$1));
-          return order != 0
-              ? order
-              : anchors.indexOf(a.$2).compareTo(anchors.indexOf(b.$2));
-        });
-        candidates[seat.id] = choices;
-      }
-      final ordered = [...changing]
-        ..sort((a, b) {
-          final order = candidates[a.id]!.length.compareTo(
-            candidates[b.id]!.length,
-          );
-          return order != 0
-              ? order
-              : seats.indexOf(a).compareTo(seats.indexOf(b));
-        });
-      for (final seat in ordered) {
-        var placed = false;
-        for (final (next, anchor) in candidates[seat.id]!) {
-          final hull = worldHull(next, localMatrix(next));
-          if (occupied.any(
-            (other) =>
-                polygonsOverlap(hull, worldHull(other, localMatrix(other))) ||
-                pow(next.x - other.x, 2) + pow(next.y - other.y, 2) <
-                    pitchStep * pitchStep - 1e-7,
-          ))
-            continue;
-          occupied.add(next);
-          chosen[seat.id] = next;
-          chosenAnchors[seat.id] = anchor;
-          placed = true;
-          break;
-        }
-        if (!placed) return false;
-      }
-      regularize(chosen, chosenAnchors);
-      commit(chosen, chosenAnchors);
-      return true;
-    }
-
-    if (!pack(movable) && !pack(movable, compact: true)) {
-      // Manual placements are preferences while moving the whole assembly.
-      // If they block the only viable wall layout, relocate them too.
-      final all = seats
-          .where((n) => !n.locked && attachments[n.id]?['targetId'] == table.id)
-          .toList();
-      if (!pack(all)) pack(all, compact: true);
-    }
+    return d;
   }
-  if (replacements.isEmpty) return d;
-  return d.copyWith(
-    nodes: d.nodes.map((n) => replacements[n.id] ?? n).toList(),
-    attachments: d.attachments
-        .map((a) => nextAttachments[a['seatId']] ?? a)
-        .toList(),
-  );
 }
 
-/// Snaps an independently moved attached chair onto a nearby unoccupied
-/// standard perimeter slot. Far-away manual placements never teleport.
 VenueLayoutDocument snapAttachedChairPosition(
   VenueLayoutDocument d,
   String seatId, {
@@ -1229,7 +632,6 @@ VenueLayoutDocument snapAttachedChairPosition(
           x: (slot['x'] as num).toDouble(),
           y: (slot['y'] as num).toDouble(),
           rotation: (slot['rotation'] as num).toDouble(),
-          properties: {...seat.properties, 'manual': true},
         ),
         hull = worldHull(next, localMatrix(next));
     if (polygonsOverlap(hull, localHull(table)) ||
@@ -1248,7 +650,12 @@ VenueLayoutDocument snapAttachedChairPosition(
       nodes: d.nodes.map((n) => n.id == seatId ? next : n).toList(),
       attachments: d.attachments
           .map(
-            (a) => a['seatId'] == seatId ? {...a, ...slot, 'manual': true} : a,
+            (a) => a['seatId'] == seatId
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                  }
+                : a,
           )
           .toList(),
     );
@@ -1267,7 +674,6 @@ VenueLayoutDocument cloneLayout(
   for (final records in [
     d.sections,
     d.selectionUnits,
-    d.generators,
     d.presets,
     d.attachments,
   ]) {
@@ -1371,10 +777,7 @@ VenueLayoutDocument transformNodes(
           .toList(),
       matrices = worldMatrices(d),
       points = roots.expand((n) => worldHull(n, matrices[n.id]!)).toList(),
-      bounds =
-          roots.any(
-            (n) => n.kind == 'group' && n.properties['assembly'] == null,
-          )
+      bounds = roots.any((n) => n.kind == 'group' && (n.assembly == null))
           ? selectionBounds(d, ids)
           : boundsOfPoints(points),
       cx = bounds['x']! + (cornerPivot ? 0 : bounds['width']! / 2),
@@ -1383,40 +786,43 @@ VenueLayoutDocument transformNodes(
       c = cos(r),
       s = sin(r),
       rootIds = roots.map((n) => n.id).toSet();
+  final movedNodes = d.nodes.map((n) {
+    if (!rootIds.contains(n.id)) return n;
+    final m = matrices[n.id]!,
+        x = m[4] - cx,
+        y = m[5] - cy,
+        world = [cx + c * x - s * y + dx, cy + s * x + c * y + dy],
+        parent = matrices[n.parentId],
+        local = parent == null
+            ? world
+            : transformPoint(inverseMatrix(parent), world[0], world[1]);
+    return n.copyWith(
+      x: quantize(local[0]),
+      y: quantize(local[1]),
+      rotation: quantize(n.rotation + rotation),
+    );
+  }).toList();
+  final movedById = {for (final n in movedNodes) n.id: n};
   return d.copyWith(
-    nodes: d.nodes.map((n) {
-      if (!rootIds.contains(n.id)) return n;
-      final m = matrices[n.id]!,
-          x = m[4] - cx,
-          y = m[5] - cy,
-          world = [cx + c * x - s * y + dx, cy + s * x + c * y + dy],
-          parent = matrices[n.parentId],
-          local = parent == null
-              ? world
-              : transformPoint(inverseMatrix(parent), world[0], world[1]);
-      final moved = n.copyWith(
-        x: quantize(local[0]),
-        y: quantize(local[1]),
-        rotation: quantize(
-          tableSeatFacingRotation(n, byId[n.parentId]) + rotation,
-        ),
-        properties: {
-          ...n.properties,
-          if (rotation != 0 &&
-              n.kind == 'seat' &&
-              byId[n.parentId]?.kind == 'table')
-            'manualRotation': true,
-        },
-      );
-      return moved.copyWith(
-        rotation: tableSeatFacingRotation(moved, byId[n.parentId]),
-      );
-    }).toList(),
+    nodes: movedNodes,
+    attachments: [
+      for (final a in d.attachments)
+        if (rootIds.contains(a['seatId']))
+          {
+            ...a,
+            if (movedById[a['seatId']]!.x != byId[a['seatId']]!.x ||
+                movedById[a['seatId']]!.y != byId[a['seatId']]!.y)
+              'placement': {'mode': 'free'},
+            if (rotation != 0) 'rotationMode': 'manual',
+          }
+        else
+          a,
+    ],
   );
 }
 
-/// Translates an assembly inside the fixed canvas, reflowing automatic table
-/// chairs where possible. Derive every preview from the gesture baseline.
+/// Translates an assembly inside the fixed canvas. Derive every preview from
+/// the gesture baseline.
 /// Physical furniture and chairs constrain placement; decorative labels do not.
 /// Move the complete assembly rigidly. Seating repair belongs to explicit
 /// layout operations, never to pointer translation.
@@ -1425,21 +831,20 @@ VenueLayoutDocument translateLayoutWithinCanvas(
   Set<String> ids, {
   double dx = 0,
   double dy = 0,
-}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy, reflowSeating: false);
+}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy);
 
 VenueLayoutDocument moveLayoutWithinCanvas(
   VenueLayoutDocument d,
   Set<String> ids, {
   double dx = 0,
   double dy = 0,
-}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy, reflowSeating: true);
+}) => _moveLayoutWithinCanvas(d, ids, dx: dx, dy: dy);
 
 VenueLayoutDocument _moveLayoutWithinCanvas(
   VenueLayoutDocument d,
   Set<String> ids, {
   double dx = 0,
   double dy = 0,
-  required bool reflowSeating,
 }) {
   if (!dx.isFinite || !dy.isFinite) {
     throw ArgumentError('Translation must be finite');
@@ -1454,18 +859,6 @@ VenueLayoutDocument _moveLayoutWithinCanvas(
           .where((n) => n.kind == 'table')
           .map((n) => n.id)
           .toSet(),
-      attachments = {for (final a in d.attachments) a['seatId']: a},
-      bars = moving.where(isBarNode).map((n) => n.id).toSet(),
-      fixed = moving
-          .where(
-            (n) =>
-                !(n.kind == 'seat' &&
-                    tables.contains(n.parentId) &&
-                    !bars.contains(n.parentId) &&
-                    !n.locked &&
-                    attachments[n.id]?['targetId'] == n.parentId),
-          )
-          .toList(),
       left = (d.canvas['x'] as num).toDouble(),
       top = (d.canvas['y'] as num).toDouble(),
       right = left + (d.canvas['width'] as num),
@@ -1499,66 +892,9 @@ VenueLayoutDocument _moveLayoutWithinCanvas(
       b['y']! >= top - 1e-7 &&
       b['x']! + b['width']! <= right + 1e-7 &&
       b['y']! + b['height']! <= bottom + 1e-7;
-  final initial = clamp(bounds(d, fixed.isEmpty ? moving : fixed), dx, dy);
-  // An assembly larger than the canvas has no valid translation. Keep the
-  // baseline intact rather than dropping chairs or resizing the canvas.
-  if (initial == null) return d;
-  var x = initial[0], y = initial[1];
-  for (var attempt = 0; reflowSeating && attempt < 8; attempt++) {
-    final translated = transformNodes(d, ids, dx: x, dy: y);
-    final spatial = tables.isEmpty ? null : LayoutSpatialIndex(translated);
-    // A colliding tabletop cannot be repaired by moving its chairs. Reject it
-    // before building perimeter candidates or running the seating packer.
-    if (spatial != null &&
-        !_tableBodiesClear(translated, tables, spatial, {
-          for (final n in translated.nodes) n.id: n,
-        }))
-      return d;
-    final candidate = spatial == null
-        ? translated
-        : _reflowTablesAtCanvasEdges(translated, tables, spatial);
-    final b = bounds(
-      candidate,
-      candidate.nodes
-          .where((n) => subtree.contains(n.id) && n.kind != 'group')
-          .toList(),
-    );
-    if (contained(b)) {
-      // An infeasible reflow keeps unassigned chairs at their original local
-      // positions. Those may be inside but overlap a newly occupied cell.
-      // Such a table must stop farther inward, rather than stack its chairs.
-      var clear = true;
-      for (final tableId in tables) {
-        final seats = candidate.nodes
-            .where((n) => n.kind == 'seat' && n.parentId == tableId)
-            .toList();
-        for (var i = 0; i < seats.length && clear; i++) {
-          for (var j = i + 1; j < seats.length; j++) {
-            if (polygonsOverlap(
-              worldHull(seats[i], localMatrix(seats[i])),
-              worldHull(seats[j], localMatrix(seats[j])),
-            )) {
-              clear = false;
-              break;
-            }
-          }
-        }
-      }
-      if (clear && _tableChairsClear(candidate, tables)) return candidate;
-      break;
-    }
-    final correction = clamp(b, 0, 0);
-    if (correction == null) break;
-    final quantum = 1 / layoutLimits['coordinateQuantum']!;
-    x += correction[0] + correction[0].sign * quantum;
-    y += correction[1] + correction[1].sign * quantum;
-  }
-  // Reflow can switch perimeter cells as a corner becomes available. A rigid
-  // assembly clamp is a deterministic safe fallback if projection did not settle.
   final rigid = clamp(bounds(d, moving), dx, dy);
   if (rigid == null) return d;
-  x = rigid[0];
-  y = rigid[1];
+  var x = rigid[0], y = rigid[1];
   for (var attempt = 0; attempt < 4; attempt++) {
     final candidate = transformNodes(d, ids, dx: x, dy: y),
         b = bounds(
@@ -1589,6 +925,35 @@ VenueLayoutDocument resizeNode(
   if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0)
     throw ArgumentError('Dimensions must be finite and positive');
   final resizeTarget = d.nodes.firstWhere((n) => n.id == id);
+  if (resizeTarget.kind == 'table') {
+    final surface = Map<String, dynamic>.from(resizeTarget.surface!);
+    if (surface['type'] == 'circle' && (width - height).abs() > 1 / 1024)
+      throw StateError('circle_requires_equal_dimensions');
+    if (surface['type'] == 'grid') {
+      if ((width / resizeTarget.width - height / resizeTarget.height).abs() >
+          1 / 1024)
+        throw StateError('grid_resize_requires_uniform_module');
+      surface['moduleSize'] =
+          (surface['moduleSize'] as num) * width / resizeTarget.width;
+    }
+    final resized = resizeTarget.copyWith(
+      width: width,
+      height: height,
+      surface: surface,
+    );
+    final next = d.copyWith(
+      nodes: [for (final n in d.nodes) n.id == id ? resized : n],
+    );
+    return reflowTable(
+      next,
+      id,
+      min(
+        d.nodes.where((n) => n.parentId == id && n.kind == 'seat').length,
+        tableCapacity(resized),
+      ),
+      protectedSeatIds: protectedSeatIds,
+    );
+  }
   if (isZigzagNode(resizeTarget)) {
     return resizeZigzagLine(d, id, width, height);
   }
@@ -1713,6 +1078,48 @@ VenueLayoutDocument updatePathVertex(
   );
 }
 
+/// Changes placement intent in one physical command. The node transform remains
+/// the sole rendered pose; manual rotation is independent of placement.
+VenueLayoutDocument setTableSeatPlacement(
+  VenueLayoutDocument document,
+  String seatId,
+  Map<String, dynamic> placement, {
+  Set<String> protectedSeatIds = const {},
+}) {
+  {}
+  final seat = document.nodes.firstWhere((node) => node.id == seatId);
+  final table = document.nodes.firstWhere((node) => node.id == seat.parentId);
+  if (seat.kind != 'seat' || table.kind != 'table')
+    throw ArgumentError('Select a chair attached to a table');
+  _unlocked(document, {seatId, table.id});
+  final existing = seatAttachment(document, seatId);
+  if (sameLayoutValue(existing?['placement'], placement)) return document;
+  final next = document.copyWith(
+    attachments: [
+      for (final attachment in document.attachments)
+        if (attachment['seatId'] != seatId) attachment,
+      {
+        if (existing?['id'] != null) 'id': existing!['id'],
+        'seatId': seatId,
+        'targetId': table.id,
+        'rotationMode': existing?['rotationMode'] ?? 'auto',
+        'placement': placement,
+      },
+    ],
+  );
+  final issues = validateDocument(next);
+  if (issues.isNotEmpty) throw InvalidLayoutDocument(issues, next.toJson());
+  if (placement['mode'] == 'free') return next;
+  return reflowTable(
+    next,
+    table.id,
+    next.nodes
+        .where((node) => node.parentId == table.id && node.kind == 'seat')
+        .length,
+    protectedSeatIds: protectedSeatIds,
+  );
+}
+
 VenueLayoutDocument detachSeat(VenueLayoutDocument d, String id) {
   _unlocked(d, {id});
   final m = worldMatrix(d, d.nodes.firstWhere((n) => n.id == id));
@@ -1725,7 +1132,7 @@ VenueLayoutDocument detachSeat(VenueLayoutDocument d, String id) {
                   x: m[4],
                   y: m[5],
                   rotation: atan2(m[1], m[0]) * 180 / pi,
-                  properties: {...n.properties, 'manual': true},
+                  properties: n.properties,
                 )
               : n,
         )
@@ -1756,42 +1163,47 @@ VenueLayoutDocument attachSeat(
         (a) => a['seatId'] == seatId && a['targetId'] == tableId,
       ))
     return d;
-  final priorAttachment = d.attachments
-      .where((a) => a['seatId'] == seatId)
-      .firstOrNull;
-  final seating = TableSeating.fromDocument(d, table, excludeSeatId: seatId);
-  var result = detachSeat(d, seatId);
-  result = result.copyWith(
-    nodes: result.nodes
-        .map(
-          (n) => n.id == seatId
+  {
+    if (d.selectionUnits.any(
+      (u) =>
+          (u['nodeIds'] as List).length > 1 &&
+          (u['nodeIds'] as List).contains(seatId),
+    ))
+      throw StateError('atomic_unit_requires_full_move');
+    final profile = TableSeating.fromDocument(d, table),
+        old = seatAttachment(d, seatId);
+    final result = d.copyWith(
+      nodes: [
+        for (final n in d.nodes)
+          n.id == seatId
               ? n.copyWith(
                   parentId: tableId,
-                  width: seating.width,
-                  height: seating.height,
-                  properties: {
-                    ...n.properties,
-                    'manual': false,
-                    'slot': 100000,
-                  },
+                  width: profile.width,
+                  height: profile.height,
+                  properties: {...n.properties, 'slot': 100000},
                 )
-              : n.id == tableId
-              ? n.copyWith(properties: {...n.properties, ...seating.properties})
               : n,
-        )
-        .toList(),
-    attachments: [
-      ...result.attachments,
-      if (priorAttachment != null)
-        {...priorAttachment, 'targetId': tableId, 'manual': false},
-    ],
-  );
-  return reflowTable(
-    result,
-    tableId,
-    result.nodes.where((n) => n.parentId == tableId && n.kind == 'seat').length,
-    constrainToCanvas: true,
-  );
+      ],
+      attachments: [
+        ...d.attachments.where((a) => a['seatId'] != seatId),
+        {
+          if (old?['id'] != null) 'id': old!['id'],
+          'seatId': seatId,
+          'targetId': tableId,
+          'rotationMode': old?['rotationMode'] ?? 'auto',
+          'placement': {'mode': 'automatic'},
+        },
+      ],
+    );
+    return reflowTable(
+      result,
+      tableId,
+      result.nodes
+          .where((n) => n.parentId == tableId && n.kind == 'seat')
+          .length,
+      constrainToCanvas: true,
+    );
+  }
 }
 
 /// Uses the exact atomic attachment operation for hover and drop availability.
@@ -1850,6 +1262,10 @@ VenueLayoutDocument groupNodes(VenueLayoutDocument d, Set<String> ids) {
 VenueLayoutDocument ungroupNodes(VenueLayoutDocument d, Set<String> ids) {
   _unlocked(d, ids);
   final matrices = worldMatrices(d);
+  final removedGroups = d.nodes
+      .where((n) => ids.contains(n.id) && n.kind == 'group')
+      .map((n) => n.id)
+      .toSet();
   return d.copyWith(
     nodes: d.nodes.where((n) => !ids.contains(n.id) || n.kind != 'group').map((
       n,
@@ -1863,7 +1279,12 @@ VenueLayoutDocument ungroupNodes(VenueLayoutDocument d, Set<String> ids) {
         rotation: atan2(m[1], m[0]) * 180 / pi,
       );
     }).toList(),
-    sections: d.sections.where((s) => !ids.contains(s['rootId'])).toList(),
+    sections: d.sections
+        .where((s) => !removedGroups.contains(s['rootId']))
+        .toList(),
+    attachments: d.attachments
+        .where((a) => !removedGroups.contains(a['targetId']))
+        .toList(),
   );
 }
 
@@ -1912,6 +1333,18 @@ VenueLayoutDocument resizeCanvas(
   );
 }
 
+// Spreadsheet-style letters keep long rows unique beyond Z.
+String _rowSeatLabel(int row, int column) {
+  var n = column + 1;
+  var letter = '';
+  while (n > 0) {
+    n--;
+    letter = String.fromCharCode(65 + n % 26) + letter;
+    n ~/= 26;
+  }
+  return '${row + 1}$letter';
+}
+
 VenueLayoutDocument rowLayout({
   int rows = 5,
   int seatsPerRow = 8,
@@ -1938,229 +1371,81 @@ VenueLayoutDocument rowLayout({
       aisle < 0 ||
       !arc.isFinite ||
       !x.isFinite ||
-      !y.isFinite) {
+      !y.isFinite)
     throw ArgumentError('Invalid row geometry');
-  }
-  final root = id ?? newLayoutId();
+  final root = id ?? newLayoutId(),
+      parameters = <String, dynamic>{
+        'rows': rows,
+        'seatsPerRow': seatsPerRow,
+        'blocks': blocks,
+        'aisle': aisle,
+        'spacing': spacing,
+        'rowSpacing': rowSpacing,
+        'arc': arc,
+      };
+  final nodes = <LayoutNode>[
+    LayoutNode(
+      id: root,
+      kind: 'group',
+      x: x,
+      y: y,
+      properties: const {},
+      assembly: {'kind': 'rows', ...parameters},
+      seating: seating.record,
+    ),
+    for (var r = 0; r < rows; r++)
+      for (var b = 0; b < blocks; b++)
+        for (var i = 0; i < seatsPerRow; i++)
+          LayoutNode(
+            id: newLayoutId(),
+            kind: 'seat',
+            width: seating.width,
+            height: seating.height,
+            parentId: root,
+            x: b * (seatsPerRow * spacing + aisle) + i * spacing,
+            y: r * rowSpacing + arc * pow(i - (seatsPerRow - 1) / 2, 2),
+            rotation:
+                atan(2 * arc * (i - (seatsPerRow - 1) / 2) / spacing) *
+                180 /
+                pi,
+            label: _rowSeatLabel(r, b * seatsPerRow + i),
+            properties: {'slot': '$r:$b:$i'},
+          ),
+  ];
   return VenueLayoutDocument(
-    nodes: [
-      LayoutNode(
-        id: root,
-        kind: 'group',
-        x: x,
-        y: y,
-        properties: {
-          'assembly': 'rows',
-          'rows': rows,
-          'seatsPerRow': seatsPerRow,
-          'blocks': blocks,
-          'aisle': aisle,
-          'spacing': spacing,
-          'rowSpacing': rowSpacing,
-          'arc': arc,
+    schemaVersion: 2,
+    nodes: nodes,
+    seatingDefaults: seating.record,
+    attachments: [
+      for (final node in nodes.where((node) => node.kind == 'seat'))
+        {
+          'seatId': node.id,
+          'targetId': root,
+          'rotationMode': 'auto',
+          'placement': {'mode': 'automatic'},
         },
-      ),
-      for (var r = 0; r < rows; r++)
-        for (var b = 0; b < blocks; b++)
-          for (var i = 0; i < seatsPerRow; i++)
-            LayoutNode(
-              id: newLayoutId(),
-              kind: 'seat',
-              width: seating.width,
-              height: seating.height,
-              parentId: root,
-              x: b * (seatsPerRow * spacing + aisle) + i * spacing,
-              y: r * rowSpacing + arc * pow(i - (seatsPerRow - 1) / 2, 2),
-              rotation:
-                  atan(2 * arc * (i - (seatsPerRow - 1) / 2) / spacing) *
-                  180 /
-                  pi,
-              label: '${r * seatsPerRow * blocks + b * seatsPerRow + i + 1}',
-              properties: {'slot': '$r:$b:$i', 'size': 12, 'align': 'center'},
-            ),
     ],
   );
 }
 
-/// Reads row generator settings, recovering omitted legacy metadata from its
-/// materialized local chair coordinates. Explicit valid metadata wins.
+/// Reads the validated stored row specification.
 Map<String, num> rowLayoutParameters(VenueLayoutDocument d, String rootId) {
   final root = d.nodes.firstWhere((n) => n.id == rootId);
-  if (root.properties['assembly'] != 'rows') {
-    throw ArgumentError('Not a row assembly');
-  }
-  final slots = <(LayoutNode, int, int, int)>[];
-  for (final seat in d.nodes.where(
-    (n) => n.kind == 'seat' && n.parentId == rootId,
-  )) {
-    final parts = '${seat.properties['slot']}'.split(':');
-    if (parts.length != 3) continue;
-    final indices = parts.map(int.tryParse).toList();
-    if (indices.any((i) => i == null || i < 0)) continue;
-    slots.add((seat, indices[0]!, indices[1]!, indices[2]!));
-  }
-  slots.sort((a, b) {
-    for (final c in [
-      a.$2.compareTo(b.$2),
-      a.$3.compareTo(b.$3),
-      a.$4.compareTo(b.$4),
-    ]) {
-      if (c != 0) return c;
-    }
-    return a.$1.id.compareTo(b.$1.id);
-  });
-  int count(String key, int index) {
-    final explicit = root.properties[key];
-    if (explicit is num &&
-        explicit.isFinite &&
-        explicit >= 1 &&
-        explicit == explicit.round()) {
-      return explicit.toInt();
-    }
-    return slots.fold(
-      1,
-      (n, slot) => max(n, [slot.$2, slot.$3, slot.$4][index] + 1),
-    );
-  }
-
-  final rows = count('rows', 0),
-      blocks = count('blocks', 1),
-      seatsPerRow = count('seatsPerRow', 2),
-      automatic = slots
-          .where((s) => s.$1.properties['manual'] != true)
-          .toList();
-  double setting(
-    String key,
-    double inferred,
-    double fallback, {
-    bool signed = false,
-    bool zero = false,
-  }) {
-    bool valid(num value) =>
-        value.isFinite && (signed || (zero ? value >= 0 : value > 0));
-    final explicit = root.properties[key];
-    if (explicit is num && valid(explicit)) return explicit.toDouble();
-    return valid(inferred) ? inferred : fallback;
-  }
-
-  double inferDelta(String kind) {
-    final origins = <String, (LayoutNode, int, int, int)>{};
-    for (final slot in automatic) {
-      final key = switch (kind) {
-        'spacing' => '${slot.$2}:${slot.$3}',
-        'rowSpacing' => '${slot.$3}:${slot.$4}',
-        _ => '${slot.$2}:${slot.$4}',
-      };
-      final previous = origins[key];
-      if (previous == null) {
-        origins[key] = slot;
-        continue;
-      }
-      final index = kind == 'spacing'
-          ? slot.$4 - previous.$4
-          : kind == 'rowSpacing'
-          ? slot.$2 - previous.$2
-          : slot.$3 - previous.$3;
-      if (index != 0)
-        return (kind == 'rowSpacing'
-                ? slot.$1.y - previous.$1.y
-                : slot.$1.x - previous.$1.x) /
-            index;
-    }
-    return double.nan;
-  }
-
-  final spacing = setting('spacing', inferDelta('spacing'), 56),
-      rowSpacing = setting('rowSpacing', inferDelta('rowSpacing'), 64),
-      half = (seatsPerRow - 1) / 2;
-  var inferredArc = double.nan;
-  for (final slot in automatic.where((s) => s.$2 == 0)) {
-    final square = pow(slot.$4 - half, 2);
-    if (square > 0) {
-      inferredArc = slot.$1.y / square;
-      break;
-    }
-  }
-  return {
-    'rows': rows,
-    'seatsPerRow': seatsPerRow,
-    'blocks': blocks,
-    'spacing': spacing,
-    'rowSpacing': rowSpacing,
-    'arc': setting('arc', inferredArc, 0, signed: true),
-    'aisle': setting(
+  {
+    final spec = root.assembly;
+    const fields = [
+      'rows',
+      'seatsPerRow',
+      'blocks',
       'aisle',
-      inferDelta('aisle') - seatsPerRow * spacing,
-      80,
-      zero: true,
-    ),
-  };
-}
-
-/// Repairs the former arc-angle formula only where legacy generator evidence
-/// matches both the original chair position and original defective angle.
-/// Custom, manual and locked chairs remain untouched.
-VenueLayoutDocument repairLegacyRowTangents(VenueLayoutDocument d) {
-  final replacements = <String, LayoutNode>{},
-      byId = {for (final n in d.nodes) n.id: n},
-      tolerance = 2 / layoutLimits['coordinateQuantum']!;
-  for (final root in d.nodes.where((n) => n.properties['assembly'] == 'rows')) {
-    if (const [
-      'arc',
       'spacing',
       'rowSpacing',
-      'aisle',
-    ].every(root.properties.containsKey))
-      continue;
-    final params = rowLayoutParameters(d, root.id),
-        spacing = params['spacing']!.toDouble(),
-        rowSpacing = params['rowSpacing']!.toDouble(),
-        aisle = params['aisle']!.toDouble(),
-        arc = params['arc']!.toDouble(),
-        seatsPerRow = params['seatsPerRow']!.toInt(),
-        half = (seatsPerRow - 1) / 2;
-    replacements[root.id] = root.copyWith(
-      properties: {...root.properties, ...params},
-    );
-    for (final seat in d.nodes.where(
-      (n) => n.kind == 'seat' && n.parentId == root.id,
-    )) {
-      if (seat.properties['manual'] == true) continue;
-      var locked = false;
-      LayoutNode? ancestor = seat;
-      while (ancestor != null) {
-        if (ancestor.locked) {
-          locked = true;
-          break;
-        }
-        ancestor = byId[ancestor.parentId];
-      }
-      if (locked) continue;
-      final indices = '${seat.properties['slot']}'
-          .split(':')
-          .map(int.tryParse)
-          .toList();
-      if (indices.length != 3 || indices.any((n) => n == null || n < 0))
-        continue;
-      final r = indices[0]!, b = indices[1]!, i = indices[2]!;
-      if (r >= params['rows']! || b >= params['blocks']! || i >= seatsPerRow)
-        continue;
-      final expectedX = b * (seatsPerRow * spacing + aisle) + i * spacing,
-          expectedY = r * rowSpacing + arc * pow(i - half, 2),
-          oldRotation = atan(2 * arc * (i - half)) * 180 / pi;
-      if ((seat.x - expectedX).abs() <= tolerance &&
-          (seat.y - expectedY).abs() <= tolerance &&
-          (seat.rotation - oldRotation).abs() <= tolerance) {
-        replacements[seat.id] = seat.copyWith(
-          rotation: atan(2 * arc * (i - half) / spacing) * 180 / pi,
-        );
-      }
-    }
+      'arc',
+    ];
+    if (spec?['kind'] != 'rows' || fields.any((field) => spec![field] is! num))
+      throw const FormatException('incomplete_row_assembly');
+    return {for (final field in fields) field: spec![field] as num};
   }
-  if (replacements.isEmpty) return d;
-  return d.copyWith(
-    nodes: d.nodes.map((n) => replacements[n.id] ?? n).toList(),
-  );
 }
 
 class LayoutFitResult {
@@ -2230,7 +1515,9 @@ class _SeatFitSearch {
               x: x,
               y: y,
               label: '${added.length + 1}',
-              properties: {'size': 12, 'align': 'center'},
+              style: {
+                'label': {'size': 12, 'align': 'center'},
+              },
             ),
             hull = worldHull(n, localMatrix(n));
         var blocked = boundary != null && !polygonContainsHull(boundary!, hull);
@@ -2365,7 +1652,6 @@ VenueLayoutDocument savePreset(
             .toList(),
         presets: [],
         sections: [],
-        generators: [],
         clearBackground: true,
       );
   return d.copyWith(
@@ -2445,54 +1731,110 @@ VenueLayoutDocument reconcileAssembly(
   String rootId,
   VenueLayoutDocument generated,
 ) {
-  final sourceRoot = generated.nodes.firstWhere((n) => n.parentId == null),
-      old = d.nodes.where((n) => n.parentId == rootId).toList(),
-      bySlot = {
-        for (final n in old)
-          if (n.properties['slot'] != null) n.properties['slot']: n,
-      },
-      remapped = <LayoutNode>[],
-      used = <String>{};
-  for (final candidate in generated.nodes.where(
-    (n) => n.parentId == sourceRoot.id,
-  )) {
-    final existing = bySlot[candidate.properties['slot']];
-    if (existing != null) {
+  {
+    {}
+    final root = d.nodes.firstWhere((node) => node.id == rootId),
+        source = generated.nodes.firstWhere((node) => node.parentId == null);
+    if (root.assembly?['kind'] != 'rows' || source.assembly?['kind'] != 'rows')
+      throw ArgumentError('Expected row assemblies');
+    _unlocked(d, {rootId});
+    final old = d.nodes.where((node) => node.parentId == rootId).toList(),
+        bySlot = {
+          for (final node in d.nodes.where((node) => node.parentId == rootId))
+            node.properties['slot']: node,
+        };
+    final replacements = <LayoutNode>[], used = <String>{};
+    for (final candidate in generated.nodes.where(
+      (node) => node.parentId == source.id,
+    )) {
+      final existing = bySlot[candidate.properties['slot']];
+      if (existing == null) {
+        replacements.add(candidate.copyWith(parentId: rootId));
+        continue;
+      }
       used.add(existing.id);
-      remapped.add(
-        existing.locked || existing.properties['manual'] == true
-            ? existing
-            : existing.copyWith(
-                x: candidate.x,
-                y: candidate.y,
-                rotation: candidate.rotation,
-                width: candidate.width,
-                height: candidate.height,
-                properties: {...existing.properties, ...candidate.properties},
-              ),
+      if (existing.locked) {
+        replacements.add(existing);
+        continue;
+      }
+      final free = seatPlacementFree(d, existing);
+      final slot = '${candidate.properties['slot']}'
+          .split(':')
+          .map(int.parse)
+          .toList();
+      final oldColumns = (root.assembly!['seatsPerRow'] as num).toInt();
+      final automaticLabel = _rowSeatLabel(
+        slot[0],
+        slot[1] * oldColumns + slot[2],
       );
-    } else {
-      remapped.add(candidate.copyWith(parentId: rootId));
+      replacements.add(
+        existing.copyWith(
+          label: existing.label == automaticLabel
+              ? candidate.label
+              : existing.label,
+          x: free ? existing.x : candidate.x,
+          y: free ? existing.y : candidate.y,
+          rotation: seatRotationManual(d, existing)
+              ? existing.rotation
+              : candidate.rotation,
+          properties: {...existing.properties, ...candidate.properties},
+        ),
+      );
     }
+    for (final node in old.where((node) => !used.contains(node.id))) {
+      if (node.kind != 'seat' || seatPlacementFree(d, node)) {
+        replacements.add(node);
+        continue;
+      }
+      if (node.locked)
+        throw StateError('Assembly change would remove locked seat');
+    }
+    final oldIds = old.map((node) => node.id).toSet(),
+        kept = replacements.map((node) => node.id).toSet(),
+        removed = old
+            .map((node) => node.id)
+            .where((id) => !kept.contains(id))
+            .toSet();
+    final units = <Map<String, dynamic>>[];
+    for (final unit in d.selectionUnits) {
+      final ids = (unit['nodeIds'] as List).cast<String>();
+      if (ids.any(removed.contains)) {
+        if (!ids.every(removed.contains))
+          throw StateError('atomic_unit_requires_full_change');
+      } else {
+        units.add(unit);
+      }
+    }
+    final anchors = {
+      for (final attachment in d.attachments) attachment['seatId']: attachment,
+    };
+    return d.copyWith(
+      nodes: [
+        for (final node in d.nodes)
+          if (!oldIds.contains(node.id))
+            node.id == rootId
+                ? node.copyWith(
+                    properties: {...root.properties, ...source.properties},
+                    assembly: source.assembly,
+                  )
+                : node,
+        ...replacements,
+      ],
+      selectionUnits: units,
+      attachments: [
+        for (final attachment in d.attachments)
+          if (!oldIds.contains(attachment['seatId'])) attachment,
+        for (final node in replacements.where((node) => node.kind == 'seat'))
+          anchors[node.id] ??
+              {
+                'seatId': node.id,
+                'targetId': rootId,
+                'rotationMode': 'auto',
+                'placement': {'mode': 'automatic'},
+              },
+      ],
+    );
   }
-  if (old.any((n) => !used.contains(n.id) && n.locked))
-    throw StateError('Assembly change would remove locked seat');
-  remapped.addAll(
-    old.where((n) => !used.contains(n.id) && n.properties['manual'] == true),
-  );
-  final oldIds = old.map((n) => n.id).toSet();
-  return d.copyWith(
-    nodes: [
-      ...d.nodes
-          .where((n) => !oldIds.contains(n.id))
-          .map(
-            (n) => n.id == rootId
-                ? n.copyWith(properties: sourceRoot.properties)
-                : n,
-          ),
-      ...remapped,
-    ],
-  );
 }
 
 class LayoutSnapResult {
@@ -2524,7 +1866,7 @@ LayoutSnapResult snapTranslation(
   final parent = parents.length == 1 ? byId[parents.first] : null;
   final angle =
           (axisRotation ??
-              (parent?.properties['assembly'] == 'rows'
+              (isRowAssemblyNode(parent)
                   ? atan2(matrices[parent!.id]![1], matrices[parent.id]![0]) *
                         180 /
                         pi
@@ -2961,132 +2303,6 @@ VenueLayoutDocument reorderNodes(
   return reorderLayoutLayers(d, ids, direction: direction);
 }
 
-/// Merges a validated visual patch for one node kind. Existing explicit factory
-/// colors remain defaults; only appearanceOverrides opt out of a global value.
-VenueLayoutDocument setLayoutAppearance(
-  VenueLayoutDocument document,
-  String kind,
-  Map<String, dynamic> styles,
-) {
-  if (!layoutAppearanceKinds.contains(kind)) {
-    throw ArgumentError.value(kind, 'kind', 'Unsupported appearance kind');
-  }
-  final previous = document.appearance[kind] as Map? ?? const {};
-  final typography = styles.keys
-      .where(const {'fontId', 'size', 'bold', 'italic'}.contains)
-      .toSet();
-  final byId = {for (final n in document.nodes) n.id: n};
-  final guardedAncestors = <String>{};
-  for (final node in document.nodes.where((n) => n.locked)) {
-    LayoutNode? current = node;
-    while (current != null) {
-      guardedAncestors.add(current.id);
-      current = byId[current.parentId];
-    }
-  }
-  bool locked(LayoutNode node) {
-    if (guardedAncestors.contains(node.id)) return true;
-    LayoutNode? current = node;
-    while (current != null) {
-      if (current.locked) return true;
-      current = byId[current.parentId];
-    }
-    return false;
-  }
-
-  final result = document.copyWith(
-    nodes: typography.isEmpty
-        ? document.nodes
-        : [
-            for (final n in document.nodes)
-              if (n.kind == kind && locked(n))
-                n.copyWith(
-                  properties: {
-                    ...n.properties,
-                    for (final key in typography)
-                      key:
-                          effectiveNodeProperties(document, n)[key] ??
-                          document.defaultTextStyle[key] ??
-                          (const {'bold', 'italic'}.contains(key)
-                              ? false
-                              : null),
-                    'appearanceOverrides': {
-                      ...(n.properties['appearanceOverrides'] as List? ??
-                          const []),
-                      ...typography,
-                    }.toList(),
-                  },
-                )
-              else
-                n,
-          ],
-    appearance: {
-      ...document.appearance,
-      kind: ({...previous, ...styles}
-        ..removeWhere((key, value) => key == 'fontId' && value == null)),
-    },
-  );
-  final issues = validateDocument(result);
-  if (issues.isNotEmpty)
-    throw InvalidLayoutDocument(issues, {'appearance': result.appearance});
-  return result;
-}
-
-/// Enabling a local override captures the current effective value when present.
-/// Disabling it restores document inheritance without deleting the local default.
-VenueLayoutDocument setNodeAppearanceOverride(
-  VenueLayoutDocument document,
-  Iterable<String> ids,
-  Iterable<String> keys, {
-  bool enabled = true,
-}) {
-  final selected = ids.toSet(), requested = keys.toSet();
-  if (requested.any((key) => !layoutAppearanceKeys.contains(key))) {
-    throw ArgumentError('Unsupported appearance override');
-  }
-  final knownIds = document.nodes.map((node) => node.id).toSet();
-  if (!knownIds.containsAll(selected)) {
-    throw ArgumentError('Unknown appearance node');
-  }
-  _unlocked(document, selected);
-  final result = document.copyWith(
-    nodes: [
-      for (final node in document.nodes)
-        if (!selected.contains(node.id))
-          node
-        else
-          node.copyWith(
-            properties: () {
-              final overrides = <String>{
-                ...(node.properties['appearanceOverrides'] as List? ?? const [])
-                    .cast<String>(),
-              };
-              final props = {...node.properties},
-                  effective = effectiveNodeProperties(document, node);
-              if (enabled) {
-                overrides.addAll(requested);
-                for (final key in requested) {
-                  if (effective.containsKey(key)) props[key] = effective[key];
-                }
-              } else {
-                overrides.removeAll(requested);
-              }
-              if (overrides.isEmpty) {
-                props.remove('appearanceOverrides');
-              } else {
-                props['appearanceOverrides'] = overrides.toList()..sort();
-              }
-              return props;
-            }(),
-          ),
-    ],
-  );
-  final issues = validateDocument(result);
-  if (issues.isNotEmpty)
-    throw InvalidLayoutDocument(issues, {'nodeIds': selected.toList()});
-  return result;
-}
-
 String _barSide(LayoutNode node) {
   final side = node.properties['guestSide'];
   if (!isBarNode(node) || !barGuestSides.contains(side)) {
@@ -3103,6 +2319,8 @@ VenueLayoutDocument barLayout({
   double height = 72,
   String guestSide = 'bottom',
   String? id,
+
+  TableSeating seating = const TableSeating(),
 }) {
   if (!barGuestSides.contains(guestSide))
     throw ArgumentError('Bar guest side must be top, right, bottom or left.');
@@ -3125,14 +2343,15 @@ VenueLayoutDocument barLayout({
     y: y,
     width: width,
     height: height,
-    properties: {
-      'shape': count == 0 ? 'polygon' : 'roundedRect',
-      if (count == 0) 'points': surfacePresetPoints('rectangle', width, height),
-      'furniture': 'bar',
-      'guestSide': guestSide,
-    },
+    surface: {'type': 'rect'},
+    seating: seating.record,
+    properties: {'furniture': 'bar', 'guestSide': guestSide},
   );
-  return reflowTable(VenueLayoutDocument(nodes: [bar]), bar.id, count);
+  return reflowTable(
+    VenueLayoutDocument(schemaVersion: 2, nodes: [bar]),
+    bar.id,
+    count,
+  );
 }
 
 int barSeatCount(VenueLayoutDocument document, String id) {
@@ -3188,6 +2407,52 @@ VenueLayoutDocument setBarGuestSide(
   return reflowBar(next, id, count, protectedSeatIds: protectedSeatIds);
 }
 
+/// Change a typed surface without removing or replacing existing seat identities.
+VenueLayoutDocument setTableSurfaceKind(
+  VenueLayoutDocument document,
+  String id,
+  String kind, {
+  Set<String> protectedSeatIds = const {},
+}) {
+  {}
+  final table = document.nodes.firstWhere((node) => node.id == id),
+      seats = document.nodes
+          .where((node) => node.parentId == id && node.kind == 'seat')
+          .toList();
+  if (table.kind != 'table' ||
+      !const {'rect', 'circle', 'grid'}.contains(kind) ||
+      isBarNode(table) && kind == 'circle')
+    throw ArgumentError('Invalid table surface');
+  if (table.surface?['type'] == kind) return document;
+  _unlocked(document, {id, ...seats.map((seat) => seat.id)});
+  final diameter = max(table.width, table.height);
+  var next = table.copyWith(
+    surface: {'type': kind == 'grid' ? 'rect' : kind},
+    width: kind == 'circle' ? diameter : table.width,
+    height: kind == 'circle' ? diameter : table.height,
+    seating: TableSeating.fromDocument(document, table).record,
+  );
+  if (kind == 'grid') next = snapTableSurfaceToGrid(next, preset: 'L');
+  if (tableCapacity(next) < seats.length)
+    throw StateError('Table capacity exceeded');
+  final result = reconcileSurfaceEdit(
+    document,
+    document.copyWith(
+      nodes: [for (final node in document.nodes) node.id == id ? next : node],
+    ),
+    id,
+    protectedSeatIds: protectedSeatIds,
+  );
+  final retained = result.nodes
+      .where((node) => node.parentId == id && node.kind == 'seat')
+      .map((seat) => seat.id)
+      .toSet();
+  if (retained.length != seats.length ||
+      !retained.containsAll(seats.map((seat) => seat.id)))
+    throw StateError('Table capacity exceeded');
+  return result;
+}
+
 /// Reconciles edited table footprints through the existing protected-seat rules.
 /// Recentring a path must not move an attached manual/locked seat in world space.
 VenueLayoutDocument reconcileSurfaceEdit(
@@ -3205,6 +2470,34 @@ VenueLayoutDocument reconcileSurfaceEdit(
     next.y,
   );
   final adjusted = after.copyWith(
+    attachments:
+        old.surface?['type'] != 'grid' ||
+            next.surface?['type'] != 'grid' ||
+            old.surface?['moduleSize'] != next.surface?['moduleSize']
+        ? after.attachments
+        : [
+            for (final attachment in after.attachments)
+              if (attachment['targetId'] == id &&
+                  attachment['placement']?['cell'] is List)
+                {
+                  ...attachment,
+                  'placement': {
+                    ...attachment['placement'] as Map,
+                    'cell': [
+                      (attachment['placement']['cell'][0] as int) +
+                          (((next.width - old.width) / 2 - localDelta[0]) /
+                                  (next.surface!['moduleSize'] as num))
+                              .round(),
+                      (attachment['placement']['cell'][1] as int) +
+                          (((next.height - old.height) / 2 - localDelta[1]) /
+                                  (next.surface!['moduleSize'] as num))
+                              .round(),
+                    ],
+                  },
+                }
+              else
+                attachment,
+          ],
     nodes: [
       for (final n in after.nodes)
         n.parentId == id
@@ -3220,127 +2513,6 @@ VenueLayoutDocument reconcileSurfaceEdit(
     id,
     min(count, tableCapacity(next)),
     protectedSeatIds: protectedSeatIds,
-  );
-}
-
-VenueLayoutDocument reshapeTableSurface(
-  VenueLayoutDocument document,
-  String id,
-  String shape, {
-  Set<String> protectedSeatIds = const {},
-}) {
-  final node = document.nodes.firstWhere((n) => n.id == id);
-  if (node.kind != 'table') throw ArgumentError('Expected a table or bar');
-  _unlocked(document, {id});
-  final next = node.copyWith(
-    properties: {
-      ...(Map<String, dynamic>.from(node.properties)..remove('holes')),
-      'shape': 'polygon',
-      'points': surfacePresetPoints(shape, node.width, node.height),
-    },
-  );
-  return reconcileSurfaceEdit(
-    document,
-    document.copyWith(
-      nodes: [for (final n in document.nodes) n.id == id ? next : n],
-    ),
-    id,
-    protectedSeatIds: protectedSeatIds,
-  );
-}
-
-/// Pulls the middle half of an edge into a new wing. Shoulder points preserve
-/// the untouched boundary; the gesture is evaluated from its original snapshot.
-VenueLayoutDocument extendTableSurface(
-  VenueLayoutDocument document,
-  String id,
-  int edge,
-  double x,
-  double y, {
-  Set<String> protectedSeatIds = const {},
-}) {
-  _unlocked(document, {id});
-  final node = document.nodes.firstWhere((n) => n.id == id);
-  if (node.kind != 'table' || node.properties['shape'] != 'polygon')
-    throw ArgumentError('Expected an editable surface');
-  if (!x.isFinite ||
-      !y.isFinite ||
-      x.abs() > layoutLimits['geometryAbsMax']! ||
-      y.abs() > layoutLimits['geometryAbsMax']!) {
-    throw ArgumentError('Invalid surface extension');
-  }
-  final points = localHull(node);
-  RangeError.checkValidIndex(edge, points);
-  if (points.length + 4 > layoutLimits['verticesMax']!)
-    throw StateError('Path vertex limit reached');
-  final a = points[edge],
-      b = points[(edge + 1) % points.length],
-      dx = b[0] - a[0],
-      dy = b[1] - a[1],
-      length = sqrt(dx * dx + dy * dy);
-  if (length < 1) throw ArgumentError('Edge is too short');
-  final nx = -dy / length, ny = dx / length;
-  final distance = (x - (a[0] + b[0]) / 2) * nx + (y - (a[1] + b[1]) / 2) * ny;
-  if (distance.abs() < 1) return document;
-  final shiftX = x - (a[0] + b[0]) / 2, shiftY = y - (a[1] + b[1]) / 2;
-  List<double> at(double t, double d) => [
-    a[0] + dx * t + (d == 0 ? 0 : shiftX),
-    a[1] + dy * t + (d == 0 ? 0 : shiftY),
-  ];
-  points.insertAll(edge + 1, [
-    at(.25, 0),
-    at(.25, distance),
-    at(.75, distance),
-    at(.75, 0),
-  ]);
-  if (polygonSelfIntersects(points))
-    throw StateError('The surface outline cannot cross itself.');
-  final normalized = shapeFromPoints(
-    'polygon',
-    points,
-    id: id,
-    properties: node.properties,
-  );
-  final angle = node.rotation * pi / 180;
-  final next = node.copyWith(
-    x: node.x + normalized.x * cos(angle) - normalized.y * sin(angle),
-    y: node.y + normalized.x * sin(angle) + normalized.y * cos(angle),
-    width: normalized.width,
-    height: normalized.height,
-    properties: normalized.properties,
-  );
-  return reconcileSurfaceEdit(
-    document,
-    document.copyWith(
-      nodes: [for (final n in document.nodes) n.id == id ? next : n],
-    ),
-    id,
-    protectedSeatIds: protectedSeatIds,
-  );
-}
-
-VenueLayoutDocument surfaceFromPolygon(
-  VenueLayoutDocument document,
-  String id, {
-  bool bar = false,
-}) {
-  _unlocked(document, {id});
-  final node = document.nodes.firstWhere((n) => n.id == id);
-  if (node.kind != 'shape' || node.properties['shape'] != 'polygon')
-    throw ArgumentError('Draw a polygon first.');
-  return document.copyWith(
-    nodes: [
-      for (final n in document.nodes)
-        n.id == id
-            ? n.copyWith(
-                kind: 'table',
-                properties: {
-                  ...n.properties,
-                  if (bar) ...{'furniture': 'bar', 'guestSide': 'bottom'},
-                },
-              )
-            : n,
-    ],
   );
 }
 
@@ -3371,21 +2543,18 @@ VenueLayoutDocument configureTableSeating(
     nodes: [
       for (final n in doc.nodes)
         if (n.id == tableId)
-          n.copyWith(properties: {...n.properties, ...seating.properties})
+          n.copyWith(seating: seating.record)
         else if (ids.contains(n.id))
           n.copyWith(
             width: seating.width,
             height: seating.height,
-            properties: {...n.properties, 'manual': false},
+            properties: n.properties,
           )
         else
           n,
     ],
     attachments: [
-      for (final a in doc.attachments)
-        ids.contains(a['seatId'])
-            ? {...a, 'manual': false, 'gap': seating.gap}
-            : a,
+      for (final a in doc.attachments) ids.contains(a['seatId']) ? a : a,
     ],
   );
   return reflowTable(
@@ -3421,86 +2590,46 @@ VenueLayoutDocument configurePlanTableSeating(
   double? edgePadding,
   bool constrainToCanvas = true,
 }) {
-  final patch = <String, double>{
-    if (width != null) 'seatWidth': width,
-    if (height != null) 'seatHeight': height,
-    if (gap != null) 'seatGap': gap,
-    if (spacing != null) 'seatSpacing': spacing,
-    if (edgePadding != null) 'seatEdgePadding': edgePadding,
-  };
-  for (final entry in patch.entries) {
-    final min = const {'seatWidth', 'seatHeight'}.contains(entry.key) ? 1 : 0;
-    if (!entry.value.isFinite || entry.value < min || entry.value > 1000000) {
-      throw ArgumentError('Invalid chair layout');
-    }
-  }
-  if (patch.isEmpty) return doc;
-  final byId = {for (final node in doc.nodes) node.id: node};
-  final guarded = <String>{};
-  for (final node in doc.nodes.where((node) => node.locked)) {
-    for (
-      LayoutNode? current = node;
-      current != null;
-      current = byId[current.parentId]
-    ) {
-      if (!guarded.add(current.id)) break;
-    }
-  }
-  bool locked(LayoutNode node) {
-    if (guarded.contains(node.id)) return true;
-    for (
-      LayoutNode? current = node;
-      current != null;
-      current = byId[current.parentId]
-    ) {
-      if (current.locked) return true;
-    }
-    return false;
-  }
-
-  final tables = doc.nodes
-      .where(
-        (node) => node.kind == 'table' && !isBarNode(node) && !locked(node),
-      )
-      .toList();
-  var next = doc.copyWith(
-    appearance: {
-      ...doc.appearance,
-      'table': {...?doc.appearance['table'] as Map?, ...patch},
-    },
-  );
-  for (final table in tables) {
-    final seating = TableSeating.fromDocument(doc, table).copyWith(
+  {
+    final defaults = TableSeating.fromRecord(doc.seatingDefaults).copyWith(
       width: width,
       height: height,
       gap: gap,
       spacing: spacing,
       edgePadding: edgePadding,
     );
-    final seats = doc.nodes
-        .where((node) => node.kind == 'seat' && node.parentId == table.id)
-        .length;
-    next = next.copyWith(
-      nodes: [
-        for (final node in next.nodes)
-          node.id == table.id
-              ? node.copyWith(
-                  properties: {...node.properties, ...seating.properties},
-                )
-              : node.kind == 'seat' && node.parentId == table.id
-              ? node.copyWith(
-                  width: width ?? node.width,
-                  height: height ?? node.height,
-                )
-              : node,
-      ],
-    );
-    next = reflowTable(
-      next,
-      table.id,
-      seats,
-      constrainToCanvas: constrainToCanvas,
-    );
+    for (final entry in defaults.record.entries) {
+      final value = entry.value as double;
+      if (!value.isFinite ||
+          value > (1000000) ||
+          value < (const {'width', 'height'}.contains(entry.key) ? 1 : 0))
+        throw ArgumentError('Invalid chair dimensions or spacing');
+    }
+    var next = doc.copyWith(seatingDefaults: defaults.record);
+    final byId = {for (final n in doc.nodes) n.id: n};
+    bool locked(LayoutNode node) {
+      LayoutNode? current = node;
+      while (current != null) {
+        if (current.locked) return true;
+        current = byId[current.parentId];
+      }
+      return doc.nodes.any((n) => n.parentId == node.id && n.locked);
+    }
+
+    for (final table in doc.nodes.where(
+      (n) => n.kind == 'table' && !isBarNode(n) && !locked(n),
+    )) {
+      final profile = TableSeating.fromDocument(doc, table).copyWith(
+        width: width,
+        height: height,
+        gap: gap,
+        spacing: spacing,
+        edgePadding: edgePadding,
+      );
+      next = configureTableSeating(next, table.id, profile);
+    }
+    final issues = validateDocument(next);
+    if (issues.isNotEmpty) throw InvalidLayoutDocument(issues, next.toJson());
+    return next;
   }
-  return next;
 }

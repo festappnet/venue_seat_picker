@@ -3,7 +3,7 @@ import 'package:venue_seat_picker/venue_seat_picker.dart';
 
 void main() {
   test(
-    'manually moved chair still relocates when its table reaches the wall',
+    'rigid table movement preserves the free chair pose while clamping at the wall',
     () {
       final original = tableLayout(shape: 'roundedRect', count: 6);
       final c = VenueLayoutController(original);
@@ -15,9 +15,10 @@ void main() {
       c.select({chair.id});
       c.moveSelection(-10, 0);
       expect(
-        c.document.nodes
-            .firstWhere((n) => n.id == chair.id)
-            .properties['manual'],
+        seatPlacementFree(
+          c.document,
+          c.document.nodes.firstWhere((n) => n.id == chair.id),
+        ),
         true,
       );
       final manuallyPositioned = c.document;
@@ -25,10 +26,9 @@ void main() {
       c.moveSelection(-2000, 0);
       final movedTable = c.document.nodes.firstWhere((n) => n.id == table.id);
       expect(
-        movedTable.x - movedTable.width / 2,
+        selectionBounds(c.document, {table.id})['x'],
         closeTo(0, .02),
-        reason:
-            'Manual position is not a lock: chairs must relocate at the canvas boundary.',
+        reason: 'The complete rigid assembly clamps at the canvas boundary.',
       );
       expect(
         c.document.nodes.map((n) => n.id).toSet(),

@@ -26,78 +26,29 @@ void main() {
         ),
       );
 
-  testWidgets(
-    'table shrinking respects the rendered label in drag and numeric dimensions',
-    (tester) async {
-      final source = tableLayout(
-        shape: 'roundedRect',
-        width: 180,
-        height: 80,
-        count: 6,
-      );
-      final table = source.nodes.firstWhere((n) => n.kind == 'table');
-      final original = source.copyWith(
-        nodes: [
-          for (final n in source.nodes)
-            n.id == table.id
-                ? n.copyWith(
-                    label: 'S1',
-                    properties: {...n.properties, 'size': 40, 'lineHeight': 1},
-                  )
-                : n,
-        ],
-      );
-      final resources = <String, dynamic>{
-        'protocol': 1,
-        'fonts': {
-          'fixture:sans': {
-            'id': 'fixture:sans',
-            'hash': List.filled(64, 'a').join(),
-            'unitsPerEm': 1000,
-            'ascent': 800,
-            'descent': -200,
-            'glyphs': {
-              for (final ch in ['S', '1'])
-                ch: {
-                  'advance': 600,
-                  'path': [
-                    ['M', 0, 0],
-                    ['L', 10, 10],
-                  ],
-                },
-            },
-          },
-        },
-      };
-      final c = VenueLayoutController(original, resources: resources)
-        ..select({table.id});
-      await open(tester, c);
-      final edge = Offset(table.x, table.y + table.height / 2);
-      surface(tester).onHandleStart!('Resize s', edge);
-      surface(tester).onDragUpdate!(edge - const Offset(0, 79));
-      surface(tester).onDragEnd!();
-      final resized = c.document.nodes.firstWhere((n) => n.id == table.id);
-      expect(resized.height, greaterThanOrEqualTo(40));
-      expect(
-        compileScene(c.document, resources: c.resources)['issues'],
-        isEmpty,
-      );
-      expect(
-        c.document.nodes
-            .where((n) => n.kind == 'seat')
-            .every((n) => n.width == 40 && n.height == 40),
-        isTrue,
-      );
-      c.undo();
-      expect(c.document, same(original));
-      expect(c.resizeObject(table.id, 1, 1), isTrue);
-      expect(
-        compileScene(c.document, resources: c.resources)['issues'],
-        isEmpty,
-      );
-    },
-  );
-
+  test('text style never changes the physical table resize constraint', () {
+    final source = tableLayout(shape: 'rect', count: 0, width: 180, height: 80);
+    final table = source.nodes.single;
+    final c = VenueLayoutController(source);
+    addTearDown(c.dispose);
+    final before = c.constrainTableDimensions(table, 60, 40);
+    final styled = table.copyWith(
+      label: 'A very long label',
+      style: {
+        'label': {'size': 200, 'weight': 700},
+      },
+    );
+    c.updateNode(styled);
+    final after = c.constrainTableDimensions(c.document.nodes.single, 60, 40);
+    expect(after.width, before.width);
+    expect(after.height, before.height);
+    c.resizeObject(table.id, 60, 40);
+    expect(c.error, isNull);
+    expect(c.document.nodes.single.width, 60);
+    expect(c.document.nodes.single.height, 40);
+    c.undo();
+    expect(c.document.nodes.single.toJson(), styled.toJson());
+  });
   testWidgets('resizing a wrapped table preserves chair size and one undo', (
     tester,
   ) async {
@@ -150,7 +101,7 @@ void main() {
   });
 
   testWidgets(
-    'wrapped imported chairs regain a natural perimeter when resizing',
+    'free imported chairs reject a resize that would overwrite their placement',
     (tester) async {
       final tableDoc = tableLayout(shape: 'roundedRect', count: 6);
       final table = tableDoc.nodes.firstWhere((n) => n.kind == 'table');
@@ -170,7 +121,11 @@ void main() {
               node,
         ],
         attachments: [
-          for (final a in tableDoc.attachments) {...a, 'manual': true},
+          for (final a in tableDoc.attachments)
+            {
+              ...a,
+              'placement': {'mode': 'free'},
+            },
         ],
       );
       final c = VenueLayoutController(original)..select({wrapper.id});
@@ -183,24 +138,14 @@ void main() {
       surface(tester).onHandleStart!('Resize se', corner);
       surface(tester).onDragUpdate!(corner + const Offset(300, 300));
       surface(tester).onDragEnd!();
-      expect(c.error, isNull);
-      final resizedTable = c.document.nodes.firstWhere((n) => n.id == table.id);
-      for (final seat in c.document.nodes.where((n) => n.kind == 'seat')) {
-        final dx = seat.x.abs() - resizedTable.width / 2;
-        final dy = seat.y.abs() - resizedTable.height / 2;
-        // Default chair half-size20 plus gap12 must not scale with the desk.
-        expect(dx > dy ? dx : dy, lessThanOrEqualTo(32.01));
-        expect(seat.width, 40);
-        expect(seat.height, 40);
-      }
-      await tester.pump();
-      c.undo();
+      expect(c.error, contains('Fixed chairs'));
       expect(c.document, same(original));
+      expect(c.canUndo, isFalse);
     },
   );
 
   testWidgets(
-    'round resize keeps circle; Shift permits ellipse; free surplus seats undo together',
+    'circle resizing stays circular with Shift and restores removed seats on undo',
     (tester) async {
       final original = tableLayout(
         shape: 'ellipse',
@@ -235,7 +180,8 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       final ellipse = c.document.nodes.firstWhere((n) => n.id == table.id);
       expect(ellipse.width, 200);
-      expect(ellipse.height, 170);
+      expect(ellipse.height, ellipse.width);
+      expect(ellipse.surface!['type'], 'circle');
     },
   );
 

@@ -21,13 +21,13 @@ void main() {
         edgePadding: 20,
       );
       expect(
-        documentSeating(changed).properties,
+        documentSeating(changed).record,
         const TableSeating(
           width: 52,
           height: 48,
           spacing: 18,
           edgePadding: 20,
-        ).properties,
+        ).record,
       );
       expect(
         changed.nodes
@@ -38,10 +38,7 @@ void main() {
       expect(changed.nodes.map((n) => n.id), original.nodes.map((n) => n.id));
       expect(validateDocument(changed), isEmpty);
       final restored = VenueLayoutDocument.fromJson(changed.toJson());
-      expect(
-        documentSeating(restored).properties,
-        documentSeating(changed).properties,
-      );
+      expect(documentSeating(restored).record, documentSeating(changed).record);
       final locked = original.copyWith(
         nodes: [
           for (final n in original.nodes)
@@ -96,7 +93,7 @@ void main() {
           seating: const TableSeating(width: 60, height: 60, gap: 12),
         );
         if (shape == 'polygon') {
-          source = reshapeTableSurface(source, source.nodes.first.id, 'L');
+          source = setTableSurfaceKind(source, source.nodes.first.id, 'grid');
         } else if (shape == 'circle') {
           source = tableLayout(
             shape: 'circle',
@@ -115,16 +112,24 @@ void main() {
             for (final node in source.nodes)
               node.id == manual.id
                   ? node.copyWith(
-                      properties: {
-                        ...node.properties,
-                        'manual': true,
-                        'manualRotation': true,
-                      },
+                      properties: {...node.properties},
                       x: -450,
                       y: -400,
                       rotation: 37,
                     )
                   : node,
+          ],
+        );
+        source = source.copyWith(
+          attachments: [
+            for (final a in source.attachments)
+              a['seatId'] == manual.id
+                  ? {
+                      ...a,
+                      'placement': {'mode': 'free'},
+                      'rotationMode': 'manual',
+                    }
+                  : a,
           ],
         );
         final before = source.nodes.firstWhere((node) => node.id == manual.id);
@@ -144,8 +149,11 @@ void main() {
               .every((node) => node.width == 60 && node.height == 60),
           true,
         );
-        expect(configured.nodes.first.properties['seatGap'], 30);
-        expect(configured.appearance['seat'], source.appearance['seat']);
+        expect(
+          TableSeating.fromDocument(configured, configured.nodes.first).gap,
+          30,
+        );
+        expect(configured.styles['seat'], source.styles['seat']);
         expect(documentSeating(configured).gap, 30);
         expect(
           documentSeating(withLayoutMaterialFamily(configured, 'wood')).gap,
@@ -186,7 +194,7 @@ void main() {
       final configured = configurePlanTableGap(rotated, 30);
       final after = configured.nodes.firstWhere((node) => node.id == seat.id);
       expect(after.rotation, before.rotation);
-      expect(after.properties['manualRotation'], true);
+      expect(seatAttachment(configured, after.id)!['rotationMode'], 'manual');
       expect(after.x != before.x || after.y != before.y, true);
     },
   );
@@ -215,7 +223,7 @@ void main() {
       );
       expect(() => configurePlanTableGap(empty, 1000001), throwsArgumentError);
       expect(() => configurePlanTableGap(source, 10000), throwsStateError);
-      expect(source.appearance, isEmpty);
+      expect(source.styles, isEmpty);
     },
   );
 }

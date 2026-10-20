@@ -17,3 +17,13 @@ export 'src/material_families.dart';
 export 'src/grid_surface.dart';
 
 export 'src/table_side_placement.dart';
+
+export 'src/canonical_contract.dart';
+export 'src/graphic_import.dart';
+export 'src/legacy_document_import.dart';
+export 'src/text_contract.dart';
+
+export 'src/placement.dart';
+export 'src/canonical_operations.dart';
+
+export 'src/contract_schema.dart';

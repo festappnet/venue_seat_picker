@@ -71,9 +71,9 @@ void main() {
             .intersection(other.nodes.map((n) => n.id).toSet()),
         isEmpty,
       );
-      expect(doc.appearance['table']['objectStyle'], 'simple');
-      expect(doc.appearance['seat']['seatStyle'], 'plain');
-      expect(doc.appearance['seat']['fill'], '#267329FF');
+      expect(doc.styles['kinds']['table']['material'], 'simple');
+      expect(doc.styles['kinds']['seat']['seatStyle'], 'plain');
+      expect(doc.styles['kinds']['seat']['fill'], '#267329FF');
       expect(doc.canvas['floorStyle'], 'plain');
       expect(
         doc.nodes

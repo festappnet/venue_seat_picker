@@ -36,7 +36,7 @@ const performanceEvidence=await page.evaluate(async()=>{
  const {mount}=await import('/src/index.js');const results=[];
  for(const count of [500,5000]){
   const nodes=Array.from({length:count},(_,i)=>({id:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,kind:'seat',label:'',transform:{x:40+(i%50)*50,y:40+Math.floor(i/50)*50,rotation:0},width:36,height:36}));
-  const document={schemaVersion:1,symbolSetVersion:1,canvas:{x:0,y:0,width:2600,height:Math.ceil(count/50)*50+80,fill:'#ffffffff'},defaultTextStyle:{fontId:'fixture:sans',size:24,color:'#222222ff'},nodes,selectionUnits:[],sections:[],attachments:[],presets:[],generators:[]};
+  const document={schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:2600,height:Math.ceil(count/50)*50+80,fill:'#ffffffff'},styles:{},seatingDefaults:{},textPolicy:{language:'und',direction:'auto'},nodes,selectionUnits:[],sections:[],attachments:[],presets:[]};
   const host=globalThis.document.createElement('div');host.style.cssText='width:900px;height:600px';globalThis.document.body.replaceChildren(host);
   const start=performance.now(),viewer=mount(host,{document});const mountMs=performance.now()-start;
   const untouched=viewer.scene.items.find(item=>item.id===nodes[count-1].id),camera={...viewer.camera};
@@ -52,7 +52,7 @@ for(const row of performanceEvidence){assert.equal(row.retainedUntouchedItem,tru
 const lifecycle=await page.evaluate(async()=>{
  const {mount}=await import('/src/index.js');
  const nodeId='00000000-0000-4000-8000-000000000001';
- const document={schemaVersion:1,symbolSetVersion:1,canvas:{x:0,y:0,width:800,height:600,fill:'#ffffffff'},defaultTextStyle:{fontId:'fixture:sans',size:24,color:'#222222ff'},nodes:[{id:nodeId,kind:'seat',label:'',transform:{x:100,y:100,rotation:0},width:40,height:40}],selectionUnits:[],sections:[],attachments:[],presets:[],generators:[]};
+ const document={schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:800,height:600,fill:'#ffffffff'},styles:{},seatingDefaults:{},textPolicy:{language:'und',direction:'auto'},nodes:[{id:nodeId,kind:'seat',label:'',transform:{x:100,y:100,rotation:0},width:40,height:40}],selectionUnits:[],sections:[],attachments:[],presets:[]};
  const host=globalThis.document.createElement('div');globalThis.document.body.replaceChildren(host);
  let resolve;const viewer=mount(host,{document,onSelectionRequested:()=>new Promise(r=>resolve=r)});
  host.querySelector('[role=list] button').click();

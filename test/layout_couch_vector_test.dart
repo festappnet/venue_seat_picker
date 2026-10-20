@@ -36,6 +36,71 @@ void main() {
   }
 
   testWidgets(
+    'canonical palette inserts every ordinary object without legacy style aliases',
+    (tester) async {
+      final c = VenueLayoutController(
+        VenueLayoutDocument(
+          schemaVersion: 2,
+          canvas: {
+            'x': 0,
+            'y': 0,
+            'width': 6000,
+            'height': 4000,
+            'fill': '#FFFFFFFF',
+          },
+        ),
+      );
+      await open(tester, c);
+      for (final name in [
+        'Table',
+        'Round table',
+        'Bar',
+        'Couch',
+        'Rows',
+        'Arc',
+        'Compartments',
+        'Bus',
+        'Double-decker bus',
+        'Seat',
+        'Standing',
+        'Rectangle',
+        'Ellipse',
+        'Line',
+        'Arrow',
+        'Polygon',
+        'Polyline',
+        'Draw table',
+        'Draw bar',
+      ]) {
+        surface(tester).onDrop!(name, const Offset(1500, 1200));
+        await tester.pumpAndSettle();
+        expect(c.error, isNull, reason: name);
+        expect(c.document.nodes, isNotEmpty, reason: name);
+        expect(validateDocument(c.document), isEmpty, reason: name);
+        expect(c.document.schemaVersion, 2);
+        expect(
+          c.document.nodes.every(
+            (node) =>
+                !node.properties.containsKey('fill') &&
+                !node.properties.containsKey('size') &&
+                !node.properties.containsKey('fontId'),
+          ),
+          isTrue,
+          reason: name,
+        );
+        c.undo();
+        await tester.pumpAndSettle();
+        expect(c.document.nodes, isEmpty, reason: name);
+      }
+      surface(tester).onDrop!('Text', const Offset(1500, 1200));
+      await tester.pumpAndSettle();
+      expect(c.error, isNull);
+      expect(validateDocument(c.document), isEmpty);
+      expect(c.document.nodes.single.style['label']['size'], 24);
+    },
+  );
+
+  testWidgets(
     'couch count controls and resize retain identities and protect atomic membership',
     (tester) async {
       final original = couchLayout();

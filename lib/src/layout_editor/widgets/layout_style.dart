@@ -1,11 +1,11 @@
-import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'layout_scene_surface.dart';
+import 'canonical_appearance_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
-import 'package:venue_seat_picker/editor_ui.dart';
 import '../venue_layout_controller.dart';
 import 'layout_strings.dart';
+import '../../templates/cinema_hall.dart';
 
 /// Neutral work panels in light mode, with the host surface retained in dark mode.
 Color layoutPanelColor(BuildContext context) {
@@ -14,6 +14,12 @@ Color layoutPanelColor(BuildContext context) {
       ? Colors.white
       : theme.colorScheme.surface;
 }
+
+/// Application workspace only. Authored document fills remain export-accurate.
+Color layoutWorkspaceColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0xFF151B24)
+    : const Color(0xFFE9EDF2);
 
 /// Visual properties only: never transfers geometry, labels or seat identities.
 class LayoutAppearance {
@@ -28,7 +34,7 @@ const layoutAppearancePresets = <String, LayoutAppearance>{
     {
       'fill': '#FFFFFFFF',
       'stroke': '#000000FF',
-      'color': '#000000FF',
+      'label': {'color': '#000000FF'},
       'strokeWidth': 1,
       'cornerRadius': 0,
     },
@@ -44,13 +50,13 @@ const layoutAppearancePresets = <String, LayoutAppearance>{
   'Neutral': LayoutAppearance(
     {
       'fill': '#E2E8F0FF',
-      'color': '#202830FF',
+      'label': {'color': '#202830FF'},
       'stroke': '#475569FF',
       'strokeWidth': 1,
       'cornerRadius': 6,
     },
     seats: {
-      'fill': '#DCFCE7FF',
+      'fill': layoutDefaultSeatFill,
       'stroke': '#475569FF',
       'strokeWidth': 1,
       'cornerRadius': 5,
@@ -61,7 +67,7 @@ const layoutAppearancePresets = <String, LayoutAppearance>{
   'Warm': LayoutAppearance(
     {
       'fill': '#F0E4D2FF',
-      'color': '#5D4431FF',
+      'label': {'color': '#5D4431FF'},
       'stroke': '#8A6A48FF',
       'strokeWidth': 1,
       'cornerRadius': 14,
@@ -78,7 +84,7 @@ const layoutAppearancePresets = <String, LayoutAppearance>{
   'Slate': LayoutAppearance(
     {
       'fill': '#CBD5E1FF',
-      'color': '#1E293BFF',
+      'label': {'color': '#1E293BFF'},
       'stroke': '#334155FF',
       'strokeWidth': 1.5,
       'cornerRadius': 2,
@@ -99,11 +105,11 @@ final layoutColorPalettes = <String, LayoutAppearance>{
     entry.key: LayoutAppearance(
       {
         for (final e in entry.value.object.entries)
-          if (const {'fill', 'stroke', 'color'}.contains(e.key)) e.key: e.value,
+          if (const {'fill', 'stroke', 'label'}.contains(e.key)) e.key: e.value,
       },
       seats: {
         for (final e in (entry.value.seats ?? entry.value.object).entries)
-          if (const {'fill', 'stroke', 'color'}.contains(e.key)) e.key: e.value,
+          if (const {'fill', 'stroke', 'label'}.contains(e.key)) e.key: e.value,
       },
       canvasFill: entry.value.canvasFill,
     ),
@@ -122,9 +128,9 @@ String layoutNodeFill(
     final parent = nodesById == null
         ? document.nodes.where((n) => n.id == node.parentId).firstOrNull
         : nodesById[node.parentId];
-    return parent?.properties['furniture'] == 'couch'
+    return parent?.assembly?['kind'] == 'couch'
         ? '#F8FAFCFF'
-        : '#DCFCE7FF';
+        : layoutDefaultSeatFill;
   }
   return switch (node.kind) {
     'table' => '#E2E8F0FF',
@@ -133,105 +139,220 @@ String layoutNodeFill(
   };
 }
 
-const _visualKeys = [
-  'objectStyle',
-  'seatStyle',
-  'color',
-  'fill',
-  'stroke',
-  'strokeWidth',
-  'opacity',
-  'cornerRadius',
-  'dash',
-];
-const _textKeys = [
-  'objectStyle',
-  'color',
-  'fontId',
-  'size',
-  'bold',
-  'italic',
-  'align',
-  'lineHeight',
-  'opacity',
-];
-const _labelTypographyKeys = ['fontId', 'size', 'bold', 'italic'];
-List<String> _appearanceKeys(LayoutNode node) => node.kind == 'text'
-    ? _textKeys
-    : [
-        ..._visualKeys,
-        if (node.kind != 'seat' && node.kind != 'group')
-          ..._labelTypographyKeys,
-      ];
+/// Captures resolved presentation only. Child exceptions stay with their chairs.
 LayoutAppearance captureLayoutAppearance(
   VenueLayoutDocument document,
   String id,
 ) {
-  var root = document.nodes.firstWhere((n) => n.id == id);
+  var root = document.nodes.firstWhere((node) => node.id == id);
   if (root.kind == 'group') {
-    final tables = document.nodes
-        .where((n) => n.parentId == root.id && n.kind == 'table')
-        .toList();
-    if (tables.length == 1) root = tables.single;
+    final ids = layoutSubtree(document, {root.id});
+    root =
+        document.nodes
+            .where((node) => ids.contains(node.id) && node.kind == 'table')
+            .firstOrNull ??
+        document.nodes.firstWhere(
+          (node) => ids.contains(node.id) && node.kind != 'group',
+          orElse: () => root,
+        );
   }
-  Map<String, dynamic> capture(LayoutNode n) => {
-    if (n.kind != 'text') ...{
-      'fill': layoutNodeFill(document, n),
-      'stroke': '#475569FF',
-      'strokeWidth': 1,
-      'opacity': 1,
-      'dash': <int>[],
-    },
-    'color': document.defaultTextStyle['color'] ?? '#222222FF',
-    if (n.kind == 'text') 'opacity': 1,
-    if (n.kind != 'seat' && n.kind != 'group') ...{
-      'bold': document.defaultTextStyle['bold'] ?? false,
-      'italic': document.defaultTextStyle['italic'] ?? false,
-    },
-    if (n.kind != 'seat' && n.kind != 'group')
-      for (final key in _labelTypographyKeys)
-        if (document.defaultTextStyle.containsKey(key))
-          key: document.defaultTextStyle[key],
-    for (final key in _appearanceKeys(n))
-      if (effectiveNodeProperties(document, n).containsKey(key))
-        key: effectiveNodeProperties(document, n)[key],
-  };
-  final ids = layoutSubtree(document, {id});
-  final seat = document.nodes
-      .where((n) => ids.contains(n.id) && n.kind == 'seat' && n.id != id)
-      .firstOrNull;
+  final child = LayoutNode(
+    id: '00000000-0000-4000-8000-000000000000',
+    kind: 'seat',
+    parentId: root.id,
+  );
   return LayoutAppearance(
-    capture(root),
-    seats: seat == null ? null : capture(seat),
+    materializedNodeStyle(document, root),
+    seats: root.kind == 'table' ? materializedNodeStyle(document, child) : null,
   );
 }
 
-const _globalVisualKeys = {
-  ..._labelTypographyKeys,
-  'objectStyle',
-  'seatStyle',
-  'fill',
-  'stroke',
-  'strokeWidth',
-  'cornerRadius',
-  'opacity',
-  'color',
-};
-Map<String, dynamic> localAppearanceProperties(
-  LayoutNode node,
-  Map<String, dynamic> patch,
+/// Appearance-only presets use the existing canonical preset document contract.
+/// Empty nodes distinguish them from insertable object/assembly presets.
+Map<String, LayoutAppearance> namedLayoutAppearances(
+  VenueLayoutDocument document,
+  String kind,
 ) => {
-  ...node.properties,
-  ...patch,
-  if (patch.keys.any(_globalVisualKeys.contains))
-    'appearanceOverrides': {
-      ...((node.properties['appearanceOverrides'] as List?) ?? const [])
-          .cast<String>(),
-      ...patch.keys.where(_globalVisualKeys.contains),
-    }.toList(),
+  for (final preset in document.presets)
+    if ((preset['document']?['nodes'] as List?)?.isEmpty == true &&
+        preset['document']?['styles']?['kinds']?[kind] is Map)
+      preset['id'] as String: LayoutAppearance(
+        Map<String, dynamic>.from(preset['document']['styles']['kinds'][kind]),
+        seats:
+            kind == 'table' &&
+                preset['document']['styles']['kinds']['seat'] is Map
+            ? Map<String, dynamic>.from(
+                preset['document']['styles']['kinds']['seat'],
+              )
+            : null,
+      ),
 };
 
-/// Drawable nodes that appearance controls can modify, excluding locked subtrees.
+VenueLayoutDocument saveLayoutAppearancePreset(
+  VenueLayoutDocument document,
+  LayoutNode node,
+  String name,
+) {
+  final title = name.trim();
+  if (title.isEmpty || title.length > 80)
+    throw const FormatException('Enter a style name.');
+  if (document.presets.any(
+    (p) => (p['title'] as String).toLowerCase() == title.toLowerCase(),
+  ))
+    throw const FormatException('A style with this name already exists.');
+  final appearance = captureLayoutAppearance(document, node.id);
+  final fragment = VenueLayoutDocument(
+    styles: {
+      'kinds': {
+        node.kind: appearance.object,
+        if (node.kind == 'table' && appearance.seats != null)
+          'seat': appearance.seats,
+      },
+    },
+  );
+  return document.copyWith(
+    presets: [
+      ...document.presets,
+      {
+        'id': newLayoutId(),
+        'title': title,
+        'version': 1,
+        'document': fragment.toJson(),
+      },
+    ],
+  );
+}
+
+Map<String, dynamic> _mergeStyle(
+  Map<String, dynamic> base,
+  Map<String, dynamic> patch,
+) => {
+  ...base,
+  ...patch,
+  if (patch['label'] is Map)
+    'label': {...base['label'] as Map? ?? {}, ...patch['label'] as Map},
+};
+
+VenueLayoutDocument applyLayoutAppearance(
+  VenueLayoutDocument document,
+  Set<String> ids,
+  LayoutAppearance appearance,
+) {
+  final targets = layoutAppearanceTargets(document, ids),
+      byId = {for (final node in document.nodes) node.id: node};
+  return document.copyWith(
+    nodes: [
+      for (final node in document.nodes)
+        if (!targets.contains(node.id) ||
+            node.kind == 'seat' &&
+                !ids.contains(node.id) &&
+                byId[node.parentId]?.kind == 'table' &&
+                targets.contains(node.parentId))
+          node
+        else
+          node.copyWith(
+            style: _mergeStyle(
+              node.style,
+              node.kind == 'image' || node.kind == 'vector'
+                  ? {
+                      if (appearance.object.containsKey('opacity'))
+                        'opacity': appearance.object['opacity'],
+                    }
+                  : {
+                      ...(node.kind == 'seat' && !ids.contains(node.id)
+                          ? appearance.seats ?? appearance.object
+                          : appearance.object),
+                      if (const {
+                        'line',
+                        'polyline',
+                        'arrow',
+                      }.contains(node.properties['shape']))
+                        'fill': '#00000000',
+                    },
+            ),
+            childStyles: node.kind == 'table' && appearance.seats != null
+                ? {
+                    ...node.childStyles,
+                    'seat': _mergeStyle(
+                      Map<String, dynamic>.from(
+                        node.childStyles['seat'] as Map? ?? {},
+                      ),
+                      appearance.seats!,
+                    ),
+                  }
+                : node.childStyles,
+          ),
+    ],
+  );
+}
+
+/// Copy only resolved text styling to editable peers of the same kind.
+/// Individual overrides are replaced so each peer actually matches the source.
+/// Geometry, authored text, child styles and document defaults stay untouched.
+Set<String> layoutTextStyleTargets(
+  VenueLayoutDocument document,
+  LayoutNode source,
+) {
+  final peers = {
+    for (final node in document.nodes)
+      if (node.kind == source.kind && node.id != source.id) node.id,
+  };
+  return layoutAppearanceTargets(document, peers).intersection(peers);
+}
+
+VenueLayoutDocument applyLayoutTextStyle(
+  VenueLayoutDocument document,
+  LayoutNode source,
+) {
+  final targets = layoutTextStyleTargets(document, source);
+  final label = resolveNodeAppearance(document, source).label;
+  return document.copyWith(
+    nodes: [
+      for (final node in document.nodes)
+        if (targets.contains(node.id))
+          node.copyWith(
+            style: {
+              ...node.style,
+              'label': {...label},
+            },
+          )
+        else
+          node,
+    ],
+  );
+}
+
+/// Apply one visual family through canonical kind defaults. Object overrides stay explicit.
+VenueLayoutDocument applyGlobalLayoutAppearance(
+  VenueLayoutDocument document,
+  LayoutAppearance appearance,
+) {
+  var next = document;
+  for (final kind in ['table', 'seat', 'furniture', 'shape', 'capacityArea']) {
+    final patch = kind == 'seat'
+        ? appearance.seats ?? appearance.object
+        : appearance.object;
+    for (final entry in patch.entries) {
+      if (entry.key == 'label') {
+        for (final label in (entry.value as Map).entries) {
+          next = setKindStyleLeaf(next, kind, [
+            'label',
+            label.key as String,
+          ], value: label.value);
+        }
+      } else {
+        next = setKindStyleLeaf(next, kind, [entry.key], value: entry.value);
+      }
+    }
+  }
+  return next.copyWith(
+    canvas: {
+      ...next.canvas,
+      if (appearance.canvasFill != null) 'fill': appearance.canvasFill,
+    },
+  );
+}
+
 Set<String> layoutAppearanceTargets(
   VenueLayoutDocument document,
   Set<String> roots,
@@ -267,138 +388,93 @@ Set<String> layoutAppearanceTargets(
   };
 }
 
-VenueLayoutDocument followPlanAppearance(
+VenueLayoutDocument applyLayoutFamily(
   VenueLayoutDocument document,
-  Set<String> roots,
-  bool follow,
-) {
-  final targets = layoutAppearanceTargets(document, roots);
-  final byId = {for (final n in document.nodes) n.id: n};
-  return document.copyWith(
-    nodes: [
-      for (final n in document.nodes)
-        if (targets.contains(n.id))
-          n.copyWith(
-            properties: follow
-                ? ({...n.properties}..remove('appearanceOverrides'))
-                : localAppearanceProperties(n, {
-                    if (n.kind != 'text') ...{
-                      'fill': layoutNodeFill(document, n, nodesById: byId),
-                      'stroke': '#475569FF',
-                      'strokeWidth': 1,
-                      'cornerRadius': n.kind == 'table'
-                          ? 6
-                          : n.kind == 'seat'
-                          ? 5
-                          : 0,
-                    },
-                    'objectStyle': 'simple',
-                    'color': document.defaultTextStyle['color'] ?? '#222222FF',
-                    if (n.kind == 'seat') 'seatStyle': 'plain',
-                    'opacity': 1,
-                    for (final e in effectiveNodeProperties(
-                      document,
-                      n,
-                    ).entries)
-                      if (_globalVisualKeys.contains(e.key)) e.key: e.value,
-                  }),
-          )
-        else
-          n,
-    ],
-  );
-}
+  String family,
+) => family == 'cinema'
+    ? withCinemaAppearance(document)
+    : withLayoutMaterialFamily(
+        document,
+        family,
+      ).copyWith(canvas: document.canvas);
 
-VenueLayoutDocument applyLayoutAppearance(
-  VenueLayoutDocument document,
-  Set<String> ids,
-  LayoutAppearance appearance,
-) {
-  final targets = layoutAppearanceTargets(document, ids);
-  return document.copyWith(
-    nodes: [
-      for (final node in document.nodes)
-        if (targets.contains(node.id))
-          node.copyWith(
-            properties: localAppearanceProperties(node, {
-              for (final entry
-                  in (node.kind == 'seat' && !ids.contains(node.id)
-                          ? appearance.seats ?? appearance.object
-                          : appearance.object)
-                      .entries)
-                if (_appearanceKeys(node).contains(entry.key) &&
-                    // Open paths retain their transparent fill and exact geometry.
-                    !(entry.key == 'fill' &&
-                        [
-                          'line',
-                          'arrow',
-                          'polyline',
-                        ].contains(node.properties['shape'])))
-                  entry.key: entry.value,
-            }),
-          )
-        else
-          node,
-    ],
-  );
-}
+final layoutMaterialFamilyAppearances = {
+  'cinema': LayoutAppearance(
+    cinemaKindStyles['table']!,
+    seats: cinemaKindStyles['seat'],
+    canvasFill: cinemaCanvasFill,
+  ),
+  for (final family in layoutMaterialFamilies.keys)
+    family: LayoutAppearance(
+      layoutMaterialStyles(family)['table']!,
+      seats: layoutMaterialStyles(family)['seat'],
+    ),
+};
 
-class LayoutStylePresets extends StatelessWidget {
-  const LayoutStylePresets({
+/// Quick family chooser backed by the same canonical material definitions as rendering.
+class LayoutMaterialFamilies extends StatelessWidget {
+  const LayoutMaterialFamilies({
     super.key,
     required this.controller,
-    this.onApply,
-    this.colorsOnly = false,
+    this.nodeId,
   });
   final VenueLayoutController controller;
-  final ValueChanged<LayoutAppearance>? onApply;
-  final bool colorsOnly;
+  final String? nodeId;
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    key: const ValueKey('layout-style-presets-scroll'),
-    scrollDirection: Axis.horizontal,
-    child: Row(
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) => Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
-        for (final entry
-            in (colorsOnly ? layoutColorPalettes : layoutAppearancePresets)
-                .entries)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: SizedBox.square(
-              dimension: 88,
-              child: OutlinedButton(
-                key: ValueKey('layout-style-${entry.key}'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.all(8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+        for (final family in const {
+          'minimal': 'Minimal',
+          'wood': 'Timber',
+          'lounge': 'Lounge',
+          'round': 'Round seating',
+          'banquet': 'Banquet hall',
+          'transit': 'Transport',
+          'cinema': 'Cinema',
+        }.entries)
+          SizedBox(
+            width: 124,
+            height: 124,
+            child: OutlinedButton(
+              key: ValueKey('appearance-family-${family.key}'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.all(8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: controller.readOnly || controller.saving
+                  ? null
+                  : () {
+                      final appearance =
+                          layoutMaterialFamilyAppearances[family.key]!;
+                      controller.apply(
+                        nodeId == null
+                            ? applyLayoutFamily(controller.document, family.key)
+                            : applyLayoutAppearance(controller.document, {
+                                nodeId!,
+                              }, appearance),
+                        label: 'Apply style',
+                      );
+                    },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LayoutStylePreview(
+                    appearance: layoutMaterialFamilyAppearances[family.key]!,
+                    size: const Size(96, 60),
                   ),
-                ),
-                onPressed: controller.readOnly || controller.saving
-                    ? null
-                    : () => onApply != null
-                          ? onApply!(entry.value)
-                          : controller.apply(
-                              applyLayoutAppearance(
-                                controller.document,
-                                controller.selection,
-                                entry.value,
-                              ),
-                              label: 'Apply style',
-                            ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _LayoutStylePreview(appearance: entry.value),
-                    const SizedBox(height: 5),
-                    LayoutText(
-                      entry.key,
-                      style: Theme.of(context).textTheme.labelSmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+                  const SizedBox(height: 6),
+                  LayoutText(
+                    family.value,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           ),
@@ -407,13 +483,111 @@ class LayoutStylePresets extends StatelessWidget {
   );
 }
 
-class _LayoutStylePreview extends StatelessWidget {
-  const _LayoutStylePreview({required this.appearance});
+class LayoutStylePresets extends StatefulWidget {
+  const LayoutStylePresets({
+    super.key,
+    required this.controller,
+    this.onApply,
+    this.colorsOnly = false,
+    this.appearances,
+    this.labelFor,
+  });
+  final VenueLayoutController controller;
+  final ValueChanged<LayoutAppearance>? onApply;
+  final bool colorsOnly;
+  final Map<String, LayoutAppearance>? appearances;
+  final String Function(String)? labelFor;
+  @override
+  State<LayoutStylePresets> createState() => _LayoutStylePresetsState();
+}
+
+class _LayoutStylePresetsState extends State<LayoutStylePresets> {
+  final _scroll = ScrollController();
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _scroll,
+    thumbVisibility: true,
+    trackVisibility: true,
+    scrollbarOrientation: ScrollbarOrientation.bottom,
+    child: SingleChildScrollView(
+      controller: _scroll,
+      padding: const EdgeInsets.only(bottom: 12),
+      key: const ValueKey('layout-style-presets-scroll'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final entry
+              in (widget.appearances ??
+                      (widget.colorsOnly
+                          ? layoutColorPalettes
+                          : layoutAppearancePresets))
+                  .entries)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: SizedBox.square(
+                dimension: 88,
+                child: OutlinedButton(
+                  key: ValueKey('layout-style-${entry.key}'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed:
+                      widget.controller.readOnly || widget.controller.saving
+                      ? null
+                      : () => widget.onApply != null
+                            ? widget.onApply!(entry.value)
+                            : widget.controller.apply(
+                                applyLayoutAppearance(
+                                  widget.controller.document,
+                                  widget.controller.selection,
+                                  entry.value,
+                                ),
+                                label: 'Apply style',
+                              ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LayoutStylePreview(appearance: entry.value),
+                      const SizedBox(height: 5),
+                      LayoutText(
+                        widget.labelFor?.call(entry.key) ?? entry.key,
+                        style: Theme.of(context).textTheme.labelSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class LayoutStylePreview extends StatelessWidget {
+  const LayoutStylePreview({
+    required this.appearance,
+    this.size = const Size(58, 40),
+  });
+  final Size size;
   final LayoutAppearance appearance;
-  static final _previews = Expando<Map<String, dynamic>>();
+  static final _previews = Expando<Map<Brightness, Map<String, dynamic>>>();
   @override
   Widget build(BuildContext context) {
-    final data = _previews[appearance] ??= (() {
+    final brightness = Theme.of(context).brightness;
+    final variants = _previews[appearance] ??= {};
+    final data = variants[brightness] ??= (() {
       final base = tableLayout(shape: 'roundedRect');
       final bounds = selectionBounds(base, base.nodes.map((n) => n.id).toSet());
       final frame = Rect.fromLTWH(
@@ -429,27 +603,34 @@ class _LayoutStylePreview extends StatelessWidget {
           'y': frame.top,
           'width': frame.width,
           'height': frame.height,
-          'fill': appearance.canvasFill ?? '#FFFFFFFF',
+          'fill':
+              appearance.canvasFill ??
+              (brightness == Brightness.dark ? '#252E3AFF' : '#F8FAFCFF'),
         },
-        appearance: {
-          'table': appearance.object,
-          'seat': appearance.seats ?? appearance.object,
+        styles: {
+          'kinds': {
+            'table': appearance.object,
+            'seat': appearance.seats ?? appearance.object,
+          },
         },
       );
       return {'frame': frame, 'scene': compileScene(doc)};
     })();
     final frame = data['frame'] as Rect;
-    final scale = math.min(58 / frame.width, 40 / frame.height);
+    final scale = math.min(
+      size.width / frame.width,
+      size.height / frame.height,
+    );
     return CustomPaint(
-      size: const Size(58, 40),
+      size: size,
       painter: LayoutScenePainter(
         scene: data['scene'] as Map<String, dynamic>,
         resources: const {},
         selected: const {},
         scale: scale,
         offset: Offset(
-          (58 - frame.width * scale) / 2 - frame.left * scale,
-          (40 - frame.height * scale) / 2 - frame.top * scale,
+          (size.width - frame.width * scale) / 2 - frame.left * scale,
+          (size.height - frame.height * scale) / 2 - frame.top * scale,
         ),
         canvasColor: Colors.transparent,
         selectionColor: Theme.of(context).colorScheme.primary,
@@ -461,157 +642,10 @@ class _LayoutStylePreview extends StatelessWidget {
 Future<void> showLayoutStyleDialog(
   BuildContext context,
   VenueLayoutController controller,
-) => showDialog<void>(
-  context: context,
-  builder: (dialogContext) => AnimatedBuilder(
-    animation: controller,
-    builder: (context, _) {
-      final selected = controller.document.nodes
-          .where((n) => controller.selection.contains(n.id))
-          .toList();
-      if (selected.isEmpty) return const SizedBox.shrink();
-      final root = selected.first;
-      final appearance = captureLayoutAppearance(controller.document, root.id);
-      final used = <String>{};
-      final byId = {
-        for (final node in controller.document.nodes) node.id: node,
-      };
-      for (final node in controller.document.nodes) {
-        for (final value in [
-          if (node.kind == 'table') '#E2E8F0FF',
-          if (node.kind == 'seat')
-            byId[node.parentId]?.properties['furniture'] == 'couch'
-                ? '#F8FAFCFF'
-                : '#DCFCE7FF',
-          effectiveNodeProperties(controller.document, node)['fill'],
-          effectiveNodeProperties(controller.document, node)['stroke'],
-          effectiveNodeProperties(controller.document, node)['color'],
-        ]) {
-          if (value is String && RegExp(r'^#[0-9a-fA-F]{8}$').hasMatch(value)) {
-            used.add(value.substring(1, 7));
-          }
-        }
-      }
-      final canvasFill = controller.document.canvas['fill'] as String?;
-      if (canvasFill != null) used.add(canvasFill.substring(1, 7));
-      Future<void> color(
-        String label,
-        String value,
-        String key, {
-        bool seats = false,
-      }) async {
-        final result = await showDialog<EditorColorResult>(
-          context: context,
-          builder: (_) => EditorColorDialog(
-            value: EditorColorValue.fromRgba(value),
-            usedColors: used.toList(),
-            image:
-                (controller.resources['images']
-                        as Map?)?[controller.document.background?['assetRef']]
-                    as ui.Image?,
-            translate: (text) => VenueLayoutStrings.text(context, text),
-          ),
-        );
-        if (result == null ||
-            !context.mounted ||
-            controller.readOnly ||
-            controller.saving) {
-          return;
-        }
-        final targets = seats
-            ? layoutSubtree(controller.document, controller.selection)
-                  .where(
-                    (id) => controller.document.nodes.any(
-                      (n) => n.id == id && n.kind == 'seat',
-                    ),
-                  )
-                  .toSet()
-            : controller.selection;
-        // Color controls target the object or its chairs independently.
-        final next = applyLayoutAppearance(
-          controller.document,
-          targets,
-          LayoutAppearance({
-            key: result.primary.rgba,
-          }, seats: seats ? null : const {}),
-        );
-        controller.apply(next, label: label);
-      }
-
-      Widget colorButton(
-        String label,
-        String value,
-        String key, {
-        bool seats = false,
-      }) => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: OutlinedButton(
-          onPressed: controller.readOnly || controller.saving
-              ? null
-              : () => color(label, value, key, seats: seats),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                EditorColorSwatch(value: EditorColorValue.fromRgba(value)),
-                const SizedBox(width: 10),
-                Expanded(child: LayoutText(label)),
-              ],
-            ),
-          ),
-        ),
+) => controller.selection.isEmpty
+    ? Future<void>.value()
+    : showCanonicalAppearanceDialog(
+        context,
+        controller,
+        nodeId: controller.selection.first,
       );
-      return AlertDialog(
-        title: const LayoutText('Style'),
-        content: SizedBox(
-          width: 360,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                LayoutStylePresets(controller: controller),
-                if (root.kind != 'group' &&
-                    ![
-                      'line',
-                      'polyline',
-                      'arrow',
-                    ].contains(root.properties['shape']))
-                  colorButton(
-                    root.kind == 'text' ? 'Text color' : 'Object color',
-                    root.kind == 'text'
-                        ? '${appearance.object['color'] ?? '#202830FF'}'
-                        : layoutNodeFill(controller.document, root),
-                    root.kind == 'text' ? 'color' : 'fill',
-                  ),
-                if (root.kind != 'text')
-                  colorButton(
-                    'Outline color',
-                    '${appearance.object['stroke'] ?? '#475569FF'}',
-                    'stroke',
-                  ),
-                if (appearance.seats != null)
-                  colorButton(
-                    'Seat color',
-                    '${appearance.seats!['fill']}',
-                    'fill',
-                    seats: true,
-                  ),
-                const SizedBox(height: 12),
-                const LayoutText(
-                  'Changes apply immediately. Undo restores the previous style.',
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const LayoutText('Done'),
-          ),
-        ],
-      );
-    },
-  ),
-);

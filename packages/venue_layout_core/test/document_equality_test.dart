@@ -1,3 +1,4 @@
+import 'support/style.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:test/test.dart';
@@ -41,9 +42,8 @@ void main() {
         y: 200,
         properties: {
           'appearanceOverrides': ['fill', 'stroke'],
-          'fill': '#123456FF',
-          'stroke': '#334455FF',
         },
+        style: {'fill': '#123456FF', 'stroke': '#334455FF'},
       );
       expect(sameLayoutNode(node, node.copyWith(x: 200.0001)), isTrue);
       expect(sameLayoutNode(node, node.copyWith(x: 200.01)), isFalse);
@@ -64,7 +64,10 @@ void main() {
       expect(
         sameLayoutNode(
           node,
-          node.copyWith(properties: {...node.properties, 'fill': '#112233FF'}),
+          node.copyWith(
+            properties: {...node.properties},
+            style: {'fill': '#112233FF'},
+          ),
         ),
         isFalse,
       );
@@ -91,7 +94,7 @@ void main() {
         expect(sameLayoutDocument(doc, other), isTrue);
         expect(jsonEncode(doc.toJson()), jsonEncode(other.toJson()));
       }
-      final styles = setLayoutAppearance(doc, 'seat', {'seatStyle': 'wood'});
+      final styles = withKindStyle(doc, 'seat', {'seatStyle': 'wood'});
       expect(sameLayoutDocument(doc, styles), isFalse);
       expect(
         sameLayoutDocument(
@@ -139,6 +142,7 @@ void main() {
         nodes.addAll([furniture, ...seats]);
         units.add({
           'id': newLayoutId(),
+          'kind': 'atomic',
           'nodeIds': seats.map((n) => n.id).toList(),
         });
       }

@@ -120,12 +120,12 @@ void main() {
       var moved = c.document.nodes.firstWhere((n) => n.id == chair.id);
       expect(moved.parentId, table.id);
       expect(moved.x, closeTo(chair.x + 22, .002));
-      expect(moved.properties['manual'], true);
+      expect(seatPlacementFree(c.document, moved), true);
       expect(
         c.document.attachments.firstWhere(
           (a) => a['seatId'] == chair.id,
-        )['manual'],
-        true,
+        )['placement']['mode'],
+        'free',
       );
       final localX = moved.x, localY = moved.y;
       c.select({table.id});

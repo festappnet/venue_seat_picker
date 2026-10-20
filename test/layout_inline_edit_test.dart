@@ -1,4 +1,7 @@
 import 'dart:ui' as ui;
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,15 +11,20 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 void main() {
   Future<void> open(
     WidgetTester tester,
-    VenueLayoutController controller,
-  ) async {
+    VenueLayoutController controller, {
+    Future<TextStyle> Function(LayoutNode)? inlineTextStyleBuilder,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: VenueLayoutEditor(controller: controller, showGallery: false),
+          body: VenueLayoutEditor(
+            controller: controller,
+            showGallery: false,
+            inlineTextStyleBuilder: inlineTextStyleBuilder,
+          ),
         ),
       ),
     );
@@ -31,6 +39,89 @@ void main() {
   final inline = find.byKey(const ValueKey('layout-inline-label'));
 
   testWidgets(
+    'canonical native input waits for its actual face and commits composed source in one undo',
+    (tester) async {
+      final fixture =
+          jsonDecode(
+                File(
+                  'web/test/fixtures/canonical_rendering.json',
+                ).readAsStringSync(),
+              )
+              as Map;
+      final document = VenueLayoutDocument.fromJson(
+        Map<String, dynamic>.from(fixture['document']),
+      );
+      final node = document.nodes.firstWhere((n) => n.kind == 'text');
+      final c = VenueLayoutController(
+        document.copyWith(
+          nodes: [node],
+          attachments: [],
+          selectionUnits: [],
+          sections: [],
+          presets: [],
+        ),
+        resources: Map<String, dynamic>.from(fixture['resources']),
+      );
+      final ready = Completer<TextStyle>();
+      var loads = 0;
+      await tester.runAsync(() async {
+        final bytes = await File(
+          'assets/layout_fonts/Roboto-400-normal.ttf',
+        ).readAsBytes();
+        final loader = FontLoader('CanonicalActualInputFace')
+          ..addFont(Future.value(ByteData.sublistView(bytes)));
+        await loader.load();
+      });
+      await open(
+        tester,
+        c,
+        inlineTextStyleBuilder: (requested) {
+          loads++;
+          expect(requested.id, node.id);
+          return ready.future;
+        },
+      );
+      surface(tester).onDoubleTapAt!(Offset(node.x, node.y));
+      await tester.pump();
+      expect(inline, findsNothing);
+      expect(loads, greaterThan(0));
+      ready.complete(
+        const TextStyle(
+          fontFamily: 'CanonicalActualInputFace',
+          fontWeight: FontWeight.normal,
+          fontStyle: FontStyle.normal,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      final field = tester.widget<TextField>(inline);
+      expect(field.style!.fontFamily, 'CanonicalActualInputFace');
+      expect(field.style!.fontWeight, FontWeight.normal);
+      expect(field.style!.fontStyle, FontStyle.normal);
+      field.controller!.value = const TextEditingValue(
+        text: 'Židle AV ffi',
+        selection: TextSelection.collapsed(offset: 12),
+        composing: TextRange(start: 0, end: 5),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(
+        c.document.nodes.single.properties['text'],
+        node.properties['text'],
+      );
+      field.controller!.clearComposing();
+      field.focusNode!.unfocus();
+      await tester.pump();
+      expect(c.document.nodes.single.properties['text'], 'Židle AV ffi');
+      expect(c.document.nodes.single.style, node.style);
+      expect(c.document.nodes.single.x, node.x);
+      c.undo();
+      expect(c.document.nodes.single.toJson(), node.toJson());
+      expect(c.canUndo, isFalse);
+    },
+  );
+
+  testWidgets(
     'inline editor keeps an independent accessible text-field boundary',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -40,9 +131,16 @@ void main() {
         x: 300,
         y: 200,
         label: 'Table 1',
+        surface: const {'type': 'rect'},
       );
       final c = VenueLayoutController(
-        VenueLayoutDocument.empty().copyWith(nodes: [node]),
+        VenueLayoutDocument.empty().copyWith(
+          nodes: [node],
+          attachments: [],
+          selectionUnits: [],
+          sections: [],
+          presets: [],
+        ),
       );
       c.select({node.id});
       await open(tester, c);
@@ -89,9 +187,16 @@ void main() {
       height: 100,
       rotation: 30,
       label: 'Table 1',
+      surface: const {'type': 'rect'},
     );
     final c = VenueLayoutController(
-      VenueLayoutDocument.empty().copyWith(nodes: [node]),
+      VenueLayoutDocument.empty().copyWith(
+        nodes: [node],
+        attachments: [],
+        selectionUnits: [],
+        sections: [],
+        presets: [],
+      ),
     );
     c.select({node.id});
     await open(tester, c);
@@ -192,7 +297,13 @@ void main() {
       properties: {'text': 'Before'},
     );
     final c = VenueLayoutController(
-      VenueLayoutDocument.empty().copyWith(nodes: [node]),
+      VenueLayoutDocument.empty().copyWith(
+        nodes: [node],
+        attachments: [],
+        selectionUnits: [],
+        sections: [],
+        presets: [],
+      ),
     );
     await open(tester, c);
     surface(tester).onDoubleTapAt!(const Offset(300, 200));
@@ -231,9 +342,16 @@ void main() {
       x: 300,
       y: 200,
       locked: true,
+      surface: const {'type': 'rect'},
     );
     final c = VenueLayoutController(
-      VenueLayoutDocument.empty().copyWith(nodes: [node]),
+      VenueLayoutDocument.empty().copyWith(
+        nodes: [node],
+        attachments: [],
+        selectionUnits: [],
+        sections: [],
+        presets: [],
+      ),
     );
     c.select({node.id});
     await open(tester, c);
@@ -257,7 +375,13 @@ void main() {
       height: 100,
     );
     final c = VenueLayoutController(
-      VenueLayoutDocument.empty().copyWith(nodes: [node]),
+      VenueLayoutDocument.empty().copyWith(
+        nodes: [node],
+        attachments: [],
+        selectionUnits: [],
+        sections: [],
+        presets: [],
+      ),
     );
     c.select({node.id});
     await open(tester, c);
@@ -299,7 +423,8 @@ void main() {
         y: 100,
         width: 40,
         height: 40,
-        properties: {'shape': 'ellipse', 'fill': '#000000FF'},
+        properties: {'shape': 'ellipse'},
+        style: {'fill': '#000000FF'},
       );
       final doc = VenueLayoutDocument.empty().copyWith(
         canvas: {

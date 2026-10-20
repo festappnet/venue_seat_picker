@@ -36,7 +36,7 @@ void main() {
         ),
         throwsFormatException,
       );
-      corrupt['version'] = 2;
+      corrupt['version'] = 99;
       expect(
         () => DemoBundle.decode(
           Uint8List.fromList(utf8.encode(jsonEncode(corrupt))),
@@ -45,33 +45,34 @@ void main() {
       );
     },
   );
+  test('portable envelope preserves verified embedded raster bytes', () async {
+    final doc = VenueLayoutTemplates.create('blank');
+    final resources = await loadLayoutFixtureResources();
+    final bytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC',
+    );
+    final hash = sha256.convert(bytes).toString();
+    resources['assets'] = {
+      'image:$hash': {
+        'url': 'data:image/png;base64,${base64Encode(bytes)}',
+        'byteLength': bytes.length,
+        'hash': hash,
+        'mimeType': 'image/png',
+        'width': 2,
+        'height': 2,
+      },
+    };
+    // Bundle validation covers byte transport. Native image decoding remains a
+    // separate transactional host gate; this fixture does not impersonate it.
+    final encoded = DemoBundle(doc, resources, {'prices': {}}).encode();
+    final loaded = DemoBundle.decode(Uint8List.fromList(utf8.encode(encoded)));
+    expect(
+      loaded.resources['assets']['image:$hash']['byteLength'],
+      bytes.length,
+    );
+  });
   test(
-    'portable envelope roundtrips resources larger than one asset limit',
-    () async {
-      final doc = VenueLayoutTemplates.create('blank');
-      final resources = await loadLayoutFixtureResources();
-      final bytes = Uint8List(6 * 1024 * 1024);
-      resources['assets'] = {
-        'image:large': {
-          'data': base64Encode(bytes),
-          'size': bytes.length,
-          'sha256': sha256.convert(bytes).toString(),
-          'mime': 'image/png',
-          'width': 1,
-          'height': 1,
-        },
-      };
-      // Bundle validation covers byte transport. Native image decoding remains a
-      // separate transactional host gate; this fixture does not impersonate it.
-      final encoded = DemoBundle(doc, resources, {'prices': {}}).encode();
-      final loaded = DemoBundle.decode(
-        Uint8List.fromList(utf8.encode(encoded)),
-      );
-      expect(loaded.resources['assets']['image:large']['size'], bytes.length);
-    },
-  );
-  test(
-    'valid checksum cannot hide a corrupt glyph or orphan host binding',
+    'valid checksum cannot hide a corrupt text path or orphan host binding',
     () async {
       final doc = VenueLayoutTemplates.create('ball-classic');
       final resources = await loadLayoutFixtureResources();
@@ -80,7 +81,7 @@ void main() {
       final entry = (corrupted['resources'] as List).first as Map;
       final resource =
           jsonDecode(utf8.decode(base64Decode(entry['data'] as String))) as Map;
-      resource['fonts']['fixture:sans']['glyphs']['A']['path'] = [
+      (resource['textLayouts'] as Map).values.first['path'] = [
         ['M', 1],
       ];
       final bytes = utf8.encode(jsonEncode(resource));

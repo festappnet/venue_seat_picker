@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'layout_scene_surface.dart';
+import 'package:venue_seat_picker/editor_ui.dart';
 import 'layout_template_card.dart';
 import 'layout_table_selection.dart';
 import 'layout_palette_drag_feedback.dart';
@@ -24,6 +25,10 @@ class VenueLayoutEditor extends StatefulWidget {
     this.toolbarPrefix,
     this.toolbarLeading,
     this.toolbarTrailing,
+    this.libraryActions,
+    this.libraryOverride,
+    this.footerTrailing,
+    this.canvasBottomOverlay,
     this.showGallery = true,
     this.onTemplateSelected,
     this.onImportBackground,
@@ -31,6 +36,7 @@ class VenueLayoutEditor extends StatefulWidget {
     this.capacityPresentation = const {},
     this.interactionEnabled = true,
     this.onNodeActivated,
+    this.onEditRequested,
     this.inspectorOverride,
     this.viewSelection,
     this.onViewSelectionChanged,
@@ -40,12 +46,16 @@ class VenueLayoutEditor extends StatefulWidget {
     this.onRenameNode,
     this.fontPickerBuilder,
     this.globalFontPickerBuilder,
+    this.inlineTextStyleBuilder,
   });
   final VenueLayoutController controller;
 
   /// Optional host font catalog for object typography, built only in edit mode.
   final Widget Function(BuildContext, LayoutNode)? fontPickerBuilder;
   final Widget Function(BuildContext, String)? globalFontPickerBuilder;
+
+  /// Native input uses the exact loaded face; committed text still paints paths.
+  final Future<TextStyle> Function(LayoutNode)? inlineTextStyleBuilder;
 
   /// Host actions share the editor toolbar. Trailing actions stay visible while
   /// tools scroll horizontally on smaller screens.
@@ -54,6 +64,10 @@ class VenueLayoutEditor extends StatefulWidget {
   /// Stable host mode controls, preceding the shared pointer tools.
   final Widget? toolbarPrefix;
   final Widget? toolbarTrailing;
+  final Widget? libraryActions, libraryOverride, footerTrailing;
+
+  /// Host-owned operation summary, anchored within the canvas, outside tools.
+  final Widget? canvasBottomOverlay;
 
   /// Transient host state. Does not enter document, dirty state or history.
   final Map<String, dynamic> seatPresentation, capacityPresentation;
@@ -63,6 +77,9 @@ class VenueLayoutEditor extends StatefulWidget {
 
   /// Exact node hit, shared by pointer/touch and keyboard Enter/Space.
   final ValueChanged<String>? onNodeActivated;
+
+  /// Viewing shortcut only. The host owns edit permissions and mode changes.
+  final ValueChanged<Set<String>>? onEditRequested;
 
   /// Host-owned operational inspector, shown in viewing mode even without a selection.
   final Widget? inspectorOverride;
@@ -94,6 +111,14 @@ class VenueLayoutEditor extends StatefulWidget {
 class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   final _focus = FocusNode();
   String _tool = 'Select';
+  final _globalStyleOpen = ValueNotifier(false);
+  final _globalStyleKey = GlobalKey<LayoutGlobalStylePanelState>();
+
+  void _closeGlobalStyle() {
+    _globalStyleKey.currentState?.cancelPreview();
+    _globalStyleOpen.value = false;
+  }
+
   bool get _surfaceTool => ['Draw table', 'Draw bar'].contains(_tool);
   bool get _polygonTool => _tool == 'Polygon';
   GridSurfaceBrush? _surfaceBrush;
@@ -107,7 +132,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _libraryOpen = false;
   Map<String, dynamic>? _previewSeating;
   Map<String, double>? _canvasResizeBounds;
-  VenueLayoutDocument? _tableResizeBaseline;
   Map<String, double>? _rowResizeBounds;
   Offset? _pendingDragPoint;
   int? _dragFrameCallback;
@@ -127,6 +151,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     LayoutPaletteFeedbackState.floating,
   );
   bool _dropPreviewVisible = false;
+  List<List<List<double>>> _blockedPlacementHulls = const [];
   VenueLayoutDocument? _paletteDragFragment;
   Offset? _startPointer;
   Offset? _lastDragPoint;
@@ -136,6 +161,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _snap = true;
   bool _showGrid = false;
   int _templateViewport = 0;
+  late final _templatePeeks = [
+    for (final template in VenueLayoutTemplates.all.take(3)) template.create(),
+  ];
   bool _canvasSelected = false;
   bool get _editingCanvas =>
       _canvasSelected && _tool == 'Select' && c.selection.isEmpty;
@@ -170,6 +198,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       _canvasSelected,
       _cornerPivot,
       _copiedAppearance,
+      _globalStyleOpen.value,
       c.readOnly,
       c.saving,
       ids.join(','),
@@ -222,6 +251,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   @override
   void dispose() {
+    _globalStyleOpen.dispose();
     _discardDragPreview();
     _stopPaste();
     _paletteFeedbackState.dispose();
@@ -247,7 +277,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     if (node.kind == 'seat' && parent != null) {
       if (parent.kind == 'table') return id;
       if (parent.kind == 'group' &&
-          parent.properties['assembly'] == null &&
+          parent.assembly?['kind'] == null &&
           c.document.nodes.any(
             (sibling) =>
                 sibling.kind == 'table' && sibling.parentId == parent.id,
@@ -276,7 +306,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     // cannot steal a gap, while a foreground object and direct seat hits win.
     for (final node in _hitOrder) {
       if (node.id == direct) return direct;
-      if (node.properties['assembly'] != 'rows') continue;
+      if (!isRowAssemblyNode(node)) continue;
       final bounds = _rowHitBounds.putIfAbsent(
         node.id,
         () => rowAssemblyBounds(c.document, node.id),
@@ -300,7 +330,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _selectDown(Offset point) {
     if (!_canEdit) return;
-    if (!['Select', 'Resize', 'Rotate'].contains(_tool)) return;
+    if (_tool != 'Select') return;
     _selectionBeforeDown = {...c.selection};
     if (_canvasSelected) setState(() => _canvasSelected = false);
     _focus.requestFocus();
@@ -341,6 +371,44 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       ? node.kind == 'seat' || node.kind == 'capacityArea'
       : widget.viewSelectableIds!.contains(node.id);
 
+  DateTime? _viewTapTime;
+  Offset? _viewTapPoint;
+  String? _viewTapTarget;
+  int _viewTapCount = 0;
+  bool _viewTapWasSelected = false;
+
+  bool _requestEditFromTap(Offset point, String? target) {
+    if (widget.onEditRequested == null ||
+        HardwareKeyboard.instance.isShiftPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isAltPressed) {
+      _viewTapCount = 0;
+      return false;
+    }
+    final now = DateTime.now();
+    final continues =
+        _viewTapTime != null &&
+        now.difference(_viewTapTime!).inMilliseconds <= 350 &&
+        _viewTapPoint != null &&
+        (point - _viewTapPoint!).distance * _viewportScale <= 8 &&
+        target == _viewTapTarget;
+    if (!continues) {
+      _viewTapCount = 0;
+      _viewTapWasSelected = target != null && _viewSelection.contains(target);
+    }
+    _viewTapTime = now;
+    _viewTapPoint = point;
+    _viewTapTarget = target;
+    _viewTapCount++;
+    if (_viewTapCount >= 3 || (_viewTapCount == 2 && _viewTapWasSelected)) {
+      _viewTapCount = 0;
+      widget.onEditRequested!(target == null ? {..._viewSelection} : {target});
+      return true;
+    }
+    return false;
+  }
+
   void _tap(Offset point) {
     var activated = _hitAt(point);
     if (!_canEdit &&
@@ -352,6 +420,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     if (!_canEdit) {
       _focus.requestFocus();
       final target = activated == null ? null : _viewTarget(activated);
+      if (_requestEditFromTap(point, target)) return;
       final selected = target == null
           ? <String>{}
           : HardwareKeyboard.instance.isShiftPressed
@@ -367,10 +436,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     if (activated != null) widget.onNodeActivated?.call(activated);
     if (_canvasSelected) setState(() => _canvasSelected = false);
     _focus.requestFocus();
-    if (_tool == 'Select' ||
-        _tool == 'Resize' ||
-        _tool == 'Rotate' ||
-        _tool == 'Pan') {
+    if (_tool == 'Select' || _tool == 'Pan') {
       var id = _hitAt(point);
       final selectionHandled = _selectionBeforeDown != null;
       final previouslySelected = _selectionBeforeDown ?? c.selection;
@@ -433,7 +499,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   bool _editable(LayoutNode node) {
     if (c.readOnly ||
         c.saving ||
-        (node.kind == 'furniture' && node.properties['furniture'] == 'couch') ||
+        (node.kind == 'furniture' && node.assembly?['kind'] == 'couch') ||
         !['text', 'table', 'furniture', 'capacityArea'].contains(node.kind)) {
       return false;
     }
@@ -486,6 +552,20 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     _focus.requestFocus();
   }
 
+  void _inlineHistory(bool redo) {
+    final id = _inlineId;
+    if (id == null) return;
+    final node = c.document.nodes.where((n) => n.id == id).firstOrNull;
+    // A clean newly inserted text is still a pending gesture. Commit it before
+    // undo so creation is removed in one step and remains available for redo.
+    _finishInline(
+      _inlineInsertion && node != null
+          ? '${node.properties['text'] ?? node.label}'
+          : null,
+    );
+    redo ? c.redo() : c.undo();
+  }
+
   void _doubleTap(Offset point) {
     if (_pathPoints.isNotEmpty) {
       _finishPath();
@@ -508,32 +588,63 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       return;
     }
     if (_canvasSelected) setState(() => _canvasSelected = false);
-    final node = c.document.nodes.firstWhere((n) => n.id == id);
+    if (!HardwareKeyboard.instance.isAltPressed &&
+        c.document.nodes.any(
+          (node) =>
+              c.selection.contains(node.id) &&
+              node.kind == 'group' &&
+              layoutSubtree(c.document, {node.id}).contains(id),
+        ))
+      return;
+    final target = _selectionTarget(id);
+    final node = c.document.nodes.firstWhere((n) => n.id == target);
+    if (node.kind == 'group' || target != id) {
+      c.select({target});
+      _focus.requestFocus();
+      return;
+    }
     _beginInline(node);
   }
 
-  VenueLayoutDocument _fragment(String kind, Offset point) => c
-      .nameInsertedTables(
-        localizeLayoutDefaultLabels(
-          _rawFragment(kind, point),
-          (text) => VenueLayoutStrings.text(context, text),
-        ),
-        defaultTablePrefix: VenueLayoutStrings.text(context, 'Table'),
-      )
-      .copyWith(appearance: c.document.appearance);
+  VenueLayoutDocument _fragment(String kind, Offset point) {
+    final source = _rawFragment(kind, point);
+    final contextual = !kind.startsWith('preset:')
+        ? source.copyWith(
+            styles: c.document.styles,
+            seatingDefaults: c.document.seatingDefaults,
+            textPolicy: c.document.textPolicy,
+          )
+        : source;
+    return c.nameInsertedTables(
+      localizeLayoutDefaultLabels(
+        contextual,
+        (text) => VenueLayoutStrings.text(context, text),
+      ),
+      defaultTablePrefix: VenueLayoutStrings.text(context, 'Table'),
+    );
+  }
 
   VenueLayoutDocument _rawFragment(String kind, Offset point) {
     if (kind == 'Draw table' || kind == 'Draw bar') {
-      final node = shapeFromPoints(
-        'polygon',
-        surfacePresetPoints('L', 220, 160),
-        properties: kind == 'Draw bar'
-            ? {'furniture': 'bar', 'guestSide': 'bottom'}
-            : {},
-      ).copyWith(kind: 'table', x: point.dx, y: point.dy);
-      return VenueLayoutDocument(
-        nodes: [snapTableSurfaceToGrid(node, preset: 'L')],
-      );
+      {
+        final node = LayoutNode(
+          id: newLayoutId(),
+          kind: 'table',
+          x: point.dx,
+          y: point.dy,
+          width: 220,
+          height: 160,
+          surface: const {'type': 'rect'},
+          seating: documentSeating(c.document).record,
+          properties: kind == 'Draw bar'
+              ? const {'furniture': 'bar', 'guestSide': 'bottom'}
+              : const {},
+        );
+        return VenueLayoutDocument(
+          schemaVersion: 2,
+          nodes: [snapTableSurfaceToGrid(node, preset: 'L')],
+        );
+      }
     }
     if (kind.startsWith('preset:')) {
       final preset = c.document.presets.firstWhere(
@@ -577,6 +688,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     if (kind == 'Bar') {
       final scale = documentSeating(c.document).width / 40;
       final bar = barLayout(
+        seating: documentSeating(c.document),
         x: point.dx,
         y: point.dy,
         width: 280 * scale,
@@ -585,7 +697,12 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       return bar.copyWith(
         nodes: [
           for (final n in bar.nodes)
-            isBarNode(n) ? snapTableSurfaceToGrid(n).copyWith(label: 'Bar') : n,
+            isBarNode(n)
+                ? snapTableSurfaceToGrid(
+                    n,
+                    preset: 'rectangle',
+                  ).copyWith(label: 'Bar')
+                : n,
         ],
       );
     }
@@ -632,8 +749,28 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     }
     if (kind == 'Polyline') {
-      return VenueLayoutDocument.empty().copyWith(
-        nodes: [zigzagLine(point.dx - 80, point.dy, point.dx + 80, point.dy)],
+      final node = zigzagLine(point.dx - 80, point.dy, point.dx + 80, point.dy);
+      return VenueLayoutDocument(
+        schemaVersion: 2,
+        nodes: [
+          node.copyWith(
+            style: {
+              'fill': '#00000000',
+              'stroke': '#334155FF',
+              'strokeWidth': 2,
+            },
+            properties: {
+              for (final entry in node.properties.entries)
+                if (!const {
+                  'fill',
+                  'stroke',
+                  'strokeWidth',
+                  'appearanceOverrides',
+                }.contains(entry.key))
+                  entry.key: entry.value,
+            },
+          ),
+        ],
       );
     }
     final node = LayoutNode(
@@ -654,15 +791,25 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           ? 1
           : 80,
       label: kind == 'Standing' ? 'Standing area' : '',
-      properties: kind == 'Text'
-          ? {
-              'text': VenueLayoutStrings.text(context, 'Your text'),
-              'fontId': 'fixture:sans',
-              'size': 24,
-              'color': '#202830FF',
+      style: kind == 'Text'
+          ? const {
+              'label': {'size': 24, 'color': '#202830FF'},
             }
           : kind == 'Seat'
-          ? {'symbol': 'chair', 'size': 16, 'align': 'center'}
+          ? const {
+              'label': {'size': 16, 'align': 'center'},
+            }
+          : {
+              'fill': ['Line', 'Arrow', 'Polyline'].contains(kind)
+                  ? '#00000000'
+                  : '#CBD5E1FF',
+              'stroke': '#334155FF',
+              'strokeWidth': 2,
+            },
+      properties: kind == 'Text'
+          ? {'text': VenueLayoutStrings.text(context, 'Your text')}
+          : kind == 'Seat'
+          ? const {'symbol': 'chair'}
           : {
               'shape':
                   {
@@ -674,11 +821,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                     'Polyline': 'polyline',
                   }[kind] ??
                   'rectangle',
-              'fill': ['Line', 'Arrow', 'Polyline'].contains(kind)
-                  ? '#00000000'
-                  : '#CBD5E1FF',
-              'stroke': '#334155FF',
-              'strokeWidth': 2,
               if (kind == 'Polygon' || kind == 'Polyline')
                 'points': [
                   [-80.0, 40.0],
@@ -688,7 +830,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
               if (kind == 'Standing') 'capacity': 100,
             },
     );
-    return VenueLayoutDocument.empty().copyWith(nodes: [node]);
+    return VenueLayoutDocument(schemaVersion: 2, nodes: [node]);
   }
 
   String? _tableAt(
@@ -890,44 +1032,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     return transformPoint(inverseMatrix(matrix), point.dx, point.dy);
   }
 
-  VenueLayoutDocument _automaticTableResize(
-    VenueLayoutDocument baseline,
-    String tableId,
-  ) {
-    final seats = {
-      for (final n in baseline.nodes)
-        if (n.kind == 'seat' &&
-            n.parentId == tableId &&
-            !n.locked &&
-            n.properties['manual'] == true)
-          n.id,
-    };
-    if (!baseline.nodes.any(
-          (n) => seats.contains(n.id) && n.properties['manual'] == true,
-        ) &&
-        !baseline.attachments.any(
-          (a) => seats.contains(a['seatId']) && a['manual'] == true,
-        )) {
-      return baseline;
-    }
-    return baseline.copyWith(
-      nodes: [
-        for (final n in baseline.nodes)
-          if (seats.contains(n.id) && n.properties['manual'] == true)
-            n.copyWith(properties: {...n.properties, 'manual': false})
-          else
-            n,
-      ],
-      attachments: [
-        for (final a in baseline.attachments)
-          if (seats.contains(a['seatId']) && a['manual'] == true)
-            {...a, 'manual': false}
-          else
-            a,
-      ],
-    );
-  }
-
   void _dragUpdateUnsafe(Offset point) {
     if (_marquee != null) {
       setState(() => _marqueeEnd = point);
@@ -998,7 +1102,18 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       final shape = gesture.substring(5).toLowerCase();
       final end = _drawingPoint(point, anchor: pointer);
       final node = shape == 'polyline'
-          ? zigzagLine(pointer.dx, pointer.dy, end.dx, end.dy, id: _drawId)
+          ? zigzagLine(
+              pointer.dx,
+              pointer.dy,
+              end.dx,
+              end.dy,
+              id: _drawId,
+              style: const {
+                'fill': '#00000000',
+                'stroke': '#334155FF',
+                'strokeWidth': 2,
+              },
+            )
           : shapeFromPoints(
               shape,
               [
@@ -1006,13 +1121,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 [end.dx, end.dy],
               ],
               id: _drawId,
-              properties: {
+              style: {
                 'fill': ['line', 'arrow', 'polyline'].contains(shape)
                     ? '#00000000'
                     : '#CBD5E1FF',
                 'stroke': '#334155FF',
                 'strokeWidth': 2,
               },
+              properties: const {},
             );
       c.preview(start.copyWith(nodes: [...start.nodes, node]));
     } else if (gesture.startsWith('Zigzag ') && c.selection.length == 1) {
@@ -1092,7 +1208,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     } else if (gesture.startsWith('Resize') && c.selection.length == 1) {
       var n = start.nodes.firstWhere((n) => c.selection.contains(n.id));
-      if (n.kind == 'group' && n.properties['assembly'] == null) {
+      if (n.kind == 'group' && n.assembly?['kind'] == null) {
         final children = start.nodes
             .where((child) => child.parentId == n.id)
             .toList();
@@ -1102,7 +1218,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           n = children.single;
         }
       }
-      if (n.kind == 'group' && n.properties['assembly'] == null) {
+      if (n.kind == 'group' && n.assembly?['kind'] == null) {
         final bounds = selectionBounds(start, {n.id});
         final direction = gesture == 'Resize' ? 'se' : gesture.substring(7);
         final west = direction.contains('w'), north = direction.contains('n');
@@ -1186,7 +1302,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           : direction.contains('s')
           ? 1.0
           : 0.0;
-      final isRows = n.properties['assembly'] == 'rows';
+      final isRows = isRowAssemblyNode(n);
       final oldBounds = isRows
           ? (_rowResizeBounds ??= rowAssemblyBounds(start, n.id))
           : null;
@@ -1194,16 +1310,10 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       final oldHeight = oldBounds?['height'] ?? n.height;
       var width = math.max(1.0, oldWidth + (current[0] - initial[0]) * sx);
       var height = math.max(1.0, oldHeight + (current[1] - initial[1]) * sy);
-      final roundTable =
-          n.kind == 'table' &&
-          const [
-            'round',
-            'circle',
-            'ellipse',
-            'oval',
-          ].contains(n.properties['shape']);
+      final roundTable = n.kind == 'table' && n.surface?['type'] == 'circle';
       final shift = HardwareKeyboard.instance.isShiftPressed;
-      if (roundTable ? !shift : shift) {
+      final graphic = n.kind == 'image' || n.kind == 'vector';
+      if (roundTable || (graphic ? !shift : shift)) {
         if (sx != 0 &&
             (sy == 0 ||
                 ((width - oldWidth) / oldWidth).abs() >=
@@ -1216,14 +1326,12 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       final dimensions = c.constrainTableDimensions(n, width, height);
       width = dimensions.width;
       height = dimensions.height;
-      final resizeBase = n.kind == 'table'
-          ? (_tableResizeBaseline ??= _automaticTableResize(start, n.id))
-          : start;
+      final resizeBase = start;
       final resized = isRows
           ? resizeRowAssembly(start, n.id, width, height)
-          : n.kind == 'furniture' && n.properties['furniture'] == 'couch'
+          : n.kind == 'furniture' && n.assembly?['kind'] == 'couch'
           ? resizeCouchBody(start, n.id, width, height)
-          : n.kind == 'table' && n.properties['shape'] == 'polygon'
+          : n.kind == 'table' && n.surface?['type'] == 'grid'
           ? resizeGridTableSurface(
               resizeBase,
               n.id,
@@ -1298,10 +1406,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         LayoutNode? reference = nodes.first;
         var initialAngle = 0.0;
         while (reference != null) {
-          initialAngle += tableSeatFacingRotation(
-            reference,
-            byId[reference.parentId],
-          );
+          initialAngle += reference.rotation;
           reference = byId[reference.parentId];
         }
         degrees = ((initialAngle + degrees) / 15).round() * 15 - initialAngle;
@@ -1328,9 +1433,25 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         disabled: !_snap || HardwareKeyboard.instance.isAltPressed,
       );
       if (!c.previewMove(start, c.selection, dx: snapped.dx, dy: snapped.dy)) {
-        _snapGuides = [];
+        final attempted = transformNodes(
+          start,
+          c.selection,
+          dx: snapped.dx,
+          dy: snapped.dy,
+        );
+        final ids = layoutSubtree(attempted, c.selection);
+        final matrices = worldMatrices(attempted);
+        setState(() {
+          _blockedPlacementHulls = [
+            for (final node in attempted.nodes)
+              if (ids.contains(node.id) && node.kind != 'group')
+                worldHull(node, matrices[node.id]!),
+          ];
+          _snapGuides = [];
+        });
         return;
       }
+      _blockedPlacementHulls = const [];
       final next = c.document;
       _snapGuides = snapped.guides;
       final expected = selectionBounds(start, c.selection);
@@ -1358,6 +1479,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     final named = c
         .nameInsertedTables(
           VenueLayoutDocument(
+            schemaVersion: c.document.schemaVersion,
             nodes: [node.copyWith(label: isBarNode(node) ? 'Bar' : '')],
           ),
         )
@@ -1372,7 +1494,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _endGesture() {
     _flushDragPreview();
-    _tableResizeBaseline = null;
+    _blockedPlacementHulls = const [];
     _rowResizeBounds = null;
     _resizeRemovedSeats = 0;
     _selectionBeforeDown = null;
@@ -1462,7 +1584,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   void _cancelGesture() {
     _discardDragPreview();
-    _tableResizeBaseline = null;
+    _blockedPlacementHulls = const [];
     _rowResizeBounds = null;
     _surfaceBrush = null;
     _resizeRemovedSeats = 0;
@@ -1602,7 +1724,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   }
 
   Future<void> _gallery() async {
-    final picked = await showDialog<LayoutTemplate>(
+    final picked = await showEditorDialog<LayoutTemplate>(
       context: context,
       builder: (context) => Dialog(
         child: ConstrainedBox(
@@ -1658,7 +1780,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     );
     if (picked != null && mounted) {
       if (c.document.nodes.isNotEmpty) {
-        final replace = await showDialog<bool>(
+        final replace = await showEditorDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: const LayoutText('Replace the current plan?'),
@@ -1695,9 +1817,15 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   VenueLayoutDocument _previewDocument(String kind) {
     final cached = _themedPreviews[kind];
     if (cached != null &&
-        sameLayoutValue(cached.appearance, c.document.appearance)) {
+        sameLayoutValue(cached.styles, c.document.styles) &&
+        sameLayoutValue(cached.seatingDefaults, c.document.seatingDefaults) &&
+        sameLayoutValue(cached.textPolicy, c.document.textPolicy)) {
       return cached;
     }
+    final previous = _previews[kind];
+    if (previous != null &&
+        !sameLayoutValue(previous.seatingDefaults, c.document.seatingDefaults))
+      _previews.remove(kind);
     final base = _previews.putIfAbsent(kind, () {
       final fragment = _fragment(kind, Offset.zero);
       return fragment.copyWith(
@@ -1714,14 +1842,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       );
     });
     return _themedPreviews[kind] = base.copyWith(
-      appearance: c.document.appearance,
+      styles: c.document.styles,
+      seatingDefaults: c.document.seatingDefaults,
+      textPolicy: c.document.textPolicy,
     );
   }
 
   Widget _palette() => _gesturePanel('palette', _buildPalette);
 
   Widget _buildPalette() {
-    final seating = documentSeating(c.document).properties;
+    final seating = documentSeating(c.document).record;
     if (!sameLayoutValue(_previewSeating, seating)) {
       _previewSeating = seating;
       _previews.clear();
@@ -1842,6 +1972,63 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.showGallery) ...[
+            InkWell(
+              key: const ValueKey('palette-templates'),
+              onTap: _canEdit ? _gallery : null,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.dashboard_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(child: LayoutText('Choose template')),
+                        Icon(Icons.chevron_right, size: 18),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ExcludeSemantics(
+                      child: SizedBox(
+                        height: 42,
+                        child: Row(
+                          children: [
+                            for (final document in _templatePeeks)
+                              Expanded(
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: LayoutPaletteThumbnail(
+                                    document: document,
+                                    resources: c.resources,
+                                    kind: 'Template',
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+          ],
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
             child: LayoutText(
@@ -1875,6 +2062,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
               children: [
+                const SizedBox(height: 8),
+                if (widget.libraryActions != null) widget.libraryActions!,
+                const Divider(),
                 ...sections,
                 if (matches == 0)
                   const Padding(
@@ -1921,7 +2111,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             (states) => BorderSide(
               color: selected || states.contains(WidgetState.focused)
                   ? colors.primary
-                  : colors.outlineVariant.withValues(alpha: .65),
+                  : colors.outline.withValues(alpha: .8),
               width: selected || states.contains(WidgetState.focused) ? 1.5 : 1,
             ),
           ),
@@ -1954,7 +2144,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontSize: 12,
                     height: 1.35,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                     color: selected ? colors.primary : colors.onSurface,
                   ),
                 ),
@@ -2098,12 +2288,12 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     } else {
       _endGesture();
       setState(() => _tool = 'Select');
+      _focus.requestFocus();
     }
   }
 
   void _handleStart(String mode, Offset point) {
     _discardDragPreview();
-    _tableResizeBaseline = null;
     _rowResizeBounds = null;
     _resizeRemovedSeats = 0;
     _focus.requestFocus();
@@ -2240,16 +2430,22 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             points.last[0],
             points.last[1],
             id: _pathId,
+            style: const {
+              'fill': '#00000000',
+              'stroke': '#334155FF',
+              'strokeWidth': 2,
+            },
           )
         : shapeFromPoints(
             shape,
             points,
             id: _pathId,
-            properties: {
+            style: {
               'fill': shape == 'polygon' ? '#CBD5E1FF' : '#00000000',
               'stroke': '#334155FF',
               'strokeWidth': 2,
             },
+            properties: const {},
           );
     c.preview(
       moveLayoutLayers(
@@ -2400,6 +2596,28 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 ),
             ]
           : [
+              if (c.document.nodes.any(
+                    (n) =>
+                        n.id == hit &&
+                        n.kind == 'seat' &&
+                        c.document.nodes.any(
+                          (parent) =>
+                              parent.id == n.parentId && parent.kind == 'table',
+                        ),
+                  ) &&
+                  seatAttachment(c.document, hit)?['placement']?['mode'] !=
+                      'automatic')
+                item(
+                  'automaticChair',
+                  'Restore automatic position',
+                  Icons.restart_alt,
+                ),
+              if (c.document.nodes.any((n) => n.id == hit && n.kind == 'seat'))
+                item(
+                  'selectSeat',
+                  'Select this seat',
+                  Icons.event_seat_outlined,
+                ),
               item('style', 'Style', Icons.palette_outlined),
               item('copyStyle', 'Copy style', Icons.format_paint_outlined),
               item(
@@ -2418,6 +2636,11 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     );
     if (!mounted || !_canEdit) return;
     switch (action) {
+      case 'selectSeat':
+        if (hit != null) c.select({hit});
+        _focus.requestFocus();
+      case 'automaticChair':
+        if (hit != null) c.restoreAutomaticChairPosition(hit);
       case 'style':
         await showLayoutStyleDialog(context, c);
       case 'copyStyle':
@@ -2446,6 +2669,14 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
   Widget _inspector() => _gesturePanel('inspector', _buildInspector);
 
   Widget _buildInspector() {
+    if (_globalStyleOpen.value && widget.interactionEnabled) {
+      return LayoutGlobalStylePanel(
+        key: _globalStyleKey,
+        controller: c,
+        onClose: _closeGlobalStyle,
+        globalFontPickerBuilder: widget.globalFontPickerBuilder,
+      );
+    }
     if (!widget.interactionEnabled) {
       if (widget.inspectorOverride != null) return widget.inspectorOverride!;
       final selected = c.document.nodes.where(
@@ -2465,20 +2696,37 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         ),
       );
     }
-    return LayoutInspector(
-      controller: c,
-      onClearSelection: _clearSelection,
-      canvasSelected: _editingCanvas,
-      cornerPivot: _cornerPivot,
-      onPivotChanged: (v) => setState(() => _cornerPivot = v),
-      hostBuilder: widget.inspectorBuilder,
-      readOnlyLabelNodeIds: widget.readOnlyLabelNodeIds,
-      onRenameNode: widget.onRenameNode,
-      fontPickerBuilder: widget.fontPickerBuilder,
-      globalFontPickerBuilder: widget.globalFontPickerBuilder,
-      onImportBackground: widget.onImportBackground,
-      onCopyStyle: c.selection.isEmpty ? null : _copyStyle,
-      onPasteStyle: _copiedAppearance == null || !_canEdit ? null : _pasteStyle,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          key: const ValueKey('inspector-plan-style'),
+          leading: const Icon(Icons.palette_outlined),
+          title: const LayoutText('Plan style'),
+          onTap: !_canEdit ? null : () => (_globalStyleOpen.value = true),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: LayoutInspector(
+            controller: c,
+            onClearSelection: _clearSelection,
+            canvasSelected: _editingCanvas,
+            cornerPivot: _cornerPivot,
+            onPivotChanged: (v) => setState(() => _cornerPivot = v),
+            hostBuilder: widget.inspectorBuilder,
+            readOnlyLabelNodeIds: widget.readOnlyLabelNodeIds,
+            onRenameNode: widget.onRenameNode,
+            fontPickerBuilder: widget.fontPickerBuilder,
+            globalFontPickerBuilder: widget.globalFontPickerBuilder,
+            onOpenGlobalStyle: () => _globalStyleOpen.value = true,
+            onImportBackground: widget.onImportBackground,
+            onCopyStyle: c.selection.isEmpty ? null : _copyStyle,
+            onPasteStyle: _copiedAppearance == null || !_canEdit
+                ? null
+                : _pasteStyle,
+          ),
+        ),
+      ],
     );
   }
 
@@ -2486,10 +2734,6 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     for (final entry in <String, IconData>{
       'Select': Icons.near_me_outlined,
       'Pan': Icons.pan_tool_outlined,
-      if (widget.interactionEnabled) ...{
-        'Resize': Icons.open_in_full,
-        'Rotate': Icons.rotate_right,
-      },
     }.entries)
       IconButton(
         key: ValueKey('layout-tool-${entry.key}'),
@@ -2517,7 +2761,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: c,
+    animation: Listenable.merge([c, _globalStyleOpen]),
     builder: (context, _) => LayoutBuilder(
       builder: (context, size) {
         final wide = size.maxWidth >= 900;
@@ -2531,7 +2775,11 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 event.logicalKey == LogicalKeyboardKey.escape &&
                 !_editingText) {
               if (!widget.interactionEnabled) return KeyEventResult.ignored;
-              _clearSelection();
+              if (_globalStyleOpen.value) {
+                _closeGlobalStyle();
+              } else {
+                _clearSelection();
+              }
               return KeyEventResult.handled;
             }
             return KeyEventResult.ignored;
@@ -2549,167 +2797,122 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                       vertical: 4,
                     ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                if (widget.toolbarPrefix != null)
-                                  widget.toolbarPrefix!,
-                                if (widget.toolbarLeading != null)
-                                  widget.toolbarLeading!,
-                                if (widget.interactionEnabled)
-                                  IconButton(
-                                    tooltip: VenueLayoutStrings.text(
-                                      context,
-                                      'Undo',
-                                    ),
-                                    onPressed: c.canUndo && _canEdit
-                                        ? c.undo
-                                        : null,
-                                    icon: const Icon(Icons.undo),
+                          child: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              if (widget.toolbarPrefix != null)
+                                widget.toolbarPrefix!,
+                              const SizedBox(width: 8),
+                              if (widget.interactionEnabled) ..._pointerTools(),
+                              const SizedBox(width: 8),
+                              if (widget.toolbarLeading != null)
+                                widget.toolbarLeading!,
+                              if (widget.interactionEnabled)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Undo',
                                   ),
-                                if (widget.interactionEnabled)
-                                  IconButton(
-                                    tooltip: VenueLayoutStrings.text(
-                                      context,
-                                      'Redo',
-                                    ),
-                                    onPressed: c.canRedo && _canEdit
-                                        ? c.redo
-                                        : null,
-                                    icon: const Icon(Icons.redo),
+                                  onPressed: c.canUndo && _canEdit
+                                      ? c.undo
+                                      : null,
+                                  icon: const Icon(Icons.undo),
+                                ),
+                              if (widget.interactionEnabled)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Redo',
                                   ),
-                                if (!wide && _canEdit)
-                                  FilledButton.tonalIcon(
-                                    onPressed: _library,
-                                    icon: const Icon(Icons.add),
-                                    label: const LayoutText('Insert'),
+                                  onPressed: c.canRedo && _canEdit
+                                      ? c.redo
+                                      : null,
+                                  icon: const Icon(Icons.redo),
+                                ),
+                              if (!wide &&
+                                  (_canEdit || widget.libraryOverride != null))
+                                FilledButton.tonalIcon(
+                                  onPressed: _library,
+                                  icon: const Icon(Icons.add),
+                                  label: LayoutText(
+                                    widget.libraryOverride != null
+                                        ? 'Tables'
+                                        : 'Insert',
                                   ),
-                                const SizedBox(width: 12),
-                                const SizedBox(width: 16),
-                                if (_canEdit)
-                                  Tooltip(
-                                    message: VenueLayoutStrings.text(
-                                      context,
-                                      'Snap to objects, 8-unit grid and 15° angles. Hold Alt to bypass.',
-                                    ),
-                                    child: FilterChip(
-                                      label: const LayoutText('Snap'),
-                                      selected: _snap,
-                                      onSelected: (v) =>
-                                          setState(() => _snap = v),
-                                    ),
+                                ),
+                              const SizedBox(width: 12),
+                              const SizedBox(width: 16),
+                              if (_canEdit)
+                                Tooltip(
+                                  message: VenueLayoutStrings.text(
+                                    context,
+                                    'Snap to objects, 8-unit grid and 15° angles. Hold Alt to bypass.',
                                   ),
-                                if (widget.interactionEnabled)
-                                  TextButton.icon(
-                                    key: const ValueKey('edit-canvas'),
-                                    label: const LayoutText('Canvas size'),
-                                    icon: const Icon(
-                                      Icons.aspect_ratio,
-                                      size: 20,
-                                    ),
-                                    onPressed: !_canEdit
-                                        ? null
-                                        : () {
-                                            _cancelGesture();
-                                            c.select({});
-                                            setState(() {
-                                              _tool = 'Select';
-                                              _canvasSelected = true;
-                                            });
-                                            _focus.requestFocus();
-                                            if (!wide) {
-                                              showModalBottomSheet<void>(
-                                                context: context,
-                                                isScrollControlled: true,
-                                                builder: (context) => SizedBox(
-                                                  height:
-                                                      MediaQuery.sizeOf(
-                                                        context,
-                                                      ).height *
-                                                      .8,
-                                                  child: AnimatedBuilder(
-                                                    animation: c,
-                                                    builder: (context, _) =>
-                                                        _inspector(),
-                                                  ),
-                                                ),
-                                              );
-                                            }
-                                          },
+                                  child: FilterChip(
+                                    label: const LayoutText('Snap'),
+                                    selected: _snap,
+                                    onSelected: (v) =>
+                                        setState(() => _snap = v),
                                   ),
-                                if (widget.interactionEnabled)
-                                  TextButton.icon(
-                                    onPressed: !_canEdit
-                                        ? null
-                                        : () => showLayoutGlobalStyleDialog(
-                                            context,
-                                            c,
-                                            globalFontPickerBuilder:
-                                                widget.globalFontPickerBuilder,
-                                          ),
-                                    icon: const Icon(
-                                      Icons.palette_outlined,
+                                ),
+                              const SizedBox(width: 8),
+                              if (widget.interactionEnabled)
+                                Tooltip(
+                                  message: VenueLayoutStrings.text(
+                                    context,
+                                    'Show the grid (G). Grid visibility does not change snapping.',
+                                  ),
+                                  child: FilterChip(
+                                    avatar: const Icon(
+                                      Icons.grid_4x4,
                                       size: 18,
                                     ),
-                                    label: const LayoutText('Plan style'),
+                                    label: const LayoutText('Grid'),
+                                    selected: _showGrid,
+                                    onSelected: (v) =>
+                                        setState(() => _showGrid = v),
                                   ),
-                                const SizedBox(width: 8),
-                                if (widget.interactionEnabled)
-                                  Tooltip(
-                                    message: VenueLayoutStrings.text(
-                                      context,
-                                      'Show the grid (G). Grid visibility does not change snapping.',
-                                    ),
-                                    child: FilterChip(
-                                      avatar: const Icon(
-                                        Icons.grid_4x4,
-                                        size: 18,
-                                      ),
-                                      label: const LayoutText('Grid'),
-                                      selected: _showGrid,
-                                      onSelected: (v) =>
-                                          setState(() => _showGrid = v),
-                                    ),
+                                ),
+                              if (!wide)
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    widget.interactionEnabled
+                                        ? 'Properties and layers'
+                                        : 'Seat details',
                                   ),
-                                if (widget.showGallery && _canEdit)
-                                  TextButton.icon(
-                                    onPressed: _gallery,
-                                    icon: const Icon(
-                                      Icons.dashboard_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const LayoutText('Choose template'),
-                                  ),
-                                if (!wide)
-                                  IconButton(
-                                    tooltip: VenueLayoutStrings.text(
-                                      context,
-                                      widget.interactionEnabled
-                                          ? 'Properties and layers'
-                                          : 'Seat details',
-                                    ),
-                                    onPressed: () => showModalBottomSheet<void>(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      builder: (context) => SizedBox(
-                                        height:
-                                            MediaQuery.sizeOf(context).height *
-                                            .8,
-                                        child: AnimatedBuilder(
-                                          animation: c,
-                                          builder: (context, _) => _inspector(),
-                                        ),
+                                  onPressed: () => showModalBottomSheet<void>(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    builder: (context) => SizedBox(
+                                      height:
+                                          MediaQuery.sizeOf(context).height *
+                                          .8,
+                                      child: AnimatedBuilder(
+                                        animation: Listenable.merge([
+                                          c,
+                                          _globalStyleOpen,
+                                        ]),
+                                        builder: (context, _) => _inspector(),
                                       ),
                                     ),
-                                    icon: const Icon(Icons.tune),
                                   ),
-                                if (widget.interactionEnabled ||
-                                    c.readOnly ||
-                                    c.dirty)
-                                  LayoutText(
+                                  icon: const Icon(Icons.tune),
+                                ),
+                              if (widget.toolbarTrailing == null &&
+                                  (widget.interactionEnabled ||
+                                      c.readOnly ||
+                                      c.dirty))
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: LayoutText(
                                     c.dirty
                                         ? 'Unsaved changes'
                                         : !_canEdit
@@ -2719,10 +2922,48 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                       context,
                                     ).textTheme.labelMedium,
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
                         ),
+                        if (widget.interactionEnabled)
+                          TextButton.icon(
+                            key: const ValueKey('edit-canvas'),
+                            label: const LayoutText('Canvas size'),
+                            icon: const Icon(Icons.aspect_ratio, size: 20),
+                            onPressed: !_canEdit
+                                ? null
+                                : () {
+                                    _cancelGesture();
+                                    c.select({});
+                                    setState(() {
+                                      _tool = 'Select';
+                                      _canvasSelected = true;
+                                    });
+                                    _focus.requestFocus();
+                                    if (!wide) {
+                                      showModalBottomSheet<void>(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        builder: (context) => SizedBox(
+                                          height:
+                                              MediaQuery.sizeOf(
+                                                context,
+                                              ).height *
+                                              .8,
+                                          child: AnimatedBuilder(
+                                            animation: Listenable.merge([
+                                              c,
+                                              _globalStyleOpen,
+                                            ]),
+                                            builder: (context, _) =>
+                                                _inspector(),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                          ),
                         if (widget.toolbarTrailing != null)
                           widget.toolbarTrailing!,
                       ],
@@ -2731,49 +2972,41 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                 ),
               ),
               const Divider(height: 1),
-              Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: SizedBox(
-                  width: double.infinity,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: Row(children: _pointerTools()),
-                  ),
+              if (!wide &&
+                  _libraryOpen &&
+                  (_canEdit || widget.libraryOverride != null))
+                SizedBox(
+                  height: 240,
+                  child: widget.libraryOverride ?? _palette(),
                 ),
-              ),
-              const Divider(height: 1),
-              if (!wide && _libraryOpen && _canEdit)
-                SizedBox(height: 240, child: _palette()),
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (wide && _canEdit) ...[
+                    if (wide &&
+                        (_canEdit || widget.libraryOverride != null)) ...[
                       Material(
                         key: const ValueKey('layout-editor-tool-sidebar'),
                         color: layoutPanelColor(context),
-                        child: SizedBox(width: 232, child: _palette()),
+                        child: SizedBox(
+                          width: 232,
+                          child: widget.libraryOverride ?? _palette(),
+                        ),
                       ),
                       const VerticalDivider(width: 1),
                     ],
                     Expanded(
                       child: ColoredBox(
-                        color: const Color(0xfff3f5f8),
+                        color: layoutWorkspaceColor(context),
                         child: Stack(
                           children: [
                             Positioned.fill(
                               child: Focus(
                                 focusNode: _focus,
                                 onKeyEvent: _key,
-                                onFocusChange: (focused) {
-                                  if (!focused && _startDocument != null) {
-                                    _cancelGesture();
-                                  }
-                                },
+                                // Keyboard focus can move when inspector controls
+                                // rebuild. Pointer cancellation and Escape own
+                                // gesture rollback, not incidental focus changes.
                                 child: Semantics(
                                   container: true,
                                   explicitChildNodes: true,
@@ -2784,6 +3017,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         : _viewHint,
                                   ),
                                   child: LayoutSceneSurface(
+                                    retainPendingTextPreview: _canEdit,
                                     key: ValueKey(_templateViewport),
                                     document: c.document,
                                     canvasSelected:
@@ -2796,12 +3030,18 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                         : c.document.nodes
                                               .where((n) => n.id == _inlineId)
                                               .firstOrNull,
+                                    inlineTextStyleBuilder:
+                                        widget.inlineTextStyleBuilder,
                                     onInlineSubmit: _finishInline,
                                     onInlineCancel: () => _finishInline(null),
+                                    onInlineUndo: () => _inlineHistory(false),
+                                    onInlineRedo: () => _inlineHistory(true),
                                     onDoubleTapAt: _canEdit && _tool == 'Select'
                                         ? _doubleTap
                                         : null,
-                                    animate: !c.gestureActive,
+                                    animate:
+                                        !c.gestureActive &&
+                                        widget.inlineTextStyleBuilder == null,
                                     marquee:
                                         _marquee != null && _marqueeEnd != null
                                         ? Rect.fromPoints(
@@ -2814,18 +3054,20 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                       ...widget.seatPresentation,
                                       ...widget.capacityPresentation,
                                     },
-                                    showSeatSelectionChecks:
-                                        !widget.interactionEnabled,
+                                    showSeatSelectionChecks: false,
                                     selected: widget.interactionEnabled
                                         ? c.selection
                                         : _viewSelection,
                                     selectableIds: widget.interactionEnabled
                                         ? null
                                         : widget.viewSelectableIds,
-                                    highlightedIds: _seatTargetId == null
-                                        ? const {}
-                                        : {_seatTargetId!},
+                                    highlightedIds: {
+                                      ...c.hoveredIds,
+                                      if (_seatTargetId != null) _seatTargetId!,
+                                    },
                                     warningIds: c.placementWarningIds,
+                                    blockedPlacementHulls:
+                                        _blockedPlacementHulls,
                                     snapGuides: _snapGuides,
                                     showGrid:
                                         _canEdit &&
@@ -2970,6 +3212,16 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                   ),
                                 ),
                               ),
+                            if (widget.canvasBottomOverlay != null)
+                              Positioned(
+                                left: 12,
+                                right: 12,
+                                bottom: 20,
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: widget.canvasBottomOverlay!,
+                                ),
+                              ),
                             if (c.error != null || _resizeRemovedSeats > 0)
                               Positioned(
                                 left: 16,
@@ -3001,47 +3253,61 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
-                  vertical: 8,
+                  vertical: 2,
                 ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: LayoutText(
-                    !widget.interactionEnabled
-                        ? _viewHint
-                        : _seatTargetId != null
-                        ? 'Release to attach chair to table.'
-                        : _editingCanvas
-                        ? 'Canvas selected. Drag an edge or corner to resize. Escape exits.'
-                        : _tool == 'Select' &&
-                              c.selection.length == 1 &&
-                              c.document.nodes.any(
-                                (n) =>
-                                    c.selection.contains(n.id) &&
-                                    n.kind == 'table' &&
-                                    const [
-                                      'round',
-                                      'circle',
-                                    ].contains(n.properties['shape']),
-                              )
-                        ? 'Round table. Hold Shift to resize into an ellipse.'
-                        : _tool == 'Select'
-                        ? '${c.selection.length} selected · Shift-click adds · Alt-click selects a child'
-                        : _tool == 'Resize'
-                        ? 'Drag selected object to resize. Shift preserves proportions.'
-                        : _tool == 'Rotate'
-                        ? 'Drag to rotate. Snap: 15°. Hold Alt for free rotation.'
-                        : _tool == 'Pan'
-                        ? 'Drag to pan. Pinch or scroll to zoom.'
-                        : _surfaceTool
-                        ? (_tool == 'Draw bar'
-                              ? 'Drag to join narrow bar modules. Release finishes. Escape cancels.'
-                              : 'Drag across cells to join table modules. One cell is a table for 4. Release finishes. Escape cancels.')
-                        : ['Line', 'Arrow', 'Polyline'].contains(_tool)
-                        ? 'Click start and end, or drag to draw. Shift constrains the angle. Escape cancels.'
-                        : ['Polyline', 'Polygon'].contains(_tool)
-                        ? 'Click to add vertices. Double-click or Enter finishes. Backspace removes the last point.'
-                        : 'Tap the plan to place $_tool.',
-                    style: Theme.of(context).textTheme.labelSmall,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: widget.footerTrailing == null ? 0 : 24,
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: widget.footerTrailing == null ? 0 : 48,
+                        ),
+                        child: Align(
+                          alignment: Alignment.center,
+                          child: LayoutText(
+                            !widget.interactionEnabled
+                                ? _viewHint
+                                : _seatTargetId != null
+                                ? 'Release to attach chair to table.'
+                                : _editingCanvas
+                                ? 'Canvas selected. Drag an edge or corner to resize. Escape exits.'
+                                : _tool == 'Select' &&
+                                      c.selection.length == 1 &&
+                                      c.document.nodes.any(
+                                        (n) =>
+                                            c.selection.contains(n.id) &&
+                                            n.kind == 'table' &&
+                                            const [
+                                              'round',
+                                              'circle',
+                                            ].contains(n.properties['shape']),
+                                      )
+                                ? 'Round table. Hold Shift to resize into an ellipse.'
+                                : _tool == 'Select'
+                                ? '${c.selection.length} selected · Shift-click adds · Alt-click selects a child'
+                                : _tool == 'Pan'
+                                ? 'Drag to pan. Pinch or scroll to zoom.'
+                                : _surfaceTool
+                                ? (_tool == 'Draw bar'
+                                      ? 'Drag to join narrow bar modules. Release finishes. Escape cancels.'
+                                      : 'Drag across cells to join table modules. One cell is a table for 4. Release finishes. Escape cancels.')
+                                : ['Line', 'Arrow', 'Polyline'].contains(_tool)
+                                ? 'Click start and end, or drag to draw. Shift constrains the angle. Escape cancels.'
+                                : ['Polyline', 'Polygon'].contains(_tool)
+                                ? 'Click to add vertices. Double-click or Enter finishes. Backspace removes the last point.'
+                                : 'Tap the plan to place $_tool.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ),
+                      ),
+                      if (widget.footerTrailing != null)
+                        Positioned(right: 0, child: widget.footerTrailing!),
+                    ],
                   ),
                 ),
               ),

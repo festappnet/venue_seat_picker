@@ -19,15 +19,15 @@ VenueLayoutDocument scoutHall() {
         width: width,
         height: size * 1.2,
         label: value,
-        properties: {
-          'text': value,
-          'align': 'center',
-          'size': size,
-          'lineHeight': 1,
-          'bold': false,
-          'color': '#000000FF',
-          'role': 'decoration',
-          'appearanceOverrides': ['color'],
+        properties: {'text': value, 'role': 'decoration'},
+        style: {
+          'label': {
+            'align': 'center',
+            'size': size,
+            'lineHeight': 1,
+            'weight': 400,
+            'color': '#000000FF',
+          },
         },
       ),
     );
@@ -38,12 +38,11 @@ VenueLayoutDocument scoutHall() {
       shapeFromPoints(
         'polyline',
         points,
-        properties: {
+        properties: {'role': 'decoration'},
+        style: {
           'fill': '#00000000',
           'stroke': '#000000FF',
           'strokeWidth': stroke,
-          'role': 'decoration',
-          'appearanceOverrides': ['fill', 'stroke', 'strokeWidth'],
         },
       ).copyWith(parentId: root),
     );
@@ -68,6 +67,9 @@ VenueLayoutDocument scoutHall() {
         label: '',
         properties: {
           'shape': 'rect',
+          'role': column ? 'obstacle' : 'decoration',
+        },
+        style: {
           'fill': room
               ? '#FFFFFFFF'
               : column
@@ -76,13 +78,6 @@ VenueLayoutDocument scoutHall() {
           'stroke': '#000000FF',
           'strokeWidth': 5,
           'cornerRadius': 0,
-          'role': column ? 'obstacle' : 'decoration',
-          'appearanceOverrides': [
-            'fill',
-            'stroke',
-            'strokeWidth',
-            'cornerRadius',
-          ],
         },
       ),
     );
@@ -112,16 +107,17 @@ VenueLayoutDocument scoutHall() {
       width: r.$4 - r.$2,
       height: r.$5 - r.$3,
       label: '${r.$1}',
-      properties: {
-        'seatWidth': 77.5,
-        'seatHeight': 77.5,
-        'seatGap': 11.25,
-        'seatSpacing': 22.5,
-        'seatEdgePadding': 0,
-        'shape': 'rect',
-        'size': 70,
-        'lineHeight': 1,
-        'bold': true,
+      surface: const {'type': 'rect'},
+      seating: const {
+        'width': 77.5,
+        'height': 77.5,
+        'gap': 11.25,
+        'spacing': 22.5,
+        'edgePadding': 0,
+      },
+      properties: const {},
+      style: {
+        'label': {'size': 70, 'lineHeight': 1, 'weight': 700},
       },
     );
     nodes.add(table);
@@ -134,6 +130,14 @@ VenueLayoutDocument scoutHall() {
     seats: scoutSeats,
   );
   final document = VenueLayoutDocument(
+    schemaVersion: 2,
+    seatingDefaults: const {
+      'width': 77.5,
+      'height': 77.5,
+      'gap': 11.25,
+      'spacing': 22.5,
+      'edgePadding': 0,
+    },
     canvas: {
       'x': 0,
       'y': 0,
@@ -147,17 +151,21 @@ VenueLayoutDocument scoutHall() {
     sections: [
       {'id': newLayoutId(), 'title': 'Sál', 'rootId': root},
     ],
-    appearance: {
-      'table': {
-        'objectStyle': 'simple',
-        'fill': '#FFFFFFFF',
-        'stroke': '#000000FF',
-        'strokeWidth': 5,
-        'cornerRadius': 0,
-        'color': '#000000FF',
+    styles: {
+      'kinds': {
+        'table': {
+          'material': 'simple',
+          'fill': '#FFFFFFFF',
+          'stroke': '#000000FF',
+          'strokeWidth': 5,
+          'cornerRadius': 0,
+          'label': {'color': '#000000FF'},
+        },
+        'seat': referenceHallSeatStyle,
+        'text': {
+          'label': {'color': '#000000FF'},
+        },
       },
-      'seat': referenceHallSeatAppearance,
-      'text': {'color': '#000000FF'},
     },
   );
   return document;

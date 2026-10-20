@@ -135,6 +135,60 @@ void main() {
     },
   );
 
+  testWidgets('real pointer copy survives blocked-to-valid movement', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final original = tableLayout(shape: 'rect', x: 600, y: 600, count: 6);
+    final c = VenueLayoutController(original);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VenueLayoutEditor(controller: c, showGallery: false),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final finder = find.byType(LayoutSceneSurface);
+    final rect = tester.getRect(finder), canvas = original.canvas;
+    final w = (canvas['width'] as num).toDouble(),
+        h = (canvas['height'] as num).toDouble();
+    final sx = (rect.width - 32) / w, sy = (rect.height - 32) / h;
+    final scale = sx < sy ? sx : sy;
+    Offset at(double x, double y) =>
+        rect.topLeft +
+        Offset(
+          (rect.width - w * scale) / 2 + x * scale,
+          (rect.height - h * scale) / 2 + y * scale,
+        );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final drag = await tester.startGesture(at(600, 600));
+    await drag.moveTo(at(680, 600));
+    await tester.pump();
+    expect(c.document.nodes, hasLength(14));
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(
+      c.document.nodes,
+      hasLength(14),
+      reason: 'Keyboard focus changes must not cancel a live pointer copy',
+    );
+    await drag.moveTo(at(1100, 900));
+    await tester.pump();
+    expect(c.document.nodes, hasLength(14));
+    expect(
+      tester.widget<LayoutSceneSurface>(finder).blockedPlacementHulls,
+      isEmpty,
+    );
+    await drag.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(c.document.nodes, hasLength(14));
+    await tester.pump(const Duration(milliseconds: 350));
+  });
+
   for (final modifier in [
     LogicalKeyboardKey.controlLeft,
     LogicalKeyboardKey.metaLeft,
@@ -161,7 +215,18 @@ void main() {
       final table = original.nodes.firstWhere((n) => n.kind == 'table');
       await tester.sendKeyDownEvent(modifier);
       surface().onDragStart!(Offset(table.x, table.y));
-      surface().onDragUpdate!(Offset(table.x + 100, table.y + 100));
+      final copyId = c.selection.single;
+      // The copied origin overlaps its source: preview the blocked location,
+      // then move clear without releasing the modifier or pointer.
+      surface().onDragUpdate!(Offset(table.x + 40, table.y));
+      await tester.pump();
+      expect(surface().blockedPlacementHulls, isNotEmpty);
+      surface().onDragUpdate!(Offset(table.x + 500, table.y + 300));
+      await tester.pump();
+      expect(surface().blockedPlacementHulls, isEmpty);
+      expect(c.document.nodes.any((node) => node.id == copyId), isTrue);
+      expect(c.selection, {copyId});
+      surface().onDragUpdate!(Offset(table.x + 500, table.y + 300));
       surface().onDragEnd!();
       await tester.sendKeyUpEvent(modifier);
       expect(c.document.nodes, hasLength(14));

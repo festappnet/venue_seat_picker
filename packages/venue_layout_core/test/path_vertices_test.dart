@@ -23,20 +23,16 @@ void main() {
           height: 1,
           z: 4,
           label: 'Link',
-          properties: {
-            'shape': 'line',
-            'stroke': '#123456FF',
-            'strokeWidth': 2,
-            'opacity': .7,
-          },
+          properties: {'shape': 'line'},
+          style: {'stroke': '#123456FF', 'strokeWidth': 2, 'opacity': .7},
         ),
         d = VenueLayoutDocument(nodes: [line]),
         result = insertPathVertex(d, line.id, 0, 0, 40),
         edited = result.nodes.single;
     expect(edited.id, line.id);
     expect(edited.properties['shape'], 'polyline');
-    expect(edited.properties['stroke'], line.properties['stroke']);
-    expect(edited.properties['opacity'], .7);
+    expect(edited.style['stroke'], line.style['stroke']);
+    expect(edited.style['opacity'], .7);
     expect(edited.z, 4);
     expect(edited.label, 'Link');
     expect(vertex(result, edited, 0), [150, 200]);

@@ -11,9 +11,10 @@ void main() {
         width: 77.5,
         height: 77.5,
         rotation: 180,
-        properties: {'cornerRadius': 20},
+        properties: {},
         x: 100,
         y: 100,
+        style: {'cornerRadius': 20},
       );
       final doc = VenueLayoutDocument(nodes: [seat]);
       final plain = (compileScene(doc)['items'] as List).singleWhere(
@@ -45,8 +46,8 @@ void main() {
     'minimal defaults and material family are explicit and preserve authored geometry',
     () {
       final empty = withLayoutMinimalStyle(VenueLayoutDocument.empty());
-      expect(empty.appearance['seat']['fill'], '#267329FF');
-      expect(empty.appearance['table']['objectStyle'], 'minimal');
+      expect(empty.styles['kinds']['seat']['fill'], '#267329FF');
+      expect(empty.styles['kinds']['table']['material'], 'minimal');
       expect(empty.canvas['floorStyle'], 'plain');
       final source = tableLayout(shape: 'rect');
       final family = withLayoutMinimalStyle(source);

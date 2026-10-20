@@ -17,6 +17,7 @@ void main() {
       y: 300,
       width: 200,
       height: 100,
+      surface: const {'type': 'rect'},
     );
     final c = VenueLayoutController(
       VenueLayoutDocument(
@@ -71,7 +72,7 @@ void main() {
       surface.onSelectDown!(Offset(table.x, table.y));
       await tester.pump();
       expect(c.selection, {table.id});
-      expect(find.text('Table and seats'), findsOneWidget);
+      expect(find.text('Table'), findsWidgets);
       final second = doc.nodes.firstWhere(
         (n) => n.kind == 'table' && n.label == '2',
       );

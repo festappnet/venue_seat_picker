@@ -19,6 +19,7 @@ void main() {
         label: 'Second table',
         x: 300,
         y: 200,
+        surface: const {'type': 'rect'},
       );
       final c = VenueLayoutController(
         VenueLayoutDocument.empty().copyWith(nodes: [a, b]),

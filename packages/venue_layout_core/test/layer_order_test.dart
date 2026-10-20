@@ -1,26 +1,13 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
-const resources = {
-  'fonts': {
-    'test': {
-      'unitsPerEm': 1000,
-      'ascent': 800,
-      'glyphs': {
-        'A': {
-          'advance': 600,
-          'path': [
-            ['M', 0, 0],
-            ['L', 300, 700],
-            ['L', 600, 0],
-            ['Z'],
-          ],
-        },
-      },
-    },
-  },
-};
+final resources = Map<String, dynamic>.from(
+  jsonDecode(
+    File('../../assets/layout_fonts/fixtures.json').readAsStringSync(),
+  ),
+);
 List<String> paintedNodes(VenueLayoutDocument d) => [
   for (final item in compileScene(d, resources: resources)['items'] as List)
     (item['nodeId'] ?? item['id']) as String,
@@ -37,7 +24,10 @@ void main() {
             parentId: back.id,
             x: 100,
             y: 100,
-            properties: {'text': 'A', 'fontId': 'test'},
+            properties: {'text': 'A'},
+            style: {
+              'label': {'fontFamilyId': canonicalLabelDefaults['fontFamilyId']},
+            },
           ),
           body = LayoutNode(
             id: newLayoutId(),
@@ -96,13 +86,17 @@ void main() {
   );
   test('node labels stay with their body and z overrides all kind bands', () {
     final table = LayoutNode(
+          surface: const {'type': 'rect'},
           id: newLayoutId(),
           kind: 'table',
           z: 1,
           x: 100,
           y: 100,
           label: 'A',
-          properties: {'fontId': 'test'},
+          properties: {},
+          style: {
+            'label': {'fontFamilyId': canonicalLabelDefaults['fontFamilyId']},
+          },
         ),
         shape = LayoutNode(
           id: newLayoutId(),
@@ -110,7 +104,10 @@ void main() {
           x: 100,
           y: 100,
           label: 'A',
-          properties: {'fontId': 'test'},
+          properties: {},
+          style: {
+            'label': {'fontFamilyId': canonicalLabelDefaults['fontFamilyId']},
+          },
         ),
         d = VenueLayoutDocument(nodes: [shape, table]);
     expect(paintedNodes(d), [shape.id, shape.id, table.id, table.id]);

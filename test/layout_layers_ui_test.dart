@@ -54,7 +54,8 @@ void main() {
         y: 100,
         width: 80,
         height: 80,
-        properties: {'shape': 'rectangle', 'fill': '#FF0000FF'},
+        properties: {'shape': 'rectangle'},
+        style: {'fill': '#FF0000FF'},
       );
       final b = LayoutNode(
         id: newLayoutId(),
@@ -64,7 +65,8 @@ void main() {
         width: 80,
         height: 80,
         z: 1,
-        properties: {'shape': 'rectangle', 'fill': '#0000FFFF'},
+        properties: {'shape': 'rectangle'},
+        style: {'fill': '#0000FFFF'},
       );
       final document = VenueLayoutDocument.empty().copyWith(nodes: [a, b]);
       final scene = compileScene(document);

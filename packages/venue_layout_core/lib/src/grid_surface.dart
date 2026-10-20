@@ -39,12 +39,15 @@ class GridSurfaceBrush {
     double? height,
     bool snap = false,
   }) {
-    final step = isBarNode(node)
+    final step = node.surface?['type'] == 'grid'
+        ? (node.surface!['moduleSize'] as num).toDouble()
+        : isBarNode(node)
         ? barSurfaceModuleSize
         : tableSurfaceModuleSize;
     final w = width ?? node.width, h = height ?? node.height;
     if (node.kind != 'table' ||
-        node.properties['shape'] != 'polygon' ||
+        (node.surface?['type'] != 'grid' &&
+            node.properties['shape'] != 'polygon') ||
         !w.isFinite ||
         !h.isFinite ||
         w <= 0 ||
@@ -81,7 +84,8 @@ class GridSurfaceBrush {
     }
     final outer = ring(sourceHull);
     final holes = [
-      for (final hole in node.properties['holes'] as List? ?? const [])
+      for (final hole
+          in surfaceGeometryProperties(node)['holes'] as List? ?? const [])
         ring(hole as List),
     ];
     final columns = (targetW / step).round(), rows = (targetH / step).round();
@@ -290,20 +294,34 @@ class GridSurfaceBrush {
         if (bar) ...{'furniture': 'bar', 'guestSide': 'bottom'},
       },
     );
-    return base.copyWith(
-      kind: 'table',
-      properties: {
-        ...base.properties,
-        if (rings.length > 1)
-          'holes': [
-            for (final ring in rings.skip(1))
-              [
-                for (final p in ring)
-                  [quantize(p[0] - base.x), quantize(p[1] - base.y)],
-              ],
+    {
+      final minX = rings.first.map((point) => point[0]).reduce(math.min),
+          minY = rings.first.map((point) => point[1]).reduce(math.min);
+      List<List<int>> gridRing(List<List<double>> ring) => [
+        for (final point in ring)
+          [
+            ((point[0] - minX) / step).round(),
+            ((point[1] - minY) / step).round(),
           ],
-      },
-    );
+      ];
+      final outer = gridRing(rings.first);
+      final columns = outer.map((point) => point[0]).reduce(math.max),
+          rows = outer.map((point) => point[1]).reduce(math.max);
+      if (columns * rows > 16384)
+        throw StateError('Surface brush limit reached.');
+      return base.copyWith(
+        kind: 'table',
+        surface: {
+          'type': 'grid',
+          'moduleSize': step,
+          'outer': outer,
+          'holes': [for (final ring in rings.skip(1)) gridRing(ring)],
+        },
+        properties: {
+          if (bar) ...{'furniture': 'bar', 'guestSide': 'bottom'},
+        },
+      );
+    }
   }
 }
 
@@ -315,7 +333,8 @@ LayoutNode snapTableSurfaceToGrid(
   String? preset,
 }) {
   if (preset != null) {
-    if (preset != 'L') throw ArgumentError('Unknown grid surface preset');
+    if (!const {'L', 'rectangle'}.contains(preset))
+      throw ArgumentError('Unknown grid surface preset');
     final step = isBarNode(node)
         ? barSurfaceModuleSize
         : tableSurfaceModuleSize;
@@ -328,7 +347,8 @@ LayoutNode snapTableSurfaceToGrid(
     );
     for (var y = 0; y < rows; y++) {
       for (var x = 0; x < columns; x++) {
-        if (x == 0 || y == rows - 1) brush.stampCell(x, y);
+        if (preset == 'rectangle' || x == 0 || y == rows - 1)
+          brush.stampCell(x, y);
       }
     }
     return gridSurfaceReplacement(node, brush);
@@ -351,13 +371,8 @@ LayoutNode gridSurfaceReplacement(LayoutNode original, GridSurfaceBrush brush) {
     y: original.y + shape.x * math.sin(angle) + shape.y * math.cos(angle),
     width: shape.width,
     height: shape.height,
-    properties: {
-      ...({...original.properties}..remove('holes')),
-      'shape': 'polygon',
-      'points': shape.properties['points'],
-      if (shape.properties.containsKey('holes'))
-        'holes': shape.properties['holes'],
-    },
+    surface: shape.surface,
+    properties: original.properties,
   );
 }
 

@@ -3,6 +3,7 @@ import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
 LayoutNode table(double x, double y, {double width = 100}) => LayoutNode(
+  surface: const {'type': 'rect'},
   id: newLayoutId(),
   kind: 'table',
   x: x,

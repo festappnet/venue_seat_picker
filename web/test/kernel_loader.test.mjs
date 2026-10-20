@@ -9,7 +9,7 @@ let browser,server,base,loads=0;
 const raster=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC','base64');
 const rasterHash=createHash('sha256').update(raster).digest('hex');
 const root=resolve(new URL('..',import.meta.url).pathname);
-const geometry=JSON.parse(await readFile(new URL('../../packages/venue_layout_core/test/fixtures/public_layout_wire.json',import.meta.url),'utf8'));
+const geometry=JSON.parse(await readFile(new URL('./fixtures/canonical_rendering.json',import.meta.url),'utf8')).document;
 before(async()=>{
  server=createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname;
@@ -39,13 +39,13 @@ test('processed raster verifies actual bytes and decoded dimensions before synch
    }
    const controller=new AbortController();controller.abort();
    try{await loadLayoutAssets({assets:{[ref]:asset}},{signal:controller.signal});}catch(e){errors.push(e.name);}
-   return {resolved:resources.assets[ref].mime==='image/png'&&!!resources.assets[ref].data,errors};
+   return {resolved:resources.assets[ref].mimeType==='image/png'&&resources.assets[ref].url.startsWith('data:image/png;base64,'),errors};
   },{hash:rasterHash,length:raster.length});
   assert.deepEqual(result,{resolved:true,errors:['asset_dimensions_mismatch','asset_hash_mismatch','asset_size_limit','AbortError']});
  }finally{await page.close();}
 });
 after(async()=>{await browser?.close();await new Promise(r=>server.close(r));});
-test('unchanged classic asset validates real public wire geometry with one concurrent load',async()=>{
+test('canonical kernel validates public wire geometry with one concurrent load',async()=>{
  const page=await browser.newPage();try{
   await page.goto(`${base}/blank`);const before=loads;
   const result=await page.evaluate(async geometry=>{

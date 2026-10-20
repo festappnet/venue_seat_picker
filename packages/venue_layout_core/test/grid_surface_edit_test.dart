@@ -20,11 +20,11 @@ void main() {
               y: 500,
               rotation: 30,
               label: 'Keep',
+              seating: const TableSeating().record,
               properties: {
                 ...brush.node(id: newLayoutId(), bar: bar).properties,
-                ...const TableSeating().properties,
-                'fill': '#123456FF',
               },
+              style: {'fill': '#123456FF'},
             );
         final document = VenueLayoutDocument(nodes: [node]);
         final expanded = extendGridTableSurface(
@@ -45,7 +45,7 @@ void main() {
         expect(next.toJson(), expected.toJson());
         expect(next.label, 'Keep');
         expect(next.rotation, 30);
-        expect(next.properties['fill'], '#123456FF');
+        expect(next.style['fill'], '#123456FF');
         expect(GridSurfaceBrush.fromNode(next).cellCount, 5);
         final inset = extendGridTableSurface(
           document,
@@ -78,7 +78,7 @@ void main() {
     );
     brush.stampCell(1, 1, erase: true);
     final ring = brush.node(id: newLayoutId());
-    expect(ring.properties['holes'], hasLength(1));
+    expect(ring.surface!['holes'], hasLength(1));
     expect(GridSurfaceBrush.fromNode(ring).cellCount, 8);
     final disconnected = GridSurfaceBrush(seedCells: [(0, 0), (1, 0), (2, 0)]);
     disconnected.stampCell(1, 0, erase: true);
@@ -98,6 +98,7 @@ void main() {
 
   test('custom resize and L preset retain fixed modules including holes', () {
     final base = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       width: 190,
@@ -161,9 +162,7 @@ void main() {
           ],
         );
         final raw = brush.node(id: newLayoutId(), bar: bar);
-        final node = raw.copyWith(
-          properties: {...raw.properties, ...const TableSeating().properties},
-        );
+        final node = raw.copyWith(seating: const TableSeating().record);
         final doc = VenueLayoutDocument(nodes: [node]);
         for (final cell in [0, 3]) {
           for (final erase in [false, true]) {

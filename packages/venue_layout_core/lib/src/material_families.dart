@@ -1,5 +1,4 @@
 import 'model.dart';
-import 'minimal_appearance.dart';
 export 'minimal_appearance.dart';
 
 /// One material definition shared by templates, previews and authoring UI.
@@ -60,23 +59,32 @@ const layoutMaterialFamilies = <String, Map<String, dynamic>>{
     'strokeWidth': 1.2,
   },
 };
-Map<String, Map<String, dynamic>> layoutMaterialAppearance(String family) {
-  final style = layoutMaterialFamilies[family];
-  if (style == null) throw ArgumentError('Unknown material family');
+
+/// Canonical family presets contain presentation only and never move seats.
+Map<String, Map<String, dynamic>> layoutMaterialStyles(String family) {
+  final values = layoutMaterialFamilies[family];
+  if (values == null) throw ArgumentError('Unknown material family');
   return {
-    for (final kind in layoutAppearanceKinds)
+    for (final kind in [
+      'table',
+      'seat',
+      'furniture',
+      'shape',
+      'capacityArea',
+      'text',
+    ])
       kind: {
-        'objectStyle': family,
         'opacity': 1,
         if (kind != 'text') ...{
+          'material': family,
           'strokeWidth': kind == 'seat'
-              ? style['seatStrokeWidth'] ?? style['strokeWidth']
-              : style['strokeWidth'],
+              ? values['seatStrokeWidth'] ?? values['strokeWidth']
+              : values['strokeWidth'],
           'cornerRadius': kind == 'seat'
-              ? style['seatRadius'] ?? style['radius']
-              : style['radius'],
+              ? values['seatRadius'] ?? values['radius']
+              : values['radius'],
         },
-        if (kind == 'seat') 'seatStyle': style['seatStyle'],
+        if (kind == 'seat') 'seatStyle': values['seatStyle'],
       },
   };
 }
@@ -84,26 +92,56 @@ Map<String, Map<String, dynamic>> layoutMaterialAppearance(String family) {
 VenueLayoutDocument withLayoutMaterialFamily(
   VenueLayoutDocument document,
   String family,
-) => document.copyWith(
-  canvas: {
-    ...document.canvas,
-    'floorStyle':
-        layoutMaterialFamilies[family]?['floorStyle'] ??
-        (throw ArgumentError('Unknown material family')),
-  },
-  appearance: {
-    ...document.appearance,
-    for (final e in layoutMaterialAppearance(family).entries)
-      e.key: {...?document.appearance[e.key] as Map?, ...e.value},
-  },
-);
-
-VenueLayoutDocument withLayoutMinimalStyle(VenueLayoutDocument document) =>
-    document.copyWith(
-      canvas: {...document.canvas, 'fill': '#FFFFFFFF', 'floorStyle': 'plain'},
-      appearance: {
-        ...document.appearance,
-        for (final e in layoutMinimalAppearance.entries)
-          e.key: {...?document.appearance[e.key] as Map?, ...e.value},
+) {
+  final preset =
+      layoutMaterialFamilies[family] ??
+      (throw ArgumentError('Unknown material family'));
+  return document.copyWith(
+    canvas: {...document.canvas, 'floorStyle': preset['floorStyle']},
+    styles: {
+      ...document.styles,
+      'kinds': {
+        ...document.styles['kinds'] as Map? ?? {},
+        for (final entry in layoutMaterialStyles(family).entries)
+          entry.key: {
+            ...document.styles['kinds']?[entry.key] as Map? ?? {},
+            ...entry.value,
+          },
       },
+    },
+  );
+}
+
+VenueLayoutDocument withLayoutMinimalStyle(VenueLayoutDocument document) {
+  {
+    final styled = withLayoutMaterialFamily(document, 'minimal'),
+        kinds = Map<String, dynamic>.from(styled.styles['kinds'] as Map);
+    for (final kind in ['table', 'furniture'])
+      kinds[kind] = {
+        ...kinds[kind] as Map,
+        'fill': '#FFFFFFFF',
+        'stroke': '#000000FF',
+        'strokeWidth': 1,
+        'cornerRadius': 0,
+      };
+    kinds['table'] = {
+      ...kinds['table'] as Map,
+      'label': {...kinds['table']['label'] as Map? ?? {}, 'color': '#000000FF'},
+    };
+    kinds['seat'] = {
+      ...kinds['seat'] as Map,
+      'fill': '#267329FF',
+      'stroke': '#00000000',
+      'strokeWidth': 0,
+      'cornerRadius': 8,
+    };
+    kinds['text'] = {
+      ...kinds['text'] as Map,
+      'label': {...kinds['text']['label'] as Map? ?? {}, 'color': '#000000FF'},
+    };
+    return styled.copyWith(
+      canvas: {...styled.canvas, 'fill': '#FFFFFFFF'},
+      styles: {...styled.styles, 'kinds': kinds},
     );
+  }
+}

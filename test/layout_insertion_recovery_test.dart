@@ -18,6 +18,7 @@ void main() {
             y: 600,
             width: 40,
             height: 40,
+            surface: const {'type': 'rect'},
           ),
         ],
       );
@@ -71,6 +72,7 @@ void main() {
             y: 600,
             width: 600,
             height: 600,
+            surface: const {'type': 'rect'},
           ),
         ],
       );

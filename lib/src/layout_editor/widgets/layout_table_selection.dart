@@ -4,7 +4,7 @@ import 'package:venue_layout_core/venue_layout_core.dart';
 /// A commercial wrapper moves as one object, but its edit bounds belong to
 /// the physical tabletop. Genuine multi-object groups keep their own bounds.
 LayoutNode tabletopSelectionNode(VenueLayoutDocument doc, LayoutNode selected) {
-  if (selected.kind != 'group' || selected.properties['assembly'] != null) {
+  if (selected.kind != 'group' || selected.assembly != null) {
     return selected;
   }
   final children = doc.nodes
@@ -27,12 +27,19 @@ List<TableSeatLink> tableSeatLinks(
   Set<String> selected,
 ) {
   if (selected.isEmpty) return const [];
+  final targets = {for (final a in doc.attachments) a['seatId']: a['targetId']};
+  final selectedSeatTables = {
+    for (final n in doc.nodes)
+      if (n.kind == 'seat' && selected.contains(n.id))
+        targets[n.id] ?? n.parentId,
+  };
   final tables = {
     for (final n in doc.nodes)
-      if (n.kind == 'table' && selected.contains(n.id)) n.id: n,
+      if (n.kind == 'table' &&
+          (selected.contains(n.id) || selectedSeatTables.contains(n.id)))
+        n.id: n,
   };
   if (tables.isEmpty) return const [];
-  final targets = {for (final a in doc.attachments) a['seatId']: a['targetId']};
   final matrices = worldMatrices(doc);
   final hulls = {
     for (final t in tables.values)
@@ -61,7 +68,9 @@ List<TableSeatLink> tableSeatLinks(
   return [
     for (final seat in doc.nodes)
       if (seat.kind == 'seat' &&
-          tables.containsKey(targets[seat.id] ?? seat.parentId))
+          tables.containsKey(targets[seat.id] ?? seat.parentId) &&
+          (selected.contains(seat.id) ||
+              selected.contains(targets[seat.id] ?? seat.parentId)))
         (() {
           final m = matrices[seat.id]!.map(quantize).toList(),
               center = Offset(m[4], m[5]);

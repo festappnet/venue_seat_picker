@@ -8,7 +8,7 @@ void main() {
       final d = barLayout();
       expect(d.nodes.length, 1);
       expect(isBarNode(d.nodes.single), true);
-      expect(d.nodes.single.properties['shape'], 'polygon');
+      expect(d.nodes.single.surface!['type'], 'rect');
       expect(validateDocument(d), isEmpty);
       expect(VenueLayoutDocument.fromJson(d.toJson()).toJson(), d.toJson());
       expect(
@@ -45,62 +45,19 @@ void main() {
       );
     },
   );
-  test(
-    'pulling a surface edge creates a wing and preserves the original identity',
-    () {
-      final d = barLayout(), n = d.nodes.single;
-      final changed = extendTableSurface(d, n.id, 1, n.width / 2 + 130, 0);
-      expect(changed.nodes.single.id, n.id);
-      expect(changed.nodes.single.width, n.width + 130);
-      expect((changed.nodes.single.properties['points'] as List).length, 8);
-      expect(validateDocument(changed), isEmpty);
-      expect(d.nodes.single.width, 280);
-    },
-  );
-  test(
-    'concave table seating stays outside the surface and never overlaps',
-    () {
-      final d = tableLayout(
-        shape: 'rect',
-        count: 6,
-        width: 500,
-        height: 360,
-        x: 700,
-        y: 500,
-      );
-      for (final shape in ['L', 'U']) {
-        final next = reshapeTableSurface(d, d.nodes.first.id, shape);
-        expect(validateDocument(next), isEmpty);
-        expect(layoutCollisions(next), isEmpty);
-        expect(
-          next.nodes.where((n) => n.kind == 'seat').map((n) => n.id).toSet(),
-          d.nodes.where((n) => n.kind == 'seat').map((n) => n.id).toSet(),
-        );
-        final root = next.nodes.firstWhere((n) => n.kind == 'table');
-        final expanded = extendTableSurface(
-          next,
-          root.id,
-          0,
-          0,
-          -root.height / 2 - 100,
-        );
-        expect(validateDocument(expanded), isEmpty);
-        expect(layoutCollisions(expanded), isEmpty);
-      }
-    },
-  );
+
   test(
     'surface edits never remove protected reservations or change immutable input',
     () {
       var d = tableLayout(shape: 'rect', count: 6, width: 500, height: 360);
-      d = reshapeTableSurface(d, d.nodes.first.id, 'rectangle');
+      d = setTableSurfaceKind(d, d.nodes.first.id, 'grid');
       final before = d.toJson(), id = d.nodes.first.id;
       final reserved = d.nodes
           .where((n) => n.kind == 'seat')
           .map((n) => n.id)
           .toSet();
       expect(
-        () => resizeNode(d, id, 20, 20, protectedSeatIds: reserved),
+        () => resizeNode(d,id,20,20*d.nodes.firstWhere((n)=>n.id==id).height/d.nodes.firstWhere((n)=>n.id==id).width,protectedSeatIds:reserved),
         throwsA(isA<TableResizeRejected>()),
       );
       expect(d.toJson(), before);

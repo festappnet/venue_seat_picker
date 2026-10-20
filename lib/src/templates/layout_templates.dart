@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:venue_layout_core/venue_layout_core.dart';
 import 'scout_hall.dart';
+import 'cinema_hall.dart';
 import 'scout_balcony_hall.dart';
 
 /// A synthetic, editable layout. Every creation allocates fresh identities.
@@ -118,7 +119,7 @@ VenueLayoutDocument localizeLayoutDefaultLabels(
 
 /// Version 1 of the package-owned geometric template library.
 abstract final class VenueLayoutTemplates {
-  static const version = 7;
+  static const version = 8;
   static const defaultId = 'ball-classic';
   static final List<LayoutTemplate> all = List.unmodifiable([
     LayoutTemplate(
@@ -136,6 +137,14 @@ abstract final class VenueLayoutTemplates {
       249,
       0,
       scoutBalconyHall,
+    ),
+    LayoutTemplate(
+      'cinema-galaxy',
+      'Galaxy cinema',
+      'Dark cinema with seven rows, 84 seats and four two-seat sofas',
+      84,
+      0,
+      galaxyCinemaHall,
     ),
     LayoutTemplate(
       'ball-classic',
@@ -269,13 +278,8 @@ class _Seed {
       shapeFromPoints(
         'polyline',
         points,
-        properties: {
-          'fill': '#00000000',
-          'stroke': color,
-          'strokeWidth': weight,
-          'role': 'decoration',
-          'appearanceOverrides': ['stroke', 'strokeWidth', 'fill'],
-        },
+        properties: {'role': 'decoration'},
+        style: {'fill': '#00000000', 'stroke': color, 'strokeWidth': weight},
       ),
     );
   }
@@ -336,7 +340,11 @@ class _Seed {
         (n) => n.kind == 'table'
             ? n.copyWith(
                 label: title,
-                properties: {...n.properties, 'align': 'center', 'size': 16},
+                properties: {...n.properties},
+                style: {
+                  ...n.style,
+                  'label': {'align': 'center', 'size': 16},
+                },
               )
             : n,
       ),
@@ -353,6 +361,7 @@ class _Seed {
     String label, {
     String? parent,
     Map<String, dynamic> extra = const {},
+    Map<String, dynamic> style = const {},
   }) {
     final id = newLayoutId();
     nodes.add(
@@ -366,6 +375,7 @@ class _Seed {
         height: h,
         label: label,
         properties: extra,
+        style: style,
       ),
     );
     return id;
@@ -378,12 +388,9 @@ class _Seed {
     width,
     40,
     value,
-    extra: {
-      'text': value,
-      'align': 'center',
-      'fontId': 'fixture:sans',
-      'size': 24,
-      'color': '#243247FF',
+    extra: {'text': value},
+    style: {
+      'label': {'align': 'center', 'size': 24, 'color': '#243247FF'},
     },
   );
   void decor(
@@ -404,11 +411,12 @@ class _Seed {
     label,
     extra: {
       'shape': shape,
-      'fill': fill,
       'role': obstacle ? 'obstacle' : 'decoration',
       'obstacle': obstacle,
-      'size': 12,
-      'align': 'center',
+    },
+    style: {
+      'fill': fill,
+      'label': {'size': 12, 'align': 'center'},
     },
   );
   void seat(double x, double y, {String? parent, String label = ''}) => object(
@@ -419,11 +427,15 @@ class _Seed {
     38,
     label,
     parent: parent,
-    extra: {'symbol': 'chair', 'size': 12, 'align': 'center'},
+    extra: {'symbol': 'chair'},
+    style: {
+      'label': {'size': 12, 'align': 'center'},
+    },
   );
   VenueLayoutDocument finish({double width = 1600, double height = 1200}) =>
       VenueLayoutDocument.fromJson({
-        'schemaVersion': 1,
+        'schemaVersion': 2,
+        'seatingDefaults': {},
         'symbolSetVersion': 1,
         'canvas': {
           'x': 0,
@@ -432,16 +444,14 @@ class _Seed {
           'height': height,
           'fill': '#FFFFFFFF',
         },
-        'defaultTextStyle': {
-          'fontId': 'fixture:sans',
-          'size': 24,
-          'color': '#243247FF',
+        'styles': {
+          'label': {'size': 24, 'color': '#243247FF'},
         },
+        'textPolicy': {'language': 'und', 'direction': 'auto'},
         'nodes': nodes.map((n) => n.toJson()).toList(),
         'attachments': attachments,
         'sections': sections,
         'selectionUnits': units,
-        'generators': [],
         'presets': [],
         'background': null,
       });
@@ -482,7 +492,7 @@ VenueLayoutDocument _ball(int rectangular, int round) {
     breadth: 64,
     bar: true,
   ).copyWith(label: 'Bar');
-  s.add(VenueLayoutDocument(nodes: [counter]));
+  s.add(VenueLayoutDocument(schemaVersion: 2, nodes: [counter]));
   s.decor(1600, 170, 360, 130, '', obstacle: false, fill: '#F1F5F9FF');
   s.text(1600, 170, 'Reception');
   s.line([
@@ -514,18 +524,16 @@ VenueLayoutDocument _templateStyle(
   final d = withLayoutMaterialFamily(document, family);
   return d.copyWith(
     canvas: {...d.canvas, 'fill': colors[0]},
-    appearance: {
-      ...d.appearance,
-      'table': {
-        ...d.appearance['table'],
-        'fill': colors[1],
-        'stroke': colors[3],
-      },
-      'seat': {...d.appearance['seat'], 'fill': colors[2], 'stroke': colors[3]},
-      'furniture': {
-        ...d.appearance['furniture'],
-        'fill': colors[1],
-        'stroke': colors[3],
+    styles: {
+      ...d.styles,
+      'kinds': {
+        ...d.styles['kinds'] as Map? ?? {},
+        for (final kind in ['table', 'seat', 'furniture'])
+          kind: {
+            ...d.styles['kinds']?[kind] as Map? ?? {},
+            'fill': kind == 'seat' ? colors[2] : colors[1],
+            'stroke': colors[3],
+          },
       },
     },
   );
@@ -575,11 +583,8 @@ VenueLayoutDocument _balcony() {
         [20, 500],
         [100, 500],
       ],
-      properties: {
-        'fill': '#FFFFFF00',
-        'stroke': '#64748BFF',
-        'strokeWidth': 3,
-      },
+      properties: {},
+      style: {'fill': '#FFFFFF00', 'stroke': '#64748BFF', 'strokeWidth': 3},
     ),
   );
   return s.finish(height: 1300);
@@ -615,7 +620,8 @@ VenueLayoutDocument _lounge() {
     1100,
     180,
     'Standing area',
-    extra: {'capacity': 20, 'fill': '#D5EBE2FF'},
+    extra: {'capacity': 20},
+    style: {'fill': '#D5EBE2FF'},
   );
   s.text(800, 1035, 'Standing area - 20');
   return s.finish();
@@ -651,11 +657,8 @@ VenueLayoutDocument _auditorium() {
           for (final n in fragment.nodes)
             n.kind == 'seat'
                 ? n.copyWith(
-                    properties: {
-                      ...n.properties,
-                      'fill': '#9A7780FF',
-                      'appearanceOverrides': ['fill'],
-                    },
+                    properties: {...n.properties},
+                    style: {...n.style, 'fill': '#9A7780FF'},
                   )
                 : n,
         ],
@@ -827,7 +830,7 @@ VenueLayoutDocument _conference() {
     breadth: 80,
     bar: true,
   ).copyWith(label: 'Bar');
-  s.add(VenueLayoutDocument(nodes: [bar]));
+  s.add(VenueLayoutDocument(schemaVersion: 2, nodes: [bar]));
   s.object(
     'capacityArea',
     1750,
@@ -835,7 +838,8 @@ VenueLayoutDocument _conference() {
     650,
     270,
     'Standing area',
-    extra: {'capacity': 40, 'fill': '#E4EFEAFF'},
+    extra: {'capacity': 40},
+    style: {'fill': '#E4EFEAFF'},
   );
   s.text(1750, 1500, 'Reception');
   return _templateStyle(s.finish(width: 2400, height: 1800), 'wood');
@@ -874,6 +878,7 @@ VenueLayoutDocument _train() {
   );
   return _transportFrame(
     first.copyWith(
+      attachments: [...first.attachments, ...second.attachments],
       nodes: [
         ...first.nodes.map(
           (n) => n.parentId == null ? n.copyWith(label: 'Carriage 1') : n,

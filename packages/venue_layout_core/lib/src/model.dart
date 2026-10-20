@@ -1,5 +1,11 @@
+import 'minimal_appearance.dart' show layoutDefaultSeatFill;
+import 'text_contract.dart' show validateCanonicalTextResources;
 import 'dart:convert';
 import 'dart:math';
+import 'canonical_contract.dart';
+import 'material_families.dart' show layoutMaterialFamilies;
+import 'graphic_import.dart'
+    show LayoutVectorGraphic, GraphicImportFailure, validOriginalSvgSource;
 
 const layoutProtocol = 1;
 const layoutLimits = <String, num>{
@@ -32,7 +38,7 @@ const layoutLimits = <String, num>{
   'coordinateQuantum': 1024,
 };
 const layoutMaxNodes = 25000;
-const layoutMaxSeats = 20000;
+const layoutMaxSeats = canonicalAssemblyMaxSeats;
 const layoutMaxDepth = 16;
 const layoutMaxBytes = 8 * 1024 * 1024;
 double quantize(num value) =>
@@ -118,6 +124,8 @@ class LayoutNode {
   final int z;
   final bool locked;
   final Map<String, dynamic> properties;
+  final Map<String, dynamic> style, childStyles, seating;
+  final Map<String, dynamic>? surface, assembly, graphic, originalSource;
   LayoutNode({
     required this.id,
     required this.kind,
@@ -131,30 +139,54 @@ class LayoutNode {
     this.locked = false,
     this.label = '',
     Map<String, dynamic> properties = const {},
-  }) : properties = frozenMap(properties);
+    Map<String, dynamic> style = const {},
+    Map<String, dynamic> childStyles = const {},
+    Map<String, dynamic> seating = const {},
+    Map<String, dynamic>? surface,
+    Map<String, dynamic>? assembly,
+    Map<String, dynamic>? graphic,
+    Map<String, dynamic>? originalSource,
+  }) : properties = frozenMap(properties),
+       style = frozenMap(style),
+       childStyles = frozenMap(childStyles),
+       seating = frozenMap(seating),
+       surface = surface == null ? null : frozenMap(surface),
+       assembly = assembly == null ? null : frozenMap(assembly),
+       graphic = graphic == null ? null : frozenMap(graphic),
+       originalSource = originalSource == null
+           ? null
+           : frozenMap(originalSource);
   factory LayoutNode.fromJson(Map<String, dynamic> j) {
     final decodeIssues = _nodeDecodeIssues(j);
     if (decodeIssues.isNotEmpty) throw InvalidLayoutDocument(decodeIssues, j);
     final t = j['transform'] as Map;
     final props = Map<String, dynamic>.from(j)
       ..removeWhere(
-        (k, v) => const [
-          'id',
-          'kind',
-          'parentId',
-          'transform',
-          'x',
-          'y',
-          'rotation',
-          'width',
-          'height',
-          'z',
-          'locked',
-          'label',
-          'x',
-          'y',
-          'rotation',
-        ].contains(k),
+        (k, v) =>
+            const [
+              'style',
+              'childStyles',
+              'seating',
+              'surface',
+              'graphic',
+              'originalSource',
+              'id',
+              'kind',
+              'parentId',
+              'transform',
+              'x',
+              'y',
+              'rotation',
+              'width',
+              'height',
+              'z',
+              'locked',
+              'label',
+              'x',
+              'y',
+              'rotation',
+            ].contains(k) ||
+            (k == 'assembly' && v is Map),
       );
     return LayoutNode(
       id: j['id'] as String,
@@ -169,6 +201,21 @@ class LayoutNode {
       locked: j['locked'] as bool? ?? false,
       label: j['label'] as String? ?? '',
       properties: props,
+      style: Map<String, dynamic>.from(j['style'] as Map? ?? {}),
+      childStyles: Map<String, dynamic>.from(j['childStyles'] as Map? ?? {}),
+      seating: Map<String, dynamic>.from(j['seating'] as Map? ?? {}),
+      surface: j['surface'] == null
+          ? null
+          : Map<String, dynamic>.from(j['surface'] as Map),
+      assembly: j['assembly'] is Map
+          ? Map<String, dynamic>.from(j['assembly'] as Map)
+          : null,
+      graphic: j['graphic'] == null
+          ? null
+          : Map<String, dynamic>.from(j['graphic'] as Map),
+      originalSource: j['originalSource'] == null
+          ? null
+          : Map<String, dynamic>.from(j['originalSource'] as Map),
     );
   }
   LayoutNode copyWith({
@@ -183,6 +230,17 @@ class LayoutNode {
     String? label,
     bool? locked,
     Map<String, dynamic>? properties,
+    Map<String, dynamic>? style,
+    Map<String, dynamic>? childStyles,
+    Map<String, dynamic>? seating,
+    Map<String, dynamic>? surface,
+    Map<String, dynamic>? assembly,
+    Map<String, dynamic>? graphic,
+    Map<String, dynamic>? originalSource,
+    bool clearSurface = false,
+    bool clearAssembly = false,
+    bool clearGraphic = false,
+    bool clearOriginalSource = false,
     int? z,
   }) => LayoutNode(
     id: id,
@@ -197,13 +255,25 @@ class LayoutNode {
     locked: locked ?? this.locked,
     label: label ?? this.label,
     properties: properties ?? this.properties,
+    style: style ?? this.style,
+    childStyles: childStyles ?? this.childStyles,
+    seating: seating ?? this.seating,
+    surface: clearSurface ? null : surface ?? this.surface,
+    assembly: clearAssembly ? null : assembly ?? this.assembly,
+    graphic: clearGraphic ? null : graphic ?? this.graphic,
+    originalSource: clearOriginalSource
+        ? null
+        : originalSource ?? this.originalSource,
   );
   Map<String, dynamic> toJson() => {
     ...properties,
-    if (properties['appearanceOverrides'] is List)
-      'appearanceOverrides': (List<String>.from(
-        properties['appearanceOverrides'],
-      )..sort()),
+    if (style.isNotEmpty) 'style': style,
+    if (childStyles.isNotEmpty) 'childStyles': childStyles,
+    if (seating.isNotEmpty) 'seating': seating,
+    if (surface != null) 'surface': surface,
+    if (assembly != null) 'assembly': assembly,
+    if (graphic != null) 'graphic': graphic,
+    if (originalSource != null) 'originalSource': originalSource,
     'id': id,
     'kind': kind,
     if (parentId != null) 'parentId': parentId,
@@ -220,17 +290,29 @@ class LayoutNode {
   };
 }
 
+/// A row root owns a typed assembly spec; legacy spelling exists only until
+/// the explicit input cutover is complete.
+bool isRowAssemblyNode(LayoutNode? node) =>
+    node != null && node.kind == 'group' && node.assembly?['kind'] == 'rows';
+
 class VenueLayoutDocument {
   final List<LayoutNode> nodes;
-  final Map<String, dynamic> canvas, defaultTextStyle, appearance;
+  final Map<String, dynamic> canvas;
   final List<Map<String, dynamic>> sections,
       selectionUnits,
       attachments,
-      presets,
-      generators;
+      presets;
   final Map<String, dynamic>? background;
-  final int symbolSetVersion;
+  final int symbolSetVersion, schemaVersion;
+  final Map<String, dynamic> styles, seatingDefaults, textPolicy;
   VenueLayoutDocument({
+    this.schemaVersion = 2,
+    Map<String, dynamic> styles = const {},
+    Map<String, dynamic> seatingDefaults = const {},
+    Map<String, dynamic> textPolicy = const {
+      'language': 'und',
+      'direction': 'auto',
+    },
     List<LayoutNode> nodes = const [],
     Map<String, dynamic> canvas = const {
       'x': 0,
@@ -239,59 +321,50 @@ class VenueLayoutDocument {
       'height': 1600,
       'fill': '#FFFFFFFF',
     },
-    Map<String, dynamic> defaultTextStyle = const {
-      'fontId': 'fixture:sans',
-      'size': 24,
-      'color': '#222222FF',
-    },
-    Map<String, dynamic> appearance = const {},
     List<Map<String, dynamic>> sections = const [],
     List<Map<String, dynamic>> selectionUnits = const [],
     List<Map<String, dynamic>> attachments = const [],
     List<Map<String, dynamic>> presets = const [],
-    List<Map<String, dynamic>> generators = const [],
     Map<String, dynamic>? background,
     this.symbolSetVersion = 1,
   }) : nodes = List.unmodifiable(nodes),
        canvas = frozenMap(canvas),
-       defaultTextStyle = frozenMap(defaultTextStyle),
-       appearance = frozenMap(appearance),
+       styles = frozenMap(styles),
+       seatingDefaults = frozenMap(seatingDefaults),
+       textPolicy = frozenMap(textPolicy),
        sections = _maps(sections),
-       // Unit kinds were optional in v1; all consumers already interpret an
-       // omitted kind atomically. Normalize that legacy spelling at the model
-       // boundary so reservation guards share the same explicit semantics.
-       selectionUnits = _maps([
-         for (final unit in selectionUnits)
-           {...unit, 'kind': unit['kind'] ?? 'atomic'},
-       ]),
+       selectionUnits = _maps(selectionUnits),
        attachments = _maps(attachments),
        presets = _maps(presets),
-       generators = _maps(generators),
        background = background == null ? null : frozenMap(background);
   static List<Map<String, dynamic>> _maps(List<Map<String, dynamic>> l) =>
       List.unmodifiable(l.map(frozenMap));
   factory VenueLayoutDocument.empty() => VenueLayoutDocument();
   factory VenueLayoutDocument.fromJson(Map<String, dynamic> j) {
-    if (j['schemaVersion'] != 1) throw UnsupportedLayoutSchema(frozenMap(j));
+    if (j['schemaVersion'] != 2) throw UnsupportedLayoutSchema(frozenMap(j));
     final decodeIssues = _documentDecodeIssues(j);
     if (decodeIssues.isNotEmpty) throw InvalidLayoutDocument(decodeIssues, j);
     List<Map<String, dynamic>> maps(String k) => (j[k] as List? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
     final decoded = VenueLayoutDocument(
+      schemaVersion: j['schemaVersion'] as int,
+      styles: Map<String, dynamic>.from(j['styles'] as Map? ?? {}),
+      seatingDefaults: Map<String, dynamic>.from(
+        j['seatingDefaults'] as Map? ?? {},
+      ),
+      textPolicy: Map<String, dynamic>.from(
+        j['textPolicy'] as Map? ??
+            const {'language': 'und', 'direction': 'auto'},
+      ),
       nodes: (j['nodes'] as List? ?? [])
           .map((e) => LayoutNode.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       canvas: Map<String, dynamic>.from(j['canvas'] as Map),
-      defaultTextStyle: Map<String, dynamic>.from(
-        j['defaultTextStyle'] as Map? ?? {},
-      ),
-      appearance: Map<String, dynamic>.from(j['appearance'] as Map? ?? {}),
       sections: maps('sections'),
       selectionUnits: maps('selectionUnits'),
       attachments: maps('attachments'),
       presets: maps('presets'),
-      generators: maps('generators'),
       background: j['background'] == null
           ? null
           : Map<String, dynamic>.from(j['background']),
@@ -304,25 +377,27 @@ class VenueLayoutDocument {
   VenueLayoutDocument copyWith({
     List<LayoutNode>? nodes,
     Map<String, dynamic>? canvas,
-    Map<String, dynamic>? defaultTextStyle,
-    Map<String, dynamic>? appearance,
+    int? schemaVersion,
+    Map<String, dynamic>? styles,
+    Map<String, dynamic>? seatingDefaults,
+    Map<String, dynamic>? textPolicy,
     List<Map<String, dynamic>>? sections,
     List<Map<String, dynamic>>? selectionUnits,
     List<Map<String, dynamic>>? attachments,
     List<Map<String, dynamic>>? presets,
-    List<Map<String, dynamic>>? generators,
     Map<String, dynamic>? background,
     bool clearBackground = false,
   }) => VenueLayoutDocument(
+    schemaVersion: schemaVersion ?? this.schemaVersion,
+    styles: styles ?? this.styles,
+    seatingDefaults: seatingDefaults ?? this.seatingDefaults,
+    textPolicy: textPolicy ?? this.textPolicy,
     nodes: nodes ?? this.nodes,
     canvas: canvas ?? this.canvas,
-    defaultTextStyle: defaultTextStyle ?? this.defaultTextStyle,
-    appearance: appearance ?? this.appearance,
     sections: sections ?? this.sections,
     selectionUnits: selectionUnits ?? this.selectionUnits,
     attachments: attachments ?? this.attachments,
     presets: presets ?? this.presets,
-    generators: generators ?? this.generators,
     background: clearBackground ? null : background ?? this.background,
     symbolSetVersion: symbolSetVersion,
   );
@@ -330,7 +405,7 @@ class VenueLayoutDocument {
     final issues = validateDocument(this);
     if (issues.isNotEmpty)
       throw InvalidLayoutDocument(issues, {
-        'schemaVersion': 1,
+        'schemaVersion': schemaVersion,
         'nodes': nodes.map((n) => {'id': n.id, 'kind': n.kind}).toList(),
       });
     return _toJsonUnchecked();
@@ -338,11 +413,15 @@ class VenueLayoutDocument {
 
   Map<String, dynamic> _toJsonUnchecked({bool includeNodes = true}) =>
       _canonicalMap({
-        'schemaVersion': 1,
+        'schemaVersion': schemaVersion,
         'symbolSetVersion': symbolSetVersion,
         'canvas': canvas,
-        'defaultTextStyle': defaultTextStyle,
-        if (appearance.isNotEmpty) 'appearance': appearance,
+
+        ...{
+          'styles': styles,
+          'seatingDefaults': seatingDefaults,
+          'textPolicy': textPolicy,
+        },
         'nodes':
             ((includeNodes ? nodes.toList() : <LayoutNode>[])
                   ..sort((a, b) => a.id.compareTo(b.id)))
@@ -362,7 +441,7 @@ class VenueLayoutDocument {
               .toList(),
         ),
         'attachments': _sortedRecords(attachments, key: 'seatId'),
-        'generators': _sortedRecords(generators),
+
         'background': background,
         'presets': _sortedRecords(
           presets
@@ -404,6 +483,8 @@ List<LayoutIssue> validateDocument(VenueLayoutDocument d) =>
       _validateDocumentUncached(d),
     );
 List<LayoutIssue> _validateDocumentUncached(VenueLayoutDocument d) {
+  if (d.schemaVersion != 2)
+    return [LayoutIssue('unsupported_schema', 'schemaVersion')];
   final out = <LayoutIssue>[];
   void issue(String r, String p, [String? id]) =>
       out.add(LayoutIssue(r, p, id));
@@ -433,13 +514,15 @@ List<LayoutIssue> _validateDocumentUncached(VenueLayoutDocument d) {
       'capacityArea',
       'shape',
       'text',
+      'image',
+      'vector',
     ].contains(n.kind))
       issue('unknown_kind', 'nodes.kind', n.id);
     if ([n.x, n.y, n.rotation, n.width, n.height].any((v) => !v.isFinite) ||
         n.width <= 0 ||
         n.height <= 0)
       issue('invalid_geometry', 'nodes.transform', n.id);
-    final p = n.properties;
+    final p = surfaceGeometryProperties(n);
     if (p.keys.any(
       (k) => const [
         'id',
@@ -503,8 +586,8 @@ List<LayoutIssue> _validateDocumentUncached(VenueLayoutDocument d) {
       if ('${p['text'] ?? ''}'.runes.length >
           layoutLimits['textMaxCodePoints']!)
         issue('text_limit', 'nodes.text', n.id);
-      final size = p['size'] ?? d.defaultTextStyle['size'] ?? 24,
-          lh = p['lineHeight'] ?? 1.2;
+      final size = resolveNodeAppearance(d, n).label['size'],
+          lh = resolveNodeAppearance(d, n).label['lineHeight'];
       if (size is! num || !size.isFinite || size < 1 || size > 4096)
         issue('font_size', 'nodes.size', n.id);
       if (lh is! num || !lh.isFinite || lh < 0.8 || lh > 3)
@@ -780,18 +863,20 @@ const _nodeKinds = {
   'capacityArea',
   'shape',
   'text',
+  'image',
+  'vector',
 };
 const _documentKeys = {
-  'appearance',
+  'styles',
+  'seatingDefaults',
+  'textPolicy',
   'schemaVersion',
   'symbolSetVersion',
   'canvas',
-  'defaultTextStyle',
   'nodes',
   'sections',
   'selectionUnits',
   'attachments',
-  'generators',
   'background',
   'presets',
 };
@@ -909,6 +994,17 @@ List<LayoutIssue> _nodeDecodeIssues(Map<String, dynamic> j) {
   if (j.containsKey('z') && j['z'] is! int) add('invalid_z', 'z');
   if (j.containsKey('locked') && j['locked'] is! bool)
     add('invalid_locked', 'locked');
+  for (final key in [
+    'style',
+    'childStyles',
+    'seating',
+    'surface',
+    'graphic',
+    'originalSource',
+  ]) {
+    if (j.containsKey(key) && j[key] is! Map)
+      add('invalid_canonical_record', key);
+  }
   if (j.containsKey('label') && j['label'] is! String)
     add('invalid_label', 'label');
   if (j.keys.any((k) => const ['x', 'y', 'rotation'].contains(k)))
@@ -923,12 +1019,13 @@ List<LayoutIssue> _documentDecodeIssues(Map<String, dynamic> j) {
     add('unknown_document_field', 'document');
   if (j['symbolSetVersion'] != 1)
     add('unsupported_symbols', 'symbolSetVersion');
-  if (j.containsKey('appearance') && j['appearance'] is! Map) {
-    add('invalid_appearance', 'appearance');
-  }
   if (j['canvas'] is! Map) add('missing_canvas', 'canvas');
-  if (j['defaultTextStyle'] is! Map)
-    add('missing_text_style', 'defaultTextStyle');
+  if (j.containsKey('defaultTextStyle') ||
+      j.containsKey('appearance') ||
+      j.containsKey('generators'))
+    add('legacy_style_forbidden', 'document');
+  for (final key in ['styles', 'seatingDefaults', 'textPolicy'])
+    if (j[key] is! Map) add('missing_canonical_record', key);
   if (j['nodes'] is! List) {
     add('missing_nodes', 'nodes');
   } else {
@@ -937,6 +1034,10 @@ List<LayoutIssue> _documentDecodeIssues(Map<String, dynamic> j) {
       if (node is! Map) {
         add('invalid_node', 'nodes[$i]');
       } else {
+        if (j['schemaVersion'] == 2 &&
+            node.containsKey('assembly') &&
+            node['assembly'] is! Map)
+          add('invalid_assembly', 'nodes[$i].assembly');
         issues.addAll(
           _nodeDecodeIssues(
             Map<String, dynamic>.from(node),
@@ -945,13 +1046,7 @@ List<LayoutIssue> _documentDecodeIssues(Map<String, dynamic> j) {
       }
     }
   }
-  for (final k in [
-    'sections',
-    'selectionUnits',
-    'attachments',
-    'generators',
-    'presets',
-  ]) {
+  for (final k in ['sections', 'selectionUnits', 'attachments', 'presets']) {
     if (j.containsKey(k) &&
         (j[k] is! List || (j[k] as List).any((v) => v is! Map)))
       add('invalid_collection', k);
@@ -976,57 +1071,8 @@ void _validateExtras(
     }
   }
 
-  for (final entry in d.appearance.entries) {
-    final path = 'appearance.${entry.key}';
-    if (!layoutAppearanceKinds.contains(entry.key)) {
-      issue('unknown_appearance_kind', path);
-    }
-    if (entry.value is! Map) {
-      issue('invalid_appearance', path);
-      continue;
-    }
-    final styles = Map<String, dynamic>.from(entry.value as Map);
-    for (final style in styles.entries) {
-      if (!layoutAppearanceKeys.contains(style.key) ||
-          (layoutSeatingDefaultKeys.contains(style.key) &&
-              entry.key != 'table')) {
-        issue('unknown_appearance_property', '$path.${style.key}');
-      } else if (style.key == 'fontId') {
-        if (style.value is! String || (style.value as String).isEmpty)
-          issue('invalid_font_id', '$path.fontId');
-      } else if (style.key == 'size') {
-        if (!_finite(style.value) ||
-            style.value < layoutLimits['fontSizeMin']! ||
-            style.value > layoutLimits['fontSizeMax']!)
-          issue('font_size', '$path.size');
-      } else if (style.key == 'bold' || style.key == 'italic') {
-        if (style.value is! bool)
-          issue('invalid_boolean', '$path.${style.key}');
-      } else if (style.key == 'objectStyle') {
-        if (!layoutObjectStyles.contains(style.value)) {
-          issue('invalid_object_style', '$path.objectStyle');
-        }
-      } else if (style.key == 'seatStyle') {
-        if (!layoutSeatStyles.contains(style.value)) {
-          issue('invalid_seat_style', '$path.seatStyle');
-        }
-      } else if (const {'fill', 'stroke', 'color'}.contains(style.key)) {
-        if (style.value is! String ||
-            !layoutColorPattern.hasMatch(style.value)) {
-          issue('invalid_color', '$path.${style.key}');
-        }
-      } else if (!_finite(style.value) ||
-          style.value <
-              (const {'seatWidth', 'seatHeight'}.contains(style.key) ? 1 : 0) ||
-          style.value >
-              (style.key == 'opacity'
-                  ? 1
-                  : layoutSeatingDefaultKeys.contains(style.key)
-                  ? 1000000
-                  : layoutLimits['geometryAbsMax']!)) {
-        issue('invalid_appearance_value', '$path.${style.key}');
-      }
-    }
+  {
+    _validateCanonicalDocument(d, nodes, out);
   }
   fields(d.canvas, const {
     'x',
@@ -1040,19 +1086,6 @@ void _validateExtras(
       !layoutFloorStyles.contains(d.canvas['floorStyle'])) {
     issue('invalid_floor_style', 'canvas.floorStyle');
   }
-  fields(d.defaultTextStyle, const {
-    'fontId',
-    'size',
-    'color',
-    'align',
-    'lineHeight',
-    'bold',
-    'italic',
-    'fontStyle',
-  }, 'defaultTextStyle');
-  if (d.defaultTextStyle['fontStyle'] != null &&
-      !const ['normal', 'italic'].contains(d.defaultTextStyle['fontStyle']))
-    issue('invalid_font_style', 'defaultTextStyle.fontStyle');
   if (d.background != null) {
     fields(d.background!, const {
       'assetRef',
@@ -1119,40 +1152,18 @@ void _validateExtras(
   out.addAll(
     _jsonIssues({
       'canvas': d.canvas,
-      'defaultTextStyle': d.defaultTextStyle,
-      'appearance': d.appearance,
       'sections': d.sections,
       'selectionUnits': d.selectionUnits,
       'attachments': d.attachments,
-      'generators': d.generators,
       'background': d.background,
       'presets': d.presets,
       'nodeProperties': [for (final n in d.nodes) n.properties],
     }, business: true),
   );
-  final style = d.defaultTextStyle;
-  if (style['fontId'] is! String || (style['fontId'] as String).isEmpty)
-    issue('invalid_font_id', 'defaultTextStyle.fontId');
-  if (!_finite(style['size']) ||
-      style['size'] < layoutLimits['fontSizeMin']! ||
-      style['size'] > layoutLimits['fontSizeMax']!)
-    issue('font_size', 'defaultTextStyle.size');
-  if (style['color'] is! String || !layoutColorPattern.hasMatch(style['color']))
-    issue('invalid_color', 'defaultTextStyle.color');
-  if (style['lineHeight'] != null &&
-      (!_finite(style['lineHeight']) ||
-          style['lineHeight'] < layoutLimits['lineHeightMin']! ||
-          style['lineHeight'] > layoutLimits['lineHeightMax']!))
-    issue('line_height', 'defaultTextStyle.lineHeight');
-  if (style['align'] != null &&
-      !const ['left', 'center', 'right'].contains(style['align']))
-    issue('invalid_alignment', 'defaultTextStyle.align');
-  for (final k in ['bold', 'italic']) {
-    if (style[k] != null && style[k] is! bool)
-      issue('invalid_boolean', 'defaultTextStyle.$k');
-  }
+  {}
   for (final n in d.nodes) {
-    final p = n.properties;
+    {}
+    final p = surfaceGeometryProperties(n);
     if (p.containsKey('deck') &&
         (p['deck'] is! int || p['deck'] < 0 || p['deck'] > 1)) {
       issue('invalid_deck', 'nodes.deck', n.id);
@@ -1404,39 +1415,11 @@ void _validateExtras(
     if (u['kind'] != 'atomic')
       issue('invalid_selection_unit_kind', 'selectionUnits.kind');
   }
-  final seats = <String>{};
   for (final a in d.attachments) {
-    if (a.keys.any(
-      (k) => !const [
-        'id',
-        'seatId',
-        'targetId',
-        'kind',
-        'edge',
-        't',
-        'gap',
-        'x',
-        'y',
-        'rotation',
-        'manual',
-        'offset',
-      ].contains(k),
-    ))
-      issue('unknown_attachment_field', 'attachments');
-    if (a['id'] != null) identity(a['id'], 'attachments.id');
-    if (a['seatId'] is! String || !seats.add('${a['seatId']}'))
-      issue('duplicate_attachment', 'attachments.seatId');
-    if (nodes[a['targetId']]?.kind != 'table')
-      issue('invalid_attachment_target', 'attachments.targetId');
-    if (!const ['edge', 'perimeter'].contains(a['kind']))
-      issue('invalid_attachment_kind', 'attachments.kind');
-    if (!_finite(a['t']) || a['t'] < 0 || a['t'] > 1)
-      issue('invalid_attachment_t', 'attachments.t');
-    if (!_finite(a['gap']) || a['gap'] < 0)
-      issue('invalid_attachment_gap', 'attachments.gap');
-    if (a['kind'] == 'edge' &&
-        !const ['top', 'right', 'bottom', 'left'].contains(a['edge']))
-      issue('invalid_attachment_edge', 'attachments.edge');
+    {
+      if (a['id'] != null) identity(a['id'], 'attachments.id');
+      continue;
+    }
   }
   final sectionRoots = <String>{};
   for (final s in d.sections) {
@@ -1461,120 +1444,6 @@ void _validateExtras(
       issue('invalid_order', 'sections.order');
     if (s['levelId'] != null && s['levelId'] is! String)
       issue('invalid_level', 'sections.levelId');
-  }
-  final assemblyRoots = <String>{};
-  for (final g in d.generators) {
-    identity(g['id'], 'generators.id');
-    fields(g, const {
-      'id',
-      'kind',
-      'rootId',
-      'assemblyId',
-      'nodeIds',
-      'parameters',
-      'version',
-    }, 'generators');
-    if (g.containsKey('rootId') &&
-        g.containsKey('assemblyId') &&
-        g['rootId'] != g['assemblyId'])
-      issue('conflicting_generator_root', 'generators.rootId');
-    if (g['version'] != null && g['version'] != 1)
-      issue('unsupported_generator_version', 'generators.version');
-    final params = g['parameters'];
-    if (params != null) {
-      if (params is! Map) {
-        issue('invalid_generator_parameters', 'generators.parameters');
-      } else {
-        fields(Map<String, dynamic>.from(params), const {
-          'rows',
-          'seatsPerRow',
-          'blocks',
-          'aisle',
-          'spacing',
-          'rowSpacing',
-          'x',
-          'y',
-          'arc',
-          'left',
-          'right',
-          'rear',
-          'compartments',
-          'seats',
-          'shape',
-          'count',
-          'width',
-          'height',
-          'gap',
-        }, 'generators.parameters');
-        for (final e in params.entries) {
-          if (e.key == 'shape') {
-            if (!const [
-              'rect',
-              'rectangle',
-              'roundedRect',
-              'ellipse',
-              'oval',
-              'circle',
-              'round',
-            ].contains(e.value))
-              issue('invalid_shape', 'generators.parameters.shape');
-          } else if (!_finite(e.value) ||
-              (e.value as num).abs() > layoutLimits['geometryAbsMax']!) {
-            issue(
-              'invalid_generator_parameter',
-              'generators.parameters.${e.key}',
-            );
-          } else if (const [
-                'rows',
-                'seatsPerRow',
-                'blocks',
-                'left',
-                'right',
-                'rear',
-                'compartments',
-                'seats',
-                'count',
-              ].contains(e.key) &&
-              (e.value is! int || e.value < 0)) {
-            issue('invalid_generator_count', 'generators.parameters.${e.key}');
-          } else if (const [
-                'spacing',
-                'rowSpacing',
-                'width',
-                'height',
-              ].contains(e.key) &&
-              e.value <= 0) {
-            issue(
-              'invalid_generator_parameter',
-              'generators.parameters.${e.key}',
-            );
-          }
-        }
-      }
-    }
-    final root = g['rootId'] ?? g['assemblyId'];
-    if (root is! String ||
-        nodes[root]?.kind != (g['kind'] == 'table' ? 'table' : 'group') ||
-        !assemblyRoots.add(root))
-      issue('invalid_generator_root', 'generators.rootId');
-    if (!const [
-      'rows',
-      'row',
-      'arc',
-      'bus',
-      'compartments',
-      'table',
-    ].contains(g['kind']))
-      issue('invalid_generator_kind', 'generators.kind');
-    if (g['nodeIds'] is List &&
-        (g['nodeIds'] as List).toSet().length != (g['nodeIds'] as List).length)
-      issue('duplicate_generator_member', 'generators.nodeIds');
-    if (g['nodeIds'] != null &&
-        (g['nodeIds'] is! List ||
-            (g['nodeIds'] as List).any(
-              (id) => id is! String || !nodes.containsKey(id),
-            )))
-      issue('invalid_generator_nodes', 'generators.nodeIds');
   }
   for (final p in d.presets) {
     identity(p['id'], 'presets.id');
@@ -1644,88 +1513,14 @@ void _validateExtras(
   }
 }
 
-/// Validate font outline snapshots at import/provider boundaries, never per frame.
+/// Validate canonical prepared resources once at the resource admission seam.
 List<LayoutIssue> validateLayoutResources(Map<String, dynamic> resources) {
   final serializable = Map<String, dynamic>.from(resources)..remove('images');
-  final out = _jsonIssues(serializable, path: 'resources');
-  void issue(String r, String p) => out.add(LayoutIssue(r, p));
-  if (resources.isEmpty) return out;
-  if (resources['protocol'] != 1)
-    issue('unsupported_resource_protocol', 'resources.protocol');
-  final fonts = resources['fonts'];
-  if (fonts == null) return out;
-  if (fonts is! Map) {
-    issue('invalid_fonts', 'resources.fonts');
-    return out;
-  }
-  for (final entry in fonts.entries) {
-    final id = entry.key, font = entry.value, path = 'resources.fonts.$id';
-    if (id is! String || id.isEmpty || id.length > 256 || font is! Map) {
-      issue('invalid_font', path);
-      continue;
-    }
-    if (font['id'] != id) issue('font_id_mismatch', '$path.id');
-    if (font['hash'] is! String || !_sha256Pattern.hasMatch(font['hash']))
-      issue('invalid_font_hash', '$path.hash');
-    if (!_finite(font['unitsPerEm']) ||
-        font['unitsPerEm'] <= 0 ||
-        font['unitsPerEm'] > 1000000)
-      issue('invalid_font_metrics', '$path.unitsPerEm');
-    if (!_finite(font['ascent']) ||
-        font['ascent'] <= 0 ||
-        !_finite(font['descent']) ||
-        font['descent'] > 0)
-      issue('invalid_font_metrics', path);
-    final glyphs = font['glyphs'];
-    if (glyphs is! Map || glyphs.length > 65536) {
-      issue('invalid_glyph_map', '$path.glyphs');
-      continue;
-    }
-    for (final glyphEntry in glyphs.entries) {
-      final char = glyphEntry.key,
-          glyph = glyphEntry.value,
-          gpath = '$path.glyphs.$char';
-      if (char is! String || char.runes.length != 1 || glyph is! Map) {
-        issue('invalid_glyph', gpath);
-        continue;
-      }
-      if (!_finite(glyph['advance']) || glyph['advance'] < 0)
-        issue('invalid_advance', '$gpath.advance');
-      final commands = glyph['path'];
-      if (commands is! List || commands.length > 65536) {
-        issue('invalid_glyph_path', '$gpath.path');
-        continue;
-      }
-      var open = false;
-      for (var i = 0; i < commands.length; i++) {
-        final c = commands[i];
-        if (c is! List || c.isEmpty || c.first is! String) {
-          issue('invalid_path_command', '$gpath.path[$i]');
-          continue;
-        }
-        final arity = const {'M': 3, 'L': 3, 'C': 7, 'Q': 5, 'Z': 1}[c.first];
-        if (arity == null ||
-            c.length != arity ||
-            c
-                .skip(1)
-                .any(
-                  (v) =>
-                      !_finite(v) ||
-                      (v as num).abs() > layoutLimits['geometryAbsMax']!,
-                )) {
-          issue('invalid_path_command', '$gpath.path[$i]');
-          continue;
-        }
-        if (c.first == 'M') {
-          open = true;
-        } else if (!open) {
-          issue('path_missing_move', '$gpath.path[$i]');
-        }
-        if (c.first == 'Z') open = false;
-      }
-    }
-  }
-  return out;
+  final issues = _jsonIssues(serializable, path: 'resources');
+  if (issues.isNotEmpty || resources.isEmpty) return issues;
+  if (resources['protocol'] != canonicalTextResourceProtocol)
+    return [LayoutIssue('unsupported_resource_protocol', 'resources.protocol')];
+  return validateCanonicalTextResources(resources);
 }
 
 const layoutAppearanceKinds = <String>{
@@ -1787,38 +1582,20 @@ Map<String, dynamic> effectiveNodeProperties(
   VenueLayoutDocument document,
   LayoutNode node,
 ) {
-  final global = document.appearance[node.kind];
-  final open = const [
-    'line',
-    'polyline',
-    'arrow',
-  ].contains(node.properties['shape']);
-  if ((global is! Map || global.isEmpty) && !open) return node.properties;
-  final result = <String, dynamic>{
-    ...node.properties,
-    if (global is Map) ...Map<String, dynamic>.from(global),
-  };
+  {
+    final resolved = resolveNodeAppearance(document, node).values;
+    final visual = Map<String, dynamic>.from(resolved)..remove('label');
+    return frozenMap({
+      ...surfaceGeometryProperties(node),
+      ...visual,
+      ...Map<String, dynamic>.from(resolved['label'] as Map? ?? {}),
+    });
+  }
+
   // Authoring defaults are materialized by configurePlanTableSeating. Local
   // physical profiles remain authoritative, including locked assemblies.
-  if (node.kind == 'table') {
-    for (final key in layoutSeatingDefaultKeys) {
-      if (node.properties.containsKey(key)) {
-        result[key] = node.properties[key];
-      } else {
-        result.remove(key);
-      }
-    }
-  }
-  for (final key
-      in node.properties['appearanceOverrides'] as List? ?? const []) {
-    if (node.properties.containsKey(key))
-      result[key as String] = node.properties[key];
-  }
+
   // Open divider geometry has no surface, regardless of the shared shape fill.
-  if (const ['line', 'polyline', 'arrow'].contains(result['shape'])) {
-    result['fill'] = '#00000000';
-  }
-  return frozenMap(result);
 }
 
 /// Structural comparison for validated immutable nodes. Unchanged nodes are an
@@ -1837,6 +1614,14 @@ bool sameLayoutNode(LayoutNode a, LayoutNode b) {
       quantize(a.rotation) != quantize(b.rotation) ||
       quantize(a.width) != quantize(b.width) ||
       quantize(a.height) != quantize(b.height))
+    return false;
+  if (!sameLayoutValue(a.style, b.style) ||
+      !sameLayoutValue(a.childStyles, b.childStyles) ||
+      !sameLayoutValue(a.seating, b.seating) ||
+      !sameLayoutValue(a.surface, b.surface) ||
+      !sameLayoutValue(a.assembly, b.assembly) ||
+      !sameLayoutValue(a.graphic, b.graphic) ||
+      !sameLayoutValue(a.originalSource, b.originalSource))
     return false;
   if (identical(a.properties, b.properties)) return true;
   if (a.properties.length != b.properties.length) return false;
@@ -1859,6 +1644,11 @@ bool sameLayoutNode(LayoutNode a, LayoutNode b) {
 /// Rare record/list reorderings retain the canonical serializer as the oracle.
 bool sameLayoutDocument(VenueLayoutDocument a, VenueLayoutDocument b) {
   if (identical(a, b)) return true;
+  if (a.schemaVersion != b.schemaVersion ||
+      !sameLayoutValue(a.styles, b.styles) ||
+      !sameLayoutValue(a.seatingDefaults, b.seatingDefaults) ||
+      !sameLayoutValue(a.textPolicy, b.textPolicy))
+    return false;
   if (a.symbolSetVersion != b.symbolSetVersion ||
       a.nodes.length != b.nodes.length)
     return false;
@@ -1869,14 +1659,11 @@ bool sameLayoutDocument(VenueLayoutDocument a, VenueLayoutDocument b) {
     if (!sameLayoutNode(a.nodes[i], b.nodes[i])) return false;
   }
   if (!sameLayoutValue(a.canvas, b.canvas) ||
-      !sameLayoutValue(a.defaultTextStyle, b.defaultTextStyle) ||
-      !sameLayoutValue(a.appearance, b.appearance) ||
       !sameLayoutValue(a.background, b.background))
     return false;
   if (sameLayoutValue(a.sections, b.sections) &&
       sameLayoutValue(a.selectionUnits, b.selectionUnits) &&
       sameLayoutValue(a.attachments, b.attachments) &&
-      sameLayoutValue(a.generators, b.generators) &&
       sameLayoutValue(a.presets, b.presets))
     return true;
   return jsonEncode(a.toJson()) == jsonEncode(b.toJson());
@@ -1953,4 +1740,554 @@ bool polygonRingsTouch(List<List<double>> a, List<List<double>> b) {
         return true;
     }
   return false;
+}
+
+void _validateCanonicalDocument(
+  VenueLayoutDocument d,
+  Map<String, LayoutNode> nodes,
+  List<LayoutIssue> out,
+) {
+  void issue(String reason, String path, [String? id]) =>
+      out.add(LayoutIssue(reason, path, id));
+  void leaves(
+    Object? v,
+    Map<String, Map<String, Object>> fields,
+    String path, [
+    String? id,
+  ]) {
+    for (final i in validateCanonicalLeaves(v, fields, path))
+      issue(i.reason, i.path, id);
+  }
+
+  if (d.styles.keys.any((k) => k != 'label' && k != 'kinds'))
+    issue('unknown_style_scope', 'styles');
+  if (d.styles.containsKey('label'))
+    leaves(d.styles['label'], canonicalLabelFields, 'styles.label');
+  final kinds = d.styles['kinds'];
+  if (kinds != null) {
+    if (kinds is! Map) {
+      issue('invalid_kind_styles', 'styles.kinds');
+    } else
+      for (final e in kinds.entries) {
+        if (!canonicalStyleKinds.contains(e.key)) {
+          issue('unknown_style_kind', 'styles.kinds.${e.key}');
+          continue;
+        }
+        for (final i in validateCanonicalStyle(
+          e.value,
+          'styles.kinds.${e.key}',
+          kind: e.key as String,
+        ))
+          issue(i.reason, i.path);
+      }
+  }
+  leaves(d.seatingDefaults, canonicalSeatingFields, 'seatingDefaults');
+  leaves(d.textPolicy, {
+    for (final k in ['language', 'direction']) k: canonicalLabelFields[k]!,
+  }, 'textPolicy');
+  if (!d.textPolicy.containsKey('language') ||
+      !d.textPolicy.containsKey('direction'))
+    issue('missing_text_policy', 'textPolicy');
+  for (final node in d.nodes) {
+    final path = 'nodes.${node.id}';
+    for (final i in validateCanonicalStyle(
+      node.style,
+      '$path.style',
+      kind: node.kind,
+    ))
+      issue(i.reason, i.path, node.id);
+    final legacy = {
+      ...legacyStyleDestinations.keys,
+      ...legacySeatingDestinations.keys,
+      'appearanceOverrides',
+      'manual',
+      'manualRotation',
+      'assembly',
+    };
+    for (final key in node.properties.keys)
+      if (legacy.contains(key))
+        issue('legacy_property_forbidden', '$path.$key', node.id);
+    for (final key in node.properties.keys)
+      if (!canonicalGeometryPropertyKeys.contains(key) && !legacy.contains(key))
+        issue('unknown_canonical_geometry_field', '$path.$key', node.id);
+    if (node.originalSource != null &&
+        (node.kind != 'vector' ||
+            !validOriginalSvgSource(node.originalSource!)))
+      issue('invalid_original_source', '$path.originalSource', node.id);
+    if (node.kind == 'table') {
+      leaves(node.seating, canonicalSeatingFields, '$path.seating', node.id);
+      if (node.childStyles.keys.any((k) => k != 'seat'))
+        issue('invalid_child_style_kind', '$path.childStyles', node.id);
+      if (node.childStyles.containsKey('seat'))
+        for (final i in validateCanonicalStyle(
+          node.childStyles['seat'],
+          '$path.childStyles.seat',
+          kind: 'seat',
+        ))
+          issue(i.reason, i.path, node.id);
+      _validateCanonicalSurface(node, out);
+      if (node.properties.keys.any(
+        (k) => const {'shape', 'points', 'holes'}.contains(k),
+      ))
+        issue('legacy_surface_forbidden', path, node.id);
+    } else {
+      final assemblyRoot =
+          const {'group', 'furniture'}.contains(node.kind) &&
+          const {
+            'rows',
+            'bus',
+            'compartments',
+            'couch',
+          }.contains(node.assembly?['kind']);
+      if (node.childStyles.isNotEmpty ||
+          node.surface != null ||
+          node.seating.isNotEmpty && !assemblyRoot)
+        issue('table_record_on_other_kind', path, node.id);
+      if (assemblyRoot)
+        leaves(node.seating, canonicalSeatingFields, '$path.seating', node.id);
+    }
+    if (node.assembly != null) {
+      for (final problem in validateCanonicalAssembly(
+        node.assembly!,
+        node.kind,
+        '$path.assembly',
+      ))
+        issue(problem.reason, problem.path, node.id);
+    }
+    if (node.kind == 'vector') {
+      if (node.graphic?['type'] != 'vector') {
+        issue('vector_graphic_required', '$path.graphic', node.id);
+      } else
+        try {
+          LayoutVectorGraphic.fromJson({...node.graphic!}..remove('type'));
+        } on GraphicImportFailure catch (e) {
+          issue(e.reason, '$path.graphic', node.id);
+        }
+    } else if (node.kind == 'image') {
+      final g = node.graphic;
+      if (g == null ||
+          g['type'] != 'bitmap' ||
+          g.keys.any(
+            (k) => !const {'type', 'assetRef', 'hash', 'crop'}.contains(k),
+          ) ||
+          g['assetRef'] is! String ||
+          (g['assetRef'] as String).isEmpty ||
+          g['hash'] is! String ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch('${g['hash']}')) {
+        issue('invalid_bitmap_graphic', '$path.graphic', node.id);
+      } else {
+        final crop = g['crop'];
+        if (crop is! Map ||
+            crop.keys.toSet().difference({
+              'x',
+              'y',
+              'width',
+              'height',
+            }).isNotEmpty ||
+            [
+              'x',
+              'y',
+              'width',
+              'height',
+            ].any((k) => crop[k] is! num || !(crop[k] as num).isFinite) ||
+            crop['x'] < 0 ||
+            crop['y'] < 0 ||
+            crop['width'] <= 0 ||
+            crop['height'] <= 0 ||
+            crop['x'] + crop['width'] > 1 ||
+            crop['y'] + crop['height'] > 1)
+          issue('invalid_bitmap_crop', '$path.graphic.crop', node.id);
+      }
+    } else if (node.graphic != null) {
+      issue('graphic_on_other_kind', '$path.graphic', node.id);
+    }
+  }
+  final attached = <String>{};
+  for (final a in d.attachments) {
+    final seat = nodes[a['seatId']], target = nodes[a['targetId']];
+    final assemblyTarget =
+        target != null &&
+        const {'group', 'furniture'}.contains(target.kind) &&
+        const {
+          'rows',
+          'bus',
+          'compartments',
+          'couch',
+        }.contains(target.assembly?['kind']);
+    if (a.keys.any(
+          (k) => !const {
+            'id',
+            'seatId',
+            'targetId',
+            'placement',
+            'rotationMode',
+          }.contains(k),
+        ) ||
+        !attached.add('${a['seatId']}') ||
+        seat?.kind != 'seat' ||
+        seat?.parentId != target?.id ||
+        (target?.kind != 'table' && !assemblyTarget))
+      issue('invalid_attachment', 'attachments');
+    if (!const {'auto', 'manual'}.contains(a['rotationMode']))
+      issue('invalid_rotation_mode', 'attachments.rotationMode');
+    final placement = a['placement'];
+    if (placement is! Map) {
+      issue('invalid_placement', 'attachments.placement');
+      continue;
+    }
+    final mode = placement['mode'];
+    if (mode == 'automatic' || mode == 'free') {
+      if (placement.length != 1)
+        issue('invalid_placement', 'attachments.placement');
+    } else if (mode == 'sidePinned') {
+      if (target?.kind != 'table')
+        issue('invalid_side_pin_target', 'attachments.targetId');
+      if (placement['cell'] != null) {
+        final cell = placement['cell'];
+        if (placement.keys.any(
+              (k) => !const {'mode', 'cell', 'face'}.contains(k),
+            ) ||
+            cell is! List ||
+            cell.length != 2 ||
+            cell.any((v) => v is! int) ||
+            !const {
+              'top',
+              'right',
+              'bottom',
+              'left',
+            }.contains(placement['face']))
+          issue('invalid_grid_pin', 'attachments.placement');
+        else if (target == null ||
+            !canonicalGridPinOnBoundary(target, cell, placement['face']))
+          issue('invalid_grid_pin_boundary', 'attachments.placement');
+      } else if (placement.keys.any(
+            (k) => !const {'mode', 'side', 't'}.contains(k),
+          ) ||
+          !const {
+            'top',
+            'right',
+            'bottom',
+            'left',
+            'perimeter',
+          }.contains(placement['side']) ||
+          placement['t'] is! num ||
+          !(placement['t'] as num).isFinite ||
+          placement['t'] < 0 ||
+          placement['t'] > 1)
+        issue('invalid_side_pin', 'attachments.placement');
+      else if (placement['cell'] == null &&
+          ((placement['side'] == 'perimeter' &&
+                  target?.surface?['type'] != 'circle') ||
+              (placement['side'] != 'perimeter' &&
+                  target?.surface?['type'] != 'rect')))
+        issue('invalid_side_pin_surface', 'attachments.placement');
+    } else {
+      issue('invalid_placement_mode', 'attachments.placement');
+    }
+  }
+}
+
+/// Grid coordinates identify filled module cells; holes remain empty.
+/// Admission and physical pin placement use this same boundary predicate.
+bool canonicalGridCellFilled(LayoutNode node, int x, int y) {
+  final surface = node.surface;
+  if (surface?['type'] != 'grid') return false;
+  try {
+    List<List<double>> ring(Object? value) => [
+      for (final point in value as List)
+        [(point[0] as num).toDouble(), (point[1] as num).toDouble()],
+    ];
+    return polygonRingContains(ring(surface!['outer']), x + .5, y + .5) &&
+        !(surface['holes'] as List).any(
+          (hole) => polygonRingContains(ring(hole), x + .5, y + .5),
+        );
+  } on Object {
+    return false;
+  }
+}
+
+bool canonicalGridPinOnBoundary(LayoutNode node, List cell, String face) {
+  if (cell.length != 2 || cell.any((value) => value is! int)) return false;
+  final delta = switch (face) {
+    'top' => [0, -1],
+    'right' => [1, 0],
+    'bottom' => [0, 1],
+    'left' => [-1, 0],
+    _ => null,
+  };
+  return delta != null &&
+      canonicalGridCellFilled(node, cell[0], cell[1]) &&
+      !canonicalGridCellFilled(node, cell[0] + delta[0], cell[1] + delta[1]);
+}
+
+void _validateCanonicalSurface(LayoutNode node, List<LayoutIssue> out) {
+  void issue(String reason) =>
+      out.add(LayoutIssue(reason, 'nodes.${node.id}.surface', node.id));
+  final s = node.surface;
+  if (s == null) {
+    issue('surface_required');
+    return;
+  }
+  if (s['type'] == 'rect' || s['type'] == 'circle') {
+    if (s.length != 1) issue('unknown_surface_field');
+    if (s['type'] == 'circle' && (node.width - node.height).abs() > 1 / 1024)
+      issue('non_circular_surface');
+    if (s['type'] == 'circle' && node.properties['furniture'] == 'bar')
+      issue('bar_circle_unsupported');
+    return;
+  }
+  if (s['type'] != 'grid' ||
+      s.keys.any(
+        (k) => !const {'type', 'moduleSize', 'outer', 'holes'}.contains(k),
+      )) {
+    issue('invalid_surface');
+    return;
+  }
+  final module = s['moduleSize'], outer = s['outer'], rawHoles = s['holes'];
+  if (module is! num ||
+      !module.isFinite ||
+      module <= 0 ||
+      module > 1000000 ||
+      outer is! List ||
+      rawHoles is! List ||
+      rawHoles.length > 128) {
+    issue('invalid_grid');
+    return;
+  }
+  final rings = [outer, ...rawHoles];
+  var vertices = 0;
+  final valid = <List<List<double>>>[];
+  for (final raw in rings) {
+    if (raw is! List ||
+        raw.length < 4 ||
+        raw.any(
+          (p) =>
+              p is! List ||
+              p.length != 2 ||
+              p.any((v) => v is! int || v.abs() > 16384),
+        )) {
+      issue('invalid_grid_ring');
+      return;
+    }
+    vertices += raw.length;
+    final ring = raw
+        .map((p) => [(p[0] as num).toDouble(), (p[1] as num).toDouble()])
+        .toList();
+    for (var i = 0; i < ring.length; i++) {
+      final a = ring[i], b = ring[(i + 1) % ring.length];
+      if ((a[0] == b[0]) == (a[1] == b[1])) {
+        issue('non_orthogonal_grid');
+        return;
+      }
+    }
+    if (polygonSelfIntersects(ring) || polygonRingArea(ring) == 0) {
+      issue('invalid_grid_ring');
+      return;
+    }
+    valid.add(ring);
+  }
+  if (vertices > 512) {
+    issue('grid_vertex_limit');
+    return;
+  }
+  final ring = valid.first,
+      minX = ring.map((p) => p[0]).reduce(min),
+      minY = ring.map((p) => p[1]).reduce(min),
+      maxX = ring.map((p) => p[0]).reduce(max),
+      maxY = ring.map((p) => p[1]).reduce(max);
+  if (minX != 0 ||
+      minY != 0 ||
+      maxX * maxY > 16384 ||
+      (node.width - maxX * module).abs() > 1 / 1024 ||
+      (node.height - maxY * module).abs() > 1 / 1024)
+    issue('grid_dimensions');
+  for (var i = 1; i < valid.length; i++) {
+    final hole = valid[i];
+    if (polygonRingArea(ring) * polygonRingArea(hole) >= 0 ||
+        !hole.every((p) => polygonRingContains(ring, p[0], p[1])) ||
+        polygonRingsTouch(ring, hole))
+      issue('invalid_grid_hole');
+    for (var j = 1; j < i; j++) {
+      final prior = valid[j];
+      if (polygonRingsTouch(prior, hole) ||
+          polygonRingContains(prior, hole[0][0], hole[0][1]) ||
+          polygonRingContains(hole, prior[0][0], prior[0][1]))
+        issue('overlapping_grid_holes');
+    }
+  }
+}
+
+class ResolvedNodeAppearance {
+  ResolvedNodeAppearance(
+    Map<String, dynamic> values,
+    Map<String, dynamic> sources,
+  ) : values = frozenMap(values),
+      sources = frozenMap(sources);
+  final Map<String, dynamic> values, sources;
+  Map<String, dynamic> get label =>
+      Map<String, dynamic>.from(values['label'] as Map? ?? {});
+}
+
+/// One sparse cascade, including provenance. Lock never changes inheritance.
+ResolvedNodeAppearance resolveNodeAppearance(
+  VenueLayoutDocument document,
+  LayoutNode node,
+) {
+  final values = <String, dynamic>{}, sources = <String, dynamic>{};
+  void layer(Map raw, String source) {
+    final expanded = <String, dynamic>{};
+    final family = raw['material'];
+    if (family is String) {
+      final material = layoutMaterialFamilies[family];
+      if (material != null &&
+          node.kind != 'text' &&
+          node.kind != 'image' &&
+          node.kind != 'vector') {
+        expanded.addAll({
+          'strokeWidth': node.kind == 'seat'
+              ? material['seatStrokeWidth'] ?? material['strokeWidth']
+              : material['strokeWidth'],
+          'cornerRadius': node.kind == 'seat'
+              ? material['seatRadius'] ?? material['radius']
+              : material['radius'],
+          if (node.kind == 'seat') 'seatStyle': material['seatStyle'],
+        });
+      }
+    }
+    expanded.addAll(Map<String, dynamic>.from(raw));
+    for (final e in expanded.entries) {
+      if (e.key == 'label' && e.value is Map) {
+        final label = <String, dynamic>{
+          ...?values['label'] as Map<String, dynamic>?,
+        };
+        for (final leaf in (e.value as Map).entries) {
+          label[leaf.key as String] = leaf.value;
+          sources['label.${leaf.key}'] = source;
+        }
+        values['label'] = label;
+      } else {
+        values[e.key] = e.value;
+        sources[e.key] = source;
+      }
+    }
+  }
+
+  layer({
+    'opacity': 1,
+    if (node.kind != 'text' &&
+        node.kind != 'image' &&
+        node.kind != 'vector') ...{
+      'material': 'simple',
+      'fill': node.kind == 'seat'
+          ? layoutDefaultSeatFill
+          : node.kind == 'table'
+          ? '#E2E8F0FF'
+          : node.kind == 'capacityArea'
+          ? '#DBEAFEFF'
+          : '#F1F5F9FF',
+      'stroke': '#475569FF',
+      'strokeWidth': 1,
+      'cornerRadius': node.kind == 'seat' ? 5 : 6,
+      'strokePattern': {'type': 'solid'},
+    },
+    'label': {
+      ...canonicalLabelDefaults,
+      'align': node.kind == 'text' ? 'left' : 'center',
+      ...document.textPolicy,
+    },
+  }, 'core');
+  if (document.styles['label'] case final Map label)
+    layer({'label': label}, 'styles.label');
+  if ((document.styles['kinds'] as Map?)?[node.kind] case final Map kind)
+    layer(kind, 'styles.kinds.${node.kind}');
+  if (node.kind == 'seat' && node.parentId != null) {
+    final parent = document.nodes
+        .where((n) => n.id == node.parentId && n.kind == 'table')
+        .firstOrNull;
+    if (parent?.childStyles['seat'] case final Map child)
+      layer(child, 'table:${parent!.id}');
+  }
+  layer(node.style, 'node:${node.id}');
+  return ResolvedNodeAppearance(values, sources);
+}
+
+/// Set/Unset modifies one authored leaf. Equal values stay explicit; null is
+/// never a reset and siblings retain their declarations.
+Map<String, dynamic> patchCanonicalStyle(
+  Map<String, dynamic> style,
+  List<String> path, {
+  Object? value,
+  bool unset = false,
+}) {
+  if (path.isEmpty ||
+      path.length > 2 ||
+      (path.length == 2 && path.first != 'label') ||
+      (!unset && value == null))
+    throw const FormatException('invalid_style_patch');
+  final next = Map<String, dynamic>.from(style);
+  if (path.length == 1) {
+    if (unset) {
+      next.remove(path.single);
+    } else {
+      next[path.single] = value;
+    }
+  } else {
+    final label = Map<String, dynamic>.from(next['label'] as Map? ?? {});
+    if (unset) {
+      label.remove(path.last);
+    } else {
+      label[path.last] = value;
+    }
+    if (label.isEmpty) {
+      next.remove('label');
+    } else {
+      next['label'] = label;
+    }
+  }
+  return frozenMap(next);
+}
+
+/// Rendering/geometry projection only. Grid rings remain the stored authority;
+/// materialized width/height and node transforms are not recomputed on load.
+Map<String, dynamic> surfaceGeometryProperties(LayoutNode node) {
+  final surface = node.surface;
+  if (node.kind != 'table' || surface == null) return node.properties;
+  final result = <String, dynamic>{...node.properties};
+  switch (surface['type']) {
+    case 'rect':
+      result['shape'] = 'rect';
+    case 'circle':
+      result['shape'] = 'circle';
+    case 'grid':
+      bool validRing(Object? raw) =>
+          raw is List &&
+          raw.every(
+            (p) =>
+                p is List &&
+                p.length == 2 &&
+                p.every((v) => v is num && v.isFinite),
+          );
+      if (surface['moduleSize'] is! num ||
+          !(surface['moduleSize'] as num).isFinite ||
+          !validRing(surface['outer']) ||
+          surface['holes'] is! List ||
+          !(surface['holes'] as List).every(validRing))
+        return node.properties;
+      final module = (surface['moduleSize'] as num).toDouble();
+      List<List<double>> ring(List raw) => [
+        for (final point in raw)
+          [
+            (point[0] as num) * module - node.width / 2,
+            (point[1] as num) * module - node.height / 2,
+          ],
+      ];
+      result.addAll({
+        'shape': 'polygon',
+        'points': ring(surface['outer'] as List),
+        'holes': [
+          for (final hole in surface['holes'] as List) ring(hole as List),
+        ],
+      });
+  }
+  return frozenMap(result);
 }

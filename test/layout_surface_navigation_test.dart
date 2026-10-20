@@ -78,7 +78,13 @@ void main() {
     'selected-object canvas zooms wheel at pointer and Shift-wheel pans without edits',
     (tester) async {
       var edits = 0;
-      final node = LayoutNode(id: newLayoutId(), kind: 'table', x: 300, y: 200);
+      final node = LayoutNode(
+        id: newLayoutId(),
+        kind: 'table',
+        x: 300,
+        y: 200,
+        surface: const {'type': 'rect'},
+      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

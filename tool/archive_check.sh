@@ -64,7 +64,28 @@ dependency_overrides:
   venue_layout_core:
     path: ../../core
 YAML
+if [[ -n "${BLUEPRINT_REUSE_ARCHIVE:-}" ]]; then
+  python3 - "$OUT" "$BLUEPRINT_REUSE_ARCHIVE" <<'PYREUSE'
+import hashlib,json,pathlib,sys,tarfile
+current,previous=map(pathlib.Path,sys.argv[1:])
+assert json.loads((previous/'archive-result.json').read_text())['passed']
+def contents(path):
+ with tarfile.open(path) as archive:
+  return {m.name:hashlib.sha256(archive.extractfile(m).read()).hexdigest() for m in archive.getmembers() if m.isfile()}
+for name in ['venue_layout_core.tar.gz','venue_seat_picker.tar.gz']:
+ currentFiles,previousFiles=contents(current/name),contents(previous/name)
+ changed={f for f in currentFiles.keys()|previousFiles.keys() if currentFiles.get(f)!=previousFiles.get(f)}
+ # The archive verification shell script is distributed tooling, not a Dart
+ # import, Flutter asset or dependency. Every compiled input must be identical.
+ assert changed <= {'tool/archive_check.sh'},f'Changed Flutter build input: {name}: {changed}'
+assert (previous/'flutter/main.dart.js').is_file()
+(current/'example-build-reuse.json').write_text(json.dumps({'from':str(previous),'identicalFlutterBuildInputs':True,'distributionOnlyException':'tool/archive_check.sh','mainDartJsSha256':hashlib.sha256((previous/'flutter/main.dart.js').read_bytes()).hexdigest()},indent=2)+'\n')
+PYREUSE
+  mkdir -p "$WORK/wrapper/example/build/web"
+  cp -R "$BLUEPRINT_REUSE_ARCHIVE/flutter/." "$WORK/wrapper/example/build/web/"
+else
 (cd "$WORK/wrapper/example" && fvm flutter pub get --offline >"$OUT/example-pub.log" 2>&1 && fvm flutter build web --release --no-web-resources-cdn --no-wasm-dry-run --base-href /flutter/ >"$OUT/example-build.log" 2>&1)
+fi
 # Preserve the exact built/extracted artifacts for the existing demo kit check.
 # This avoids a second Flutter/kernel build for the same frozen inputs.
 mkdir -p "$OUT/flutter" "$OUT/npm" "$ROOT/build/demo/flutter" "$ROOT/build/demo/js"
@@ -79,7 +100,7 @@ python3 "$ROOT/tool/demo_manifest.py" "$ROOT" "$ROOT/build/demo"
 node "$ROOT/tool/qa_archive_browser.mjs" "$WORK/npm/package" "$WORK/wrapper/example/build/web" "$OUT/templates.json" "$OUT"
 python3 - "$WORK/npm/package" "$OUT" <<'PY'
 import hashlib,json,pathlib,sys
-r,out=map(pathlib.Path,sys.argv[1:]);required=['src/index.js','src/index.d.ts','dist/venue_layout_kernel.js','dist/manifest.json','demo/index.html','LICENSE','assets/layout_fonts/fixtures.json','assets/layout_fonts/manifest.json','assets/layout_fonts/Roboto.ttf','assets/layout_fonts/Roboto-Slab.ttf','assets/layout_fonts/Roboto-OFL.txt','assets/layout_fonts/Roboto-Slab-LICENSE.txt']
+r,out=map(pathlib.Path,sys.argv[1:]);required=['src/index.js','src/index.d.ts','dist/venue_layout_kernel.js','dist/manifest.json','demo/index.html','LICENSE','assets/layout_fonts/fixtures.json','assets/layout_fonts/manifest.json','assets/layout_fonts/Roboto-OFL.txt',*[f'assets/layout_fonts/Roboto-{weight}-{style}.ttf' for weight in [400,700] for style in ['normal','italic']]]
 for f in required:assert (r/f).is_file(),f
 assert 'mount' in (r/'src/index.js').read_text()
 (out/'archive-result.json').write_text(json.dumps({'passed':True,'coreSourceByteEquivalent':True,'pubSelectedCoreAndWrapper':True,'actualNpmPack':True,'cleanConsumerTemplates':len(json.loads((out/'templates.json').read_text())),'archivedExampleBuilt':True,'archivedExampleBrowser':True,'requiredNpmFiles':{f:hashlib.sha256((r/f).read_bytes()).hexdigest() for f in required}},indent=2)+'\n')

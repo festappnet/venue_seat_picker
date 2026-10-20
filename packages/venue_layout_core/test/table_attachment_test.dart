@@ -11,11 +11,7 @@ import 'package:venue_layout_core/venue_layout_core.dart';
       nodes: [
         ...original.nodes.map(
           (n) => n.id == fixed.id
-              ? n.copyWith(
-                  x: 0,
-                  locked: locked,
-                  properties: {...n.properties, 'manual': !locked},
-                )
+              ? n.copyWith(x: 0, locked: locked, properties: n.properties)
               : n,
         ),
         free,
@@ -23,7 +19,11 @@ import 'package:venue_layout_core/venue_layout_core.dart';
       attachments: original.attachments
           .map(
             (a) => a['seatId'] == fixed.id
-                ? {...a, 'id': newLayoutId(), 'manual': !locked}
+                ? {
+                    ...a,
+                    'id': newLayoutId(),
+                    'placement': {'mode': 'free'},
+                  }
                 : a,
           )
           .toList(),
@@ -39,7 +39,7 @@ void main() {
     () {
       final (before, tableId, seatId) = fixture();
       final fixed = before.nodes.firstWhere(
-            (n) => n.properties['manual'] == true,
+            (n) => n.kind == 'seat' && seatPlacementFree(before, n),
           ),
           fixedAttachment = before.attachments.firstWhere(
             (a) => a['seatId'] == fixed.id,
@@ -86,7 +86,7 @@ void main() {
     () {
       final (original, tableId, seatId) = fixture();
       final fixed = original.nodes.firstWhere(
-            (n) => n.properties['manual'] == true,
+            (n) => n.kind == 'seat' && seatPlacementFree(original, n),
           ),
           before = original.copyWith(
             nodes: original.nodes
@@ -112,6 +112,7 @@ void main() {
           target = original.nodes.firstWhere((n) => n.kind == 'table'),
           free = LayoutNode(id: newLayoutId(), kind: 'seat', x: 750, y: 300),
           other = LayoutNode(
+            surface: const {'type': 'rect'},
             id: newLayoutId(),
             kind: 'table',
             x: 250,
@@ -134,6 +135,7 @@ void main() {
     final source = tableLayout(shape: 'rect', count: 3),
         sourceSeat = source.nodes.firstWhere((n) => n.kind == 'seat'),
         target = LayoutNode(
+          surface: const {'type': 'rect'},
           id: newLayoutId(),
           kind: 'table',
           x: 900,

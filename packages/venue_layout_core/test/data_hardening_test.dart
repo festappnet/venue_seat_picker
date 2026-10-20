@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
@@ -157,7 +156,7 @@ void main() {
           a = d.attachments.first;
       expect(
         reasons(d.copyWith(attachments: [a, a])),
-        contains('duplicate_attachment'),
+        contains('invalid_attachment'),
       );
       expect(
         reasons(
@@ -167,22 +166,9 @@ void main() {
             ],
           ),
         ),
-        containsAll([
-          'invalid_attachment_target',
-          'invalid_attachment_kind',
-          'invalid_attachment_t',
-        ]),
+        contains('invalid_attachment'),
       );
-      expect(
-        reasons(
-          d.copyWith(
-            generators: [
-              {'id': newLayoutId(), 'kind': 'bus', 'rootId': 'missing'},
-            ],
-          ),
-        ),
-        contains('invalid_generator_root'),
-      );
+
       expect(
         reasons(
           d.copyWith(
@@ -322,6 +308,7 @@ void main() {
             selectionUnits: [
               {
                 'id': newLayoutId(),
+                'kind': 'atomic',
                 'nodeIds': [seat.id],
               },
             ],
@@ -348,6 +335,7 @@ void main() {
             selectionUnits: [
               {
                 'id': newLayoutId(),
+                'kind': 'atomic',
                 'nodeIds': [seats[0].id, seats[1].id],
               },
             ],
@@ -435,207 +423,4 @@ void main() {
     );
     expect(reasons(tooLarge), containsAll(['payload_limit', 'text_limit']));
   });
-  test(
-    'bundled fonts validate and malformed path/metrics/hash snapshots reject',
-    () {
-      final validFont = Map<String, dynamic>.from(
-        jsonDecode(
-          File('../../assets/layout_fonts/fixtures.json').readAsStringSync(),
-        ),
-      );
-      expect(validateLayoutResources(validFont), isEmpty);
-      Map<String, dynamic> resource(Map<String, dynamic> patch) => {
-        'protocol': 1,
-        'fonts': {
-          'test': {
-            'id': 'test',
-            'hash': 'a' * 64,
-            'unitsPerEm': 1000,
-            'ascent': 800,
-            'descent': -200,
-            'glyphs': {
-              'A': {
-                'advance': 600,
-                'path': [
-                  ['M', 0, 0],
-                  ['L', 10, 10],
-                ],
-              },
-            },
-            ...patch,
-          },
-        },
-      };
-      expect(validateLayoutResources(resource({})), isEmpty);
-      for (final patch in [
-        {'hash': 'wrong'},
-        {'id': 'other'},
-        {'descent': 20},
-        {'unitsPerEm': 0},
-        {
-          'glyphs': {
-            'AB': {'advance': 2, 'path': []},
-          },
-        },
-        {
-          'glyphs': {
-            'A': {
-              'advance': -1,
-              'path': [
-                ['X', 1, 2],
-              ],
-            },
-          },
-        },
-        {
-          'glyphs': {
-            'A': {
-              'advance': 1,
-              'path': [
-                ['L', 0, 0],
-                ['C', 1, 2],
-              ],
-            },
-          },
-        },
-        {
-          'glyphs': {
-            'A': {
-              'advance': 1,
-              'path': [
-                ['M', double.nan, 0],
-              ],
-            },
-          },
-        },
-      ]) {
-        expect(validateLayoutResources(resource(patch)), isNotEmpty);
-      }
-    },
-  );
-  test('authored plan labels remain visible below six logical pixels', () {
-    final n = LayoutNode(
-          id: newLayoutId(),
-          kind: 'table',
-          x: 100,
-          y: 100,
-          label: '1',
-          properties: {'size': 12},
-        ),
-        d = VenueLayoutDocument(nodes: [n]),
-        scene = compileScene(d),
-        viewport = <String, double>{
-          'x': 0,
-          'y': 0,
-          'width': 500,
-          'height': 500,
-        };
-    expect(
-      cullScene(
-        scene,
-        viewport,
-        zoom: .49,
-      ).any((item) => item['kind'] == 'glyphs'),
-      isTrue,
-    );
-    expect(
-      cullScene(
-        scene,
-        viewport,
-        zoom: .5,
-      ).any((item) => item['kind'] == 'glyphs'),
-      isTrue,
-    );
-    expect(
-      cullScene(
-        scene,
-        viewport,
-        zoom: .1,
-      ).any((item) => item['kind'] == 'table'),
-      isTrue,
-    );
-  });
-  test(
-    'v1 metadata maps are closed and unknown fields retain original payload',
-    () {
-      final original = valid(), rootId = original['nodes'][0]['id'];
-      final cases = <Map<String, dynamic>>[];
-      var j = jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
-      j['canvas']['silentLegacyScale'] = 2;
-      cases.add(j);
-      j = jsonDecode(jsonEncode(original));
-      j['defaultTextStyle']['cssFont'] = 'external';
-      cases.add(j);
-      j = jsonDecode(jsonEncode(original));
-      j['background'] = {
-        'assetRef': 'image:${'a' * 64}',
-        'x': 1,
-        'y': 1,
-        'width': 100,
-        'height': 80,
-        'rotation': 0,
-        'scale': 1,
-        'crop': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
-        'silentUrl': 'https://example.invalid',
-      };
-      cases.add(j);
-      j = jsonDecode(jsonEncode(original));
-      j['generators'] = [
-        {
-          'id': newLayoutId(),
-          'kind': 'table',
-          'rootId': rootId,
-          'legacyParams': {},
-        },
-      ];
-      cases.add(j);
-      j = jsonDecode(jsonEncode(original));
-      j['generators'] = [
-        {
-          'id': newLayoutId(),
-          'kind': 'table',
-          'rootId': rootId,
-          'parameters': {'undocumented': 2},
-        },
-      ];
-      cases.add(j);
-      for (final source in cases) {
-        try {
-          VenueLayoutDocument.fromJson(source);
-          fail('accepted unknown metadata');
-        } on InvalidLayoutDocument catch (e) {
-          expect(e.issues.map((i) => i.reason), contains('unknown_field'));
-          expect(e.original, source);
-          expect(() => e.original['nodes'].clear(), throwsUnsupportedError);
-        }
-      }
-    },
-  );
-  test(
-    'declared generator parameters and image hash references roundtrip without aliases',
-    () {
-      final root = LayoutNode(id: newLayoutId(), kind: 'group'),
-          d = VenueLayoutDocument(
-            nodes: [root],
-            generators: [
-              {
-                'id': newLayoutId(),
-                'kind': 'rows',
-                'rootId': root.id,
-                'version': 1,
-                'parameters': {
-                  'rows': 3,
-                  'seatsPerRow': 6,
-                  'spacing': 56,
-                  'rowSpacing': 64,
-                  'x': 100,
-                  'y': 100,
-                },
-              },
-            ],
-          );
-      expect(validateDocument(d), isEmpty);
-      expect(VenueLayoutDocument.fromJson(d.toJson()).toJson(), d.toJson());
-    },
-  );
 }

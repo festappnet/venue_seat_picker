@@ -27,9 +27,10 @@ void main() {
       expect(added.width, 77.5);
       expect(added.height, 77.5);
       expect(
-        increased.attachments.singleWhere(
-          (a) => a['seatId'] == added.id,
-        )['gap'],
+        TableSeating.fromDocument(
+          increased,
+          increased.nodes.firstWhere((n) => n.id == table.id),
+        ).gap,
         11.25,
       );
       expect(layoutCollisions(increased), isEmpty);
@@ -82,7 +83,13 @@ void main() {
         expect(n.width, 60);
         expect(n.height, 60);
       }
-      expect(c.document.attachments.every((a) => a['gap'] == 24), isTrue);
+      expect(
+        TableSeating.fromDocument(
+          c.document,
+          c.document.nodes.firstWhere((n) => n.id == table.id),
+        ).gap,
+        24,
+      );
       expect(layoutCollisions(c.document), isEmpty);
       c.undo();
       expect(c.document.toJson(), source.toJson());

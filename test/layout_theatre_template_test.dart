@@ -28,8 +28,8 @@ void main() {
       }
       final curved = document.nodes.where(
         (n) =>
-            n.properties['assembly'] == 'rows' &&
-            (n.properties['arc'] as num? ?? 0) != 0,
+            n.assembly?['kind'] == 'rows' &&
+            (n.assembly?['arc'] as num? ?? 0) != 0,
       );
       expect(curved, hasLength(2));
       for (final row in curved) {

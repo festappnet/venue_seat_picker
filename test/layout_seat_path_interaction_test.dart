@@ -56,9 +56,10 @@ void main() {
         true,
       );
       expect(
-        c.document.nodes
-            .firstWhere((n) => n.id == addedId)
-            .properties['manual'],
+        seatPlacementFree(
+          c.document,
+          c.document.nodes.firstWhere((n) => n.id == addedId),
+        ),
         false,
       );
       final items = compileScene(c.document)['items'] as List;
@@ -97,9 +98,10 @@ void main() {
         table.id,
       );
       expect(
-        c.document.nodes
-            .firstWhere((n) => n.id == chair.id)
-            .properties['manual'],
+        seatPlacementFree(
+          c.document,
+          c.document.nodes.firstWhere((n) => n.id == chair.id),
+        ),
         false,
       );
       c.undo();
@@ -147,7 +149,7 @@ void main() {
           [300, 300],
           [600, 300],
         ],
-        properties: {'stroke': '#334155FF', 'strokeWidth': 1},
+        style: {'stroke': '#334155FF', 'strokeWidth': 1},
       );
       final original = VenueLayoutDocument.empty().copyWith(nodes: [line]);
       final c = VenueLayoutController(original);

@@ -37,9 +37,11 @@ void main() {
       expect(hitTest(lounge, 350, 350), node.id);
       expect(lounge.nodes.single.toJson(), node.toJson());
       final square = lounge.copyWith(
-        appearance: {
-          ...lounge.appearance,
-          'table': {...lounge.appearance['table'] as Map, 'cornerRadius': 0},
+        styles: {
+          'kinds': {
+            ...lounge.styles['kinds'] as Map,
+            'table': {'material': 'lounge', 'cornerRadius': 0},
+          },
         },
       );
       expect(path(square).where((c) => c[0] == 'Q'), isEmpty);
@@ -62,8 +64,10 @@ void main() {
       final node = brush.node(id: newLayoutId(), bar: true);
       final d = VenueLayoutDocument(
         nodes: [node],
-        appearance: {
-          'table': {'cornerRadius': 200},
+        styles: {
+          'kinds': {
+            'table': {'cornerRadius': 200},
+          },
         },
       );
       final path =
@@ -83,58 +87,11 @@ void main() {
       expect(barSurfaceModuleSize, lessThan(tableSurfaceModuleSize));
     },
   );
-  for (final polygon in [false, true]) {
-    test(
-      'moving ${polygon ? 'custom' : 'rectangular'} table relocates its chairs around a neighbour',
-      () {
-        final brush = GridSurfaceBrush(originX: 300, originY: 300);
-        brush.paint(350, 350);
-        brush.paint(550, 350);
-        brush.paint(450, 350);
-        brush.paint(450, 450);
-        final root = brush.node(id: newLayoutId());
-        final before = polygon
-            ? reflowTable(VenueLayoutDocument(nodes: [root]), root.id, 6)
-            : tableLayout(
-                shape: 'rect',
-                count: 6,
-                x: 400,
-                y: 400,
-                width: 240,
-                height: 140,
-              );
-        final table = before.nodes.firstWhere((n) => n.kind == 'table');
-        final seat = before.nodes.firstWhere((n) => n.kind == 'seat');
-        final seatMatrix = worldMatrix(before, seat);
-        final obstacle = LayoutNode(
-          id: newLayoutId(),
-          kind: 'seat',
-          x: seatMatrix[4] + 600,
-          y: seatMatrix[5],
-          width: 40,
-          height: 40,
-        );
-        final document = before.copyWith(nodes: [...before.nodes, obstacle]);
-        final moved = moveLayoutWithinCanvas(document, {table.id}, dx: 600);
-        expect(
-          moved.nodes.firstWhere((n) => n.id == table.id).x,
-          table.x + 600,
-        );
-        expect(moved.nodes.map((n) => n.id), document.nodes.map((n) => n.id));
-        expect(layoutCollisions(moved), isEmpty);
-        expect(moved.nodes.last.toJson(), obstacle.toJson());
-        expect(
-          moved.attachments.map((a) => a['seatId']),
-          before.attachments.map((a) => a['seatId']),
-        );
-        expect(validateDocument(moved), isEmpty);
-      },
-    );
-  }
   test('blocked perimeter rejects the move without losing seats', () {
     final before = tableLayout(shape: 'rect', count: 6, x: 300, y: 300);
     final table = before.nodes.first;
     final obstacle = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       x: 1800,

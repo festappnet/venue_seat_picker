@@ -38,7 +38,10 @@ void main() {
         stools(d).every((n) => n.properties['furniture'] == 'stool'),
         isTrue,
       );
-      expect(d.attachments.every((a) => a['edge'] == side), isTrue);
+      expect(
+        d.attachments.every((a) => a['placement']?['mode'] == 'automatic'),
+        isTrue,
+      );
       expect(layoutCollisions(d), isEmpty);
       expect(VenueLayoutDocument.fromJson(d.toJson()).toJson(), d.toJson());
       final more = resizeNode(
@@ -103,7 +106,12 @@ void main() {
       );
       expect(stools(changed).map((n) => n.id), stools(d).map((n) => n.id));
       guestOnly(changed);
-      expect(changed.attachments.every((a) => a['edge'] == 'top'), isTrue);
+      expect(
+        changed.attachments.every(
+          (a) => a['placement']?['mode'] == 'automatic',
+        ),
+        isTrue,
+      );
       expect(() => setBarGuestSide(d, bar.id, 'left'), throwsStateError);
       final locked = d.copyWith(
         nodes: [
@@ -187,17 +195,19 @@ void main() {
       );
       for (final family in layoutObjectStyles) {
         final d = bar.copyWith(
-          appearance: {
-            for (final kind in layoutAppearanceKinds)
-              kind: {
-                'objectStyle': family,
-                if (kind == 'seat')
-                  'seatStyle': family == 'wood'
-                      ? 'wood'
-                      : family == 'lounge'
-                      ? 'upholstered'
-                      : 'plain',
-              },
+          styles: {
+            'kinds': {
+              for (final kind in layoutAppearanceKinds)
+                kind: {
+                  if (kind != 'text') 'material': family,
+                  if (kind == 'seat')
+                    'seatStyle': family == 'wood'
+                        ? 'wood'
+                        : family == 'lounge'
+                        ? 'upholstered'
+                        : 'plain',
+                },
+            },
           },
         );
         final full = compileScene(d)['items'] as List;
@@ -283,8 +293,10 @@ void main() {
                       ? n.copyWith(label: 'Table 1', rotation: rotation)
                       : n,
               ],
-              appearance: {
-                'table': {'objectStyle': style},
+              styles: {
+                'kinds': {
+                  'table': {'material': style},
+                },
               },
             );
             final items =
@@ -319,13 +331,26 @@ void main() {
                     .skipWhile((c) => c.first != 'Z')
                     .skip(1)
                     .toList();
-              final markBounds = sceneItemBounds(mark),
-                  label =
-                      items.singleWhere((i) => i['id'] == '${root.id}:text')
-                          as Map<String, dynamic>;
+              final label =
+                  items.singleWhere((i) => i['id'] == '${root.id}:text')
+                      as Map<String, dynamic>;
+              final labelMatrix = (label['matrix'] as List).cast<double>();
+              final relativeMark = {
+                ...mark,
+                'matrix': multiplyMatrix(
+                  inverseMatrix(labelMatrix),
+                  (mark['matrix'] as List).cast<double>(),
+                ),
+              };
+              final localLabel = {
+                ...label,
+                'matrix': [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+              };
+              final markBounds = sceneItemBounds(relativeMark),
+                  labelBounds = sceneItemBounds(localLabel);
               expect(
                 markBounds['y']! + markBounds['height']!,
-                lessThan(sceneItemBounds(label)['y']! - 2),
+                lessThan(labelBounds['y']! - 2),
               );
             }
           }

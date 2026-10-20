@@ -18,7 +18,8 @@ void main() {
         [100, 100],
         [200, 200],
       ],
-      properties: {'stroke': '#123456FF', 'strokeWidth': 2},
+      properties: {},
+      style: {'stroke': '#123456FF', 'strokeWidth': 2},
     );
     final d = VenueLayoutDocument(nodes: [n]);
     final result = resizeNode(d, n.id, 200, 50), resized = result.nodes.single;
@@ -27,7 +28,7 @@ void main() {
     expect(point(result, resized, 0), [50, 125]);
     expect(point(result, resized, 1), [250, 175]);
     expect(resized.id, n.id);
-    expect(resized.properties['stroke'], n.properties['stroke']);
+    expect(resized.style['stroke'], n.style['stroke']);
     expect(nodePath(resized), [
       ['M', -100, -25],
       ['L', 100, 25],
@@ -81,9 +82,8 @@ void main() {
             [0, 60],
             [50, -30],
           ],
-          'stroke': '#123456FF',
-          'strokeWidth': 3,
         },
+        style: {'stroke': '#123456FF', 'strokeWidth': 3},
       );
       final d = VenueLayoutDocument(nodes: [root, n]),
           expected = transformPoint(worldMatrices(d)[n.id]!, 40, 100),
@@ -104,7 +104,7 @@ void main() {
       expect(edited.z, n.z);
       expect(edited.label, n.label);
       expect(edited.locked, n.locked);
-      expect(edited.properties['stroke'], n.properties['stroke']);
+      expect(edited.style['stroke'], n.style['stroke']);
       expect(result.nodes.first, same(root));
       expect(validateDocument(result), isEmpty);
     },
@@ -141,17 +141,25 @@ void main() {
     final original = tableLayout(shape: 'rect', count: 6),
         table = original.nodes.firstWhere((n) => n.kind == 'table'),
         seat = original.nodes.firstWhere((n) => n.kind == 'seat');
-    final d = original.copyWith(
+    var d = original.copyWith(
       nodes: original.nodes
           .map(
             (n) => n.id == seat.id
-                ? n.copyWith(
-                    x: 100,
-                    properties: {...n.properties, 'manual': true},
-                  )
+                ? n.copyWith(x: 100, properties: n.properties)
                 : n,
           )
           .toList(),
+    );
+    d = d.copyWith(
+      attachments: [
+        for (final a in d.attachments)
+          a['seatId'] == seat.id
+              ? {
+                  ...a,
+                  'placement': {'mode': 'free'},
+                }
+              : a,
+      ],
     );
     final result = resizeNode(d, table.id, 240, 120);
     expect(result.nodes.where((n) => n.kind == 'seat').length, 6);

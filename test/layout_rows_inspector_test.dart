@@ -103,4 +103,88 @@ void main() {
     expect(c.document.toJson(), original.toJson());
     expect(c.canUndo, false);
   });
+  testWidgets('rows split preserves seat IDs and geometry and supports undo', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final original = rowLayout(rows: 2, seatsPerRow: 3, arc: 4);
+    final root = original.nodes.firstWhere(
+      (n) => n.assembly?['kind'] == 'rows',
+    );
+    final c = VenueLayoutController(original)..select({root.id});
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VenueLayoutEditor(controller: c, showGallery: false),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final split = find.text('Split into seats');
+    await tester.ensureVisible(split);
+    await tester.tap(split);
+    await tester.pumpAndSettle();
+    expect(c.document.nodes.any((n) => n.id == root.id), false);
+    expect(
+      c.document.nodes.map((n) => n.id).toSet(),
+      original.nodes.where((n) => n.kind == 'seat').map((n) => n.id).toSet(),
+    );
+    expect(c.document.attachments, isEmpty);
+    expect(validateDocument(c.document), isEmpty);
+    for (final seat in c.document.nodes) {
+      expect(
+        worldMatrix(c.document, seat),
+        worldMatrix(
+          original,
+          original.nodes.firstWhere((n) => n.id == seat.id),
+        ),
+      );
+    }
+    c.undo();
+    expect(c.document.toJson(), original.toJson());
+  });
+
+  test(
+    'row labels span blocks and long rows, retaining explicit seat names on resize',
+    () {
+      final wide = rowLayout(rows: 2, seatsPerRow: 28);
+      final names = wide.nodes
+          .where((n) => n.kind == 'seat')
+          .map((n) => n.label)
+          .toList();
+      expect(names.take(2), ['1A', '1B']);
+      expect(names[25], '1Z');
+      expect(names[26], '1AA');
+      expect(names[28], '2A');
+      final old = rowLayout(rows: 2, seatsPerRow: 3, blocks: 2);
+      final custom = old.nodes.firstWhere(
+        (n) => n.properties['slot'] == '0:0:1',
+      );
+      final before = old.copyWith(
+        nodes: old.nodes
+            .map((n) => n.id == custom.id ? n.copyWith(label: 'VIP') : n)
+            .toList(),
+      );
+      final root = before.nodes.firstWhere(
+        (n) => n.assembly?['kind'] == 'rows',
+      );
+      final next = reconcileAssembly(
+        before,
+        root.id,
+        rowLayout(rows: 2, seatsPerRow: 4, blocks: 2),
+      );
+      expect(next.nodes.firstWhere((n) => n.id == custom.id).label, 'VIP');
+      expect(
+        next.nodes.firstWhere((n) => n.properties['slot'] == '0:1:0').label,
+        '1E',
+      );
+      expect(
+        next.nodes.firstWhere((n) => n.properties['slot'] == '1:0:0').label,
+        '2A',
+      );
+      expect(validateDocument(next), isEmpty);
+    },
+  );
 }

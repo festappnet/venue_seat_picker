@@ -16,6 +16,7 @@ void main() {
         y: 300,
         width: 190,
         height: 110,
+        surface: const {'type': 'rect'},
       );
       final c = VenueLayoutController(
         VenueLayoutDocument.empty().copyWith(nodes: [node]),

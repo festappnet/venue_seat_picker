@@ -39,6 +39,65 @@ void main() {
   }
 
   testWidgets(
+    'manual chair can return to automatic layout with identity and undo intact',
+    (tester) async {
+      final original = tableLayout(shape: 'rect');
+      final seat = original.nodes.firstWhere((n) => n.kind == 'seat');
+      final c = VenueLayoutController(original)..select({seat.id});
+      c.updateNode(seat.copyWith(x: seat.x - 250, y: seat.y - 180));
+      final manual = c.document;
+      expect(seatAttachment(manual, seat.id)?['placement']['mode'], 'free');
+      await open(tester, c);
+      final action = find.byKey(const ValueKey('restore-automatic-chair'));
+      await tester.ensureVisible(action);
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      expect(c.error, isNull);
+      expect(
+        seatAttachment(c.document, seat.id)?['placement']['mode'],
+        'automatic',
+      );
+      expect(
+        c.document.nodes.map((n) => n.id).toSet(),
+        original.nodes.map((n) => n.id).toSet(),
+      );
+      expect(
+        find.byKey(const ValueKey('restore-automatic-chair')),
+        findsNothing,
+      );
+      c.undo();
+      expect(c.document.toJson(), manual.toJson());
+    },
+  );
+
+  testWidgets(
+    'seat stepper disables addition at table capacity and re-enables after removal',
+    (tester) async {
+      final base = tableLayout(shape: 'round', width: 180, count: 0);
+      final table = base.nodes.firstWhere((node) => node.kind == 'table');
+      final capacity = tableCapacity(table);
+      final full = reflowTable(base, table.id, capacity);
+      final c = VenueLayoutController(full)..select({table.id});
+      await open(tester, c);
+      IconButton add() => tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.add_circle_outline),
+      );
+      expect(add().onPressed, isNull);
+      await tester.tap(find.byTooltip('Remove one seat'));
+      await tester.pumpAndSettle();
+      expect(add().onPressed, isNotNull);
+      await tester.tap(find.byTooltip('Add one seat'));
+      await tester.pumpAndSettle();
+      expect(add().onPressed, isNull);
+      expect(c.error, isNull);
+      expect(
+        c.document.nodes.where((node) => node.kind == 'seat').length,
+        capacity,
+      );
+    },
+  );
+
+  testWidgets(
     'tables and bars can be painted and drawn shapes convert to bars',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 900));
@@ -72,7 +131,7 @@ void main() {
       expect(find.text('Paint table'), findsOneWidget);
       expect(find.text('Paint bar'), findsOneWidget);
       expect(find.text('Use as table'), findsNothing);
-      expect(find.text('Use as bar'), findsOneWidget);
+      expect(find.text('Use as bar'), findsNothing);
       expect(find.text('Table'), findsWidgets);
       expect(find.text('Round table'), findsWidgets);
       expect(c.dirty, isFalse);
@@ -99,36 +158,24 @@ void main() {
       )..select({table.id});
       await open(tester, controller);
       expect(find.text('Preview count'), findsNothing);
-      final shapeControl = tester.widget<DropdownButton<String>>(
-        find.byType(DropdownButton<String>).first,
-      );
-      expect(shapeControl.items!.map((item) => item.value), [
-        'rectangle',
-        'round',
-        'polygon',
-      ]);
-      final advanced = find.text('Advanced object properties');
-      await tester.ensureVisible(advanced);
-      await tester.tap(advanced);
-      await tester.pumpAndSettle();
       expect(find.text('Rotate around corner'), findsNothing);
       expect(find.text('Physical obstacle'), findsNothing);
       expect(find.text('Blocks seat placement'), findsNothing);
       expect(find.byTooltip('Add one seat'), findsOneWidget);
       expect(find.byTooltip('Remove one seat'), findsOneWidget);
       for (final entry in {
-        'Rectangle': 'roundedRect',
-        'Custom outline': 'polygon',
-        'Round': 'round',
+        'Rectangle': 'rect',
+        'Custom outline': 'grid',
+        'Round': 'circle',
       }.entries) {
         await choose(tester, entry.key);
         expect(
           controller.document.nodes
               .firstWhere((node) => node.id == table.id)
-              .properties['shape'],
+              .surface?['type'],
           entry.value,
         );
-        if (entry.value == 'polygon') {
+        if (entry.value == 'grid') {
           final points = localHull(
             controller.document.nodes.firstWhere((node) => node.id == table.id),
           );
@@ -175,7 +222,7 @@ void main() {
         count: 4,
       );
       final table = base.nodes.firstWhere((node) => node.kind == 'table');
-      final original = reshapeTableSurface(base, table.id, 'rectangle');
+      final original = setTableSurfaceKind(base, table.id, 'grid');
       final seatIds = original.nodes
           .where((node) => node.kind == 'seat')
           .map((node) => node.id)
@@ -189,15 +236,6 @@ void main() {
         find.byType(DropdownButtonFormField<String>).first,
       );
       expect(control.initialValue, 'polygon');
-      expect(
-        tester
-            .widget<DropdownButton<String>>(
-              find.byType(DropdownButton<String>).first,
-            )
-            .items!
-            .map((item) => item.value),
-        ['rectangle', 'round', 'polygon'],
-      );
       expect(find.text('Custom outline'), findsOneWidget);
       expect(controller.document, same(original));
       expect(controller.canUndo, isFalse);
@@ -205,8 +243,8 @@ void main() {
       expect(
         controller.document.nodes
             .firstWhere((node) => node.id == table.id)
-            .properties['shape'],
-        'round',
+            .surface?['type'],
+        'circle',
       );
       expect(
         controller.document.nodes
@@ -233,10 +271,10 @@ void main() {
           width: 190,
           height: 110,
           properties: {
-            'shape': 'roundedRect',
             if (bar) 'furniture': 'bar',
             if (bar) 'guestSide': 'bottom',
           },
+          surface: const {'type': 'rect'},
         );
         final original = VenueLayoutDocument.empty().copyWith(nodes: [table]);
         final controller = VenueLayoutController(original)..select({table.id});
@@ -254,7 +292,7 @@ void main() {
           }
         }
 
-        expect(converted.properties['shape'], 'polygon');
+        expect(converted.surface?['type'], 'grid');
         expect(localHull(converted).length, 6);
         expectGrid(converted);
         final expected = resizeGridTableSurface(
@@ -263,8 +301,10 @@ void main() {
           converted.width + step * 1.3,
           converted.height,
         );
-        await tester.ensureVisible(find.text('Geometry'));
-        await tester.tap(find.text('Geometry'));
+        await tester.pumpAndSettle();
+        final geometry = find.text('Position and size');
+        await tester.ensureVisible(geometry);
+        await tester.tap(geometry);
         await tester.pumpAndSettle();
         final width = find.widgetWithText(TextField, 'Width');
         await tester.ensureVisible(width);
@@ -292,11 +332,12 @@ void main() {
         kind: 'table',
         width: 256,
         height: 256,
-        properties: {'shape': 'roundedRect'},
+
+        surface: const {'type': 'rect'},
       );
       final count = tableCapacity(template);
       expect(
-        tableCapacity(template.copyWith(properties: {'shape': 'round'})),
+        tableCapacity(template.copyWith(surface: const {'type': 'circle'})),
         lessThan(count),
       );
       final original = tableLayout(
@@ -319,9 +360,7 @@ void main() {
       expect(controller.document, same(original));
       expect(controller.canUndo, isFalse);
       expect(
-        find.textContaining(
-          'The selected shape cannot fit the existing chairs.',
-        ),
+        find.byKey(const ValueKey('layout-inspector-error')),
         findsOneWidget,
       );
     },

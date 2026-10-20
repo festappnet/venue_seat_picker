@@ -1,3 +1,4 @@
+import '../packages/venue_layout_core/test/support/style.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,10 +7,14 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_style.dart';
 
 void main() {
+  Finder canvas() =>
+      find.byWidgetPredicate((w) => w is LayoutSceneSurface && w.onTap != null);
+
   test(
     'styles preserve geometry, IDs, zigzag metadata and locked descendants',
     () {
       final table = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         x: 400,
@@ -49,63 +54,18 @@ void main() {
       expect(result.nodes[0].label, table.label);
       expect(result.nodes[0].width, table.width);
       expect(result.nodes[0].x, table.x);
-      expect(result.nodes[1].properties['fill'], '#D9B788FF');
+      expect(
+        effectiveNodeProperties(result, result.nodes[1])['fill'],
+        '#D9B788FF',
+      );
       expect(result.nodes[2].toJson(), locked.toJson());
       expect(result.nodes[3].properties['points'], zigzag.properties['points']);
       expect(result.nodes[3].properties['zigzagTeeth'], 8);
-      expect(result.nodes[3].properties['fill'], '#00000000');
+      expect(result.nodes[3].style['fill'], '#00000000');
       final copied = captureLayoutAppearance(result, table.id);
       expect(result.nodes[0].toJson(), table.toJson());
       expect(copied.object, captureLayoutAppearance(doc, table.id).object);
-      expect(copied.seats!['fill'], '#D9B788FF');
-    },
-  );
-
-  test(
-    'local appearance exceptions survive global edits until inheritance is restored',
-    () {
-      final node = LayoutNode(
-        id: newLayoutId(),
-        kind: 'table',
-        x: 400,
-        y: 300,
-        width: 190,
-        height: 110,
-      );
-      var doc = setLayoutAppearance(
-        VenueLayoutDocument.empty().copyWith(nodes: [node]),
-        'table',
-        {'fill': '#112233FF', 'strokeWidth': 3, 'cornerRadius': 12},
-      );
-      expect(effectiveNodeProperties(doc, node)['fill'], '#112233FF');
-      doc = applyLayoutAppearance(doc, {
-        node.id,
-      }, const LayoutAppearance({'fill': '#ABCDEF80'}));
-      doc = setLayoutAppearance(doc, 'table', {
-        'fill': '#556677FF',
-        'strokeWidth': 5,
-      });
-      expect(
-        effectiveNodeProperties(doc, doc.nodes.single)['fill'],
-        '#ABCDEF80',
-      );
-      expect(effectiveNodeProperties(doc, doc.nodes.single)['strokeWidth'], 5);
-      doc = followPlanAppearance(doc, {node.id}, true);
-      expect(
-        effectiveNodeProperties(doc, doc.nodes.single)['fill'],
-        '#556677FF',
-      );
-      final restored = VenueLayoutDocument.fromJson(doc.toJson());
-      expect(restored.appearance, doc.appearance);
-      expect(restored.nodes.single.x, node.x);
-      expect(restored.nodes.single.id, node.id);
-      final future = LayoutNode(
-        id: newLayoutId(),
-        kind: 'table',
-        x: 900,
-        y: 300,
-      );
-      expect(effectiveNodeProperties(restored, future)['fill'], '#556677FF');
+      expect(copied.seats, captureLayoutAppearance(doc, table.id).seats);
     },
   );
 
@@ -123,109 +83,11 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('wrapper plan style switch ignores noneditable overrides', (
-    tester,
-  ) async {
-    final group = LayoutNode(
-      id: newLayoutId(),
-      kind: 'group',
-      x: 1200,
-      y: 800,
-      properties: {
-        'fill': '#ABCDEFff',
-        'appearanceOverrides': ['fill'],
-      },
-    );
-    final table = LayoutNode(
-      id: newLayoutId(),
-      parentId: group.id,
-      kind: 'table',
-      width: 190,
-      height: 110,
-      properties: {
-        'fill': '#F0E4D2FF',
-        'appearanceOverrides': ['fill'],
-      },
-    );
-    final seat = LayoutNode(
-      id: newLayoutId(),
-      parentId: table.id,
-      kind: 'seat',
-      x: 0,
-      y: -90,
-      width: 40,
-      height: 40,
-    );
-    final locked = LayoutNode(
-      id: newLayoutId(),
-      parentId: table.id,
-      kind: 'seat',
-      x: 60,
-      y: -90,
-      width: 40,
-      height: 40,
-      locked: true,
-      properties: {
-        'fill': '#123456FF',
-        'appearanceOverrides': ['fill'],
-      },
-    );
-    var original = VenueLayoutDocument.empty().copyWith(
-      nodes: [group, table, seat, locked],
-    );
-    original = setLayoutAppearance(original, 'table', {'fill': '#112233FF'});
-    original = setLayoutAppearance(original, 'seat', {'fill': '#445566FF'});
-    original = applyLayoutAppearance(original, {
-      group.id,
-    }, layoutAppearancePresets['Warm']!);
-    final c = VenueLayoutController(original)..select({group.id});
-    await open(tester, c);
-    await tester.ensureVisible(find.text('Object appearance'));
-    await tester.tap(find.text('Object appearance'));
-    await tester.pumpAndSettle();
-    final toggle = find.widgetWithText(SwitchListTile, 'Use plan style');
-    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
-    await tester.ensureVisible(toggle);
-    await tester.tap(toggle);
-    await tester.pumpAndSettle();
-    expect(c.error, isNull);
-    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
-    expect(
-      effectiveNodeProperties(c.document, c.document.nodes[1])['fill'],
-      '#F0E4D2FF',
-    );
-    expect(c.document.nodes[1].toJson(), table.toJson());
-    expect(
-      effectiveNodeProperties(c.document, c.document.nodes[2])['fill'],
-      '#445566FF',
-    );
-    expect(c.document.nodes.first.toJson(), group.toJson());
-    expect(c.document.nodes.last.toJson(), locked.toJson());
-    final inherited = c.document.toJson();
-    final warm = find.byKey(const ValueKey('layout-style-Warm'));
-    await tester.ensureVisible(warm);
-    await tester.tap(warm);
-    await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
-    expect(
-      effectiveNodeProperties(c.document, c.document.nodes[2])['fill'],
-      '#D9B788FF',
-    );
-    expect(c.document.nodes.last.toJson(), locked.toJson());
-    c.undo();
-    expect(c.document.toJson(), inherited);
-    c.undo();
-    expect(c.document.toJson(), original.toJson());
-  });
-
-  Finder canvas() => find.byWidgetPredicate(
-    (w) => w is LayoutSceneSurface && w.onContextMenu != null,
-  );
-
   testWidgets(
     'secondary click opens style menu; preset and copied style are undoable',
     (tester) async {
       final a = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         x: 1200,
@@ -234,6 +96,7 @@ void main() {
         height: 110,
       );
       final b = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         x: 1600,
@@ -259,31 +122,35 @@ void main() {
       );
       await tester.tap(find.widgetWithText(PopupMenuItem<String>, 'Style'));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byKey(const ValueKey('layout-style-Warm')),
-        ),
-      );
-      await tester.pump();
-      expect(c.document.nodes.first.properties['fill'], '#F0E4D2FF');
-      await tester.tap(find.text('Done'));
+      await tester.tap(find.text('Detailed settings'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Object appearance'));
-      await tester.tap(find.text('Object appearance'));
+      final fill = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byKey(const ValueKey('canonical-style-fill')),
+      );
+      await tester.ensureVisible(fill);
+      await tester.tap(fill);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('editor-color-Basic colors-2563EB')),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Apply'));
+      await tester.pumpAndSettle();
+      expect(c.document.nodes.first.style['fill'], '#2563EBFF');
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byTooltip('Copy style'));
       await tester.tap(find.byTooltip('Copy style'));
       await tester.pump();
       c.select({b.id});
       await tester.pump();
-      await tester.ensureVisible(find.text('Object appearance'));
-      await tester.tap(find.text('Object appearance'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byTooltip('Paste style'));
       await tester.tap(find.byTooltip('Paste style'));
       await tester.pump();
-      expect(c.document.nodes.last.properties['fill'], '#F0E4D2FF');
+      expect(c.document.nodes.last.style['fill'], '#2563EBFF');
       expect(c.document.nodes.last.x, b.x);
       c.undo();
       expect(c.document.nodes.last.toJson(), b.toJson());
@@ -296,6 +163,7 @@ void main() {
     tester,
   ) async {
     final node = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       x: 1200,

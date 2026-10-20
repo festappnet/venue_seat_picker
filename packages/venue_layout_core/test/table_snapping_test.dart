@@ -4,6 +4,7 @@ import 'package:venue_layout_core/venue_layout_core.dart';
 void main() {
   test('table magnets follow body centers after asymmetric chair reflow', () {
     final a = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       x: 200,
@@ -12,6 +13,7 @@ void main() {
       height: 80,
     );
     final b = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       x: 500,

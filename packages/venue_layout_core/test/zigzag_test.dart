@@ -55,7 +55,8 @@ void main() {
         -30,
         120,
         50,
-        properties: {'stroke': '#FF0000FF'},
+        properties: {},
+        style: {'stroke': '#FF0000FF'},
       ).copyWith(parentId: parent.id, rotation: 47, label: 'Divider');
       final d = VenueLayoutDocument(nodes: [parent, n]);
       final before = endpoints(d, n.id),
@@ -66,7 +67,7 @@ void main() {
       expect(edited.parentId, parent.id);
       expect(edited.rotation, 47);
       expect(edited.label, 'Divider');
-      expect(edited.properties['stroke'], '#FF0000FF');
+      expect(edited.style['stroke'], '#FF0000FF');
       expect((edited.properties['points'] as List).length, 28);
       expect(validateDocument(result), isEmpty);
       final points = edited.properties['points'] as List;

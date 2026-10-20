@@ -69,13 +69,13 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Geometry'), findsOneWidget);
+      expect(find.byType(SegmentedButton<int>), findsOneWidget);
       expect(find.widgetWithText(TextField, 'Width'), findsNothing);
       tester
           .widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>))
           .onSelectionChanged!({2});
       await tester.pumpAndSettle();
-      expect(c.document.nodes.first.properties['decks'], 2);
+      expect(c.document.nodes.first.assembly?['decks'], 2);
       expect(
         c.document.nodes.where((n) => n.kind == 'seat').map((n) => n.id),
         containsAll(seats),

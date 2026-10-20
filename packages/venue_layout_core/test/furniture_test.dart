@@ -5,6 +5,56 @@ List<LayoutNode> cushions(VenueLayoutDocument d) =>
     d.nodes.where((n) => n.kind == 'seat').toList();
 
 void main() {
+  test(
+    'canonical couch preserves typed footprint, seat identities and independent placement intent',
+    () {
+      var d = couchLayout(count: 2);
+      final root = d.nodes.first, seat = cushions(d).first;
+      expect(validateDocument(d), isEmpty);
+      expect(root.assembly!['kind'], 'couch');
+      expect(root.assembly!['seats'], 2);
+      expect(root.properties.containsKey('fill'), isFalse);
+      final minimumWidth = root.assembly!['minSeatWidth'];
+      d = d.copyWith(
+        nodes: [
+          for (final n in d.nodes)
+            n.id == seat.id ? n.copyWith(x: seat.x + 7, rotation: 37) : n,
+        ],
+        attachments: [
+          for (final a in d.attachments)
+            a['seatId'] == seat.id
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                    'rotationMode': 'manual',
+                  }
+                : a,
+        ],
+      );
+      final pose = d.nodes.firstWhere((n) => n.id == seat.id);
+      final resized = resizeCouchSeats(d, root.id, 3);
+      expect(validateDocument(resized), isEmpty);
+      expect(resized.nodes.first.assembly!['seats'], 3);
+      expect(resized.nodes.first.assembly!['minSeatWidth'], minimumWidth);
+      expect(resized.nodes.first.properties.containsKey('seatWidth'), isFalse);
+      final after = resized.nodes.firstWhere((n) => n.id == seat.id);
+      expect(
+        [after.x, after.y, after.rotation],
+        [pose.x, pose.y, pose.rotation],
+      );
+      expect(resized.attachments.length, 3);
+      expect(
+        (resized.selectionUnits.single['nodeIds'] as List).toSet(),
+        containsAll(cushions(d).map((n) => n.id)),
+      );
+      expect(
+        () =>
+            resizeCouchSeats(resized, root.id, 4, protectedSeatIds: {seat.id}),
+        throwsA(isA<CouchResizeRejected>()),
+      );
+    },
+  );
+
   test('couch materializes empty-label furniture and one atomic unit', () {
     final d = couchLayout();
     final root = d.nodes.first;
@@ -130,7 +180,10 @@ void main() {
             if (n.id == root.id)
               n.copyWith(rotation: 37, label: 'Existing couch')
             else if (n.id == seat.id)
-              n.copyWith(properties: {...n.properties, 'fill': '#123456FF'})
+              n.copyWith(
+                properties: {...n.properties},
+                style: {'fill': '#123456FF'},
+              )
             else
               n,
         ],
@@ -148,7 +201,7 @@ void main() {
       expect(cushions(resized).first.width, 104);
       expect(cushions(resized).first.height, 64);
       expect(cushions(resized).first.y, 6);
-      expect(cushions(resized).first.properties['fill'], '#123456FF');
+      expect(cushions(resized).first.style['fill'], '#123456FF');
       expect(cushions(resized).map((n) => n.id), cushions(d).map((n) => n.id));
       final small = resizeCouchBody(d, root.id, 1, 1);
       expect(small.nodes.first.width, root.width);

@@ -191,7 +191,7 @@ a new baseline; undo is never a server transaction. Pass additional inspector UI
 through `inspectorBuilder`; it must not reimplement geometry.
 
 See [example/README.md](example/README.md) for the standalone editor/demo kit,
-[the v1 schema](doc/layout-v1.schema.json),
+[the canonical document schema](doc/layout-v2.schema.json),
 [core operations](doc/blueprint-v2/CORE-API.md), and [JS usage](web/README.md).
 Only package/demo stage A is implemented here; reservations, SQL atomics,
 permissions, payments and production font/image adapters remain host integration.

@@ -12,12 +12,20 @@ void main() {
     bool readOnly = false,
   }) async {
     final node = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       label: 'VIP',
       x: 300,
       y: 300,
-      properties: {'size': size, 'bold': true, 'italic': true},
+      properties: {},
+      style: {
+        'label': {
+          'size': size,
+          'weight': (true == true ? 700 : 400),
+          'italic': true,
+        },
+      },
     );
     final c = VenueLayoutController(
       VenueLayoutDocument.empty().copyWith(nodes: [node]),
@@ -33,7 +41,7 @@ void main() {
               builder: (_, _) => LayoutFontSizeControl(
                 controller: c,
                 node: c.document.nodes.single,
-                value: (c.document.nodes.single.properties['size'] as num)
+                value: (c.document.nodes.single.style['label']?['size'] as num)
                     .toDouble(),
               ),
             ),
@@ -57,23 +65,23 @@ void main() {
       final gesture = await tester.startGesture(tester.getCenter(slider));
       await gesture.moveBy(const Offset(25, 0));
       await tester.pump();
-      expect(c.document.nodes.single.properties['size'], isNot(40.64));
-      final size = c.document.nodes.single.properties['size'] as num;
+      expect(c.document.nodes.single.style['label']?['size'], isNot(40.64));
+      final size = c.document.nodes.single.style['label']?['size'] as num;
       expect(size, size.round());
       expect(c.canUndo, isFalse);
       await gesture.moveBy(const Offset(20, 0));
       await tester.pump();
       await gesture.up();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
       expect(c.canUndo, isTrue);
-      expect(c.document.nodes.single.properties['bold'], isTrue);
-      expect(c.document.nodes.single.properties['italic'], isTrue);
+      expect(c.document.nodes.single.style['label']?['weight'] == 700, isTrue);
+      expect(c.document.nodes.single.style['label']?['italic'], isTrue);
       expect(
         captureLayoutAppearance(
           c.document,
           c.document.nodes.single.id,
-        ).object['size'],
-        c.document.nodes.single.properties['size'],
+        ).object['label']['size'],
+        c.document.nodes.single.style['label']?['size'],
       );
       c.undo();
       expect(c.document, same(before));
@@ -85,13 +93,13 @@ void main() {
     await tester.enterText(find.byType(TextField), '32,8');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
-    expect(c.document.nodes.single.properties['size'], 33);
+    expect(c.document.nodes.single.style['label']?['size'], 33);
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       '33',
     );
     c.undo();
-    expect(c.document.nodes.single.properties['size'], 24);
+    expect(c.document.nodes.single.style['label']?['size'], 24);
   });
   testWidgets('cancelled slider restores preview and creates no undo', (
     tester,
@@ -103,7 +111,7 @@ void main() {
     await gesture.moveBy(const Offset(30, 0));
     await tester.pump();
     await gesture.cancel();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(c.document, same(before));
     expect(c.canUndo, isFalse);
     expect(c.gestureActive, isFalse);
@@ -124,6 +132,7 @@ void main() {
     expect(c.gestureActive, isFalse);
     expect(c.canUndo, isFalse);
     await gesture.cancel();
+    await tester.pump(const Duration(milliseconds: 350));
   });
   testWidgets('unchanged precise input does not round an imported size', (
     tester,
@@ -152,6 +161,7 @@ void main() {
     tester,
   ) async {
     final node = LayoutNode(
+      surface: const {'type': 'rect'},
       id: newLayoutId(),
       kind: 'table',
       label: 'Old',
@@ -198,18 +208,23 @@ void main() {
         y: 300,
       );
       final source = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         parentId: group.id,
         label: 'VIP',
-        properties: {
-          'fontId': 'fixture:sans',
-          'size': 40.64,
-          'bold': true,
-          'italic': true,
+        properties: {},
+        style: {
+          'label': {
+            'fontFamilyId': canonicalLabelDefaults['fontFamilyId'],
+            'size': 40.64,
+            'weight': (true == true ? 700 : 400),
+            'italic': true,
+          },
         },
       );
       final target = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         label: 'Other',
@@ -221,7 +236,10 @@ void main() {
         kind: 'seat',
         parentId: target.id,
         y: 100,
-        properties: {'size': 12},
+        properties: {},
+        style: {
+          'label': {'size': 12},
+        },
       );
       final doc = VenueLayoutDocument.empty().copyWith(
         nodes: [group, source, target, seat],
@@ -230,23 +248,26 @@ void main() {
         target.id,
       }, captureLayoutAppearance(doc, group.id));
       final changed = result.nodes.firstWhere((n) => n.id == target.id);
-      for (final key in ['fontId', 'size', 'bold', 'italic']) {
-        expect(changed.properties[key], source.properties[key]);
+      for (final key in ['fontFamilyId', 'size', 'weight', 'italic']) {
+        expect(changed.style['label'][key], source.style['label'][key]);
       }
       expect(changed.label, target.label);
       expect(changed.x, target.x);
       expect(
-        result.nodes.firstWhere((n) => n.id == seat.id).properties['size'],
+        result.nodes.firstWhere((n) => n.id == seat.id).style['label']?['size'],
         12,
       );
-      expect(result.defaultTextStyle, doc.defaultTextStyle);
+      expect(result.styles, doc.styles);
       final normal = applyLayoutAppearance(doc, {
         group.id,
       }, captureLayoutAppearance(doc, target.id));
       final normalTable = normal.nodes.firstWhere((n) => n.id == source.id);
-      expect(normalTable.properties['bold'], isFalse);
-      expect(normalTable.properties['italic'], isFalse);
-      expect(normalTable.properties['size'], doc.defaultTextStyle['size']);
+      expect(normalTable.style['label']['weight'], 400);
+      expect(normalTable.style['label']?['italic'], isFalse);
+      expect(
+        normalTable.style['label']?['size'],
+        canonicalLabelDefaults['size'],
+      );
     },
   );
 }

@@ -5,7 +5,7 @@ void main() {
   test('generated cushion state colors override stored upholstery', () {
     final document = couchLayout();
     final seat = document.nodes.firstWhere((node) => node.kind == 'seat');
-    expect(seat.properties['fill'], '#F8FAFCFF');
+    expect(seat.style['fill'], '#F8FAFCFF');
     dynamic fill(Map<String, dynamic> state) {
       final items =
           compileScene(document, presentation: {seat.id: state})['items']
@@ -72,7 +72,10 @@ void main() {
       }
       for (final seat in seats) {
         final item = items.singleWhere((i) => i['id'] == seat.id) as Map;
-        expect(item['fill'], '#F8FAFCFF');
+        expect(
+          item['fill'],
+          resolveNodeAppearance(document, seat).values['fill'],
+        );
         expect(item['hitPath'], isNotEmpty);
       }
       expect(items.where((i) => i['kind'] == 'glyphs'), isEmpty);
@@ -96,6 +99,7 @@ void main() {
     'rectangular table aliases share rounded corners and respect explicit zero',
     () {
       final table = LayoutNode(
+        surface: const {'type': 'rect'},
         id: newLayoutId(),
         kind: 'table',
         width: 160,

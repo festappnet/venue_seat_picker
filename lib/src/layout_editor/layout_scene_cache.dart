@@ -31,13 +31,15 @@ class LayoutSceneCache {
         (_scene?['issues'] as List? ?? const []).isNotEmpty ||
         !identical(_resources, resources) ||
         (documentChanged &&
-            (previous.symbolSetVersion != document.symbolSetVersion ||
-                !sameLayoutValue(previous.background, document.background) ||
-                !sameLayoutValue(previous.appearance, document.appearance) ||
+            (previous.schemaVersion != document.schemaVersion ||
+                previous.symbolSetVersion != document.symbolSetVersion ||
+                !sameLayoutValue(previous.styles, document.styles) ||
                 !sameLayoutValue(
-                  previous.defaultTextStyle,
-                  document.defaultTextStyle,
+                  previous.seatingDefaults,
+                  document.seatingDefaults,
                 ) ||
+                !sameLayoutValue(previous.textPolicy, document.textPolicy) ||
+                !sameLayoutValue(previous.background, document.background) ||
                 !sameLayoutValue(
                   previous.selectionUnits,
                   document.selectionUnits,
@@ -158,5 +160,100 @@ class LayoutSceneCache {
     _resources = resources;
     _presentation = presentation;
     return _scene!;
+  }
+}
+
+/// Editor presentation retains the last successfully prepared text while a new
+/// request is outstanding. Canonical scene validation and saved data stay intact.
+class LayoutTextPreviewCache {
+  final _ready = <String, Map<String, dynamic>>{};
+  Map<String, dynamic>? _input, _output;
+  VenueLayoutDocument? _document;
+  Map<String, dynamic> update(
+    Map<String, dynamic> scene,
+    VenueLayoutDocument document, {
+    required bool enabled,
+  }) {
+    if (!enabled) {
+      _ready.clear();
+      _input = null;
+      _output = null;
+      _document = null;
+      return scene;
+    }
+    if (identical(_input, scene) && identical(_document, document))
+      return _output!;
+    final issues = scene['issues'] as List? ?? const [],
+        nodes = {for (final node in document.nodes) node.id: node};
+    const pendingReasons = {
+      'text_layout_unavailable',
+      'font_family_unavailable',
+      'font_face_unavailable',
+    };
+    if (issues.any((issue) => !pendingReasons.contains(issue['reason']))) {
+      _ready.clear();
+      _input = null;
+      _output = null;
+      _document = null;
+      return scene;
+    }
+    final pending = {
+      for (final issue in issues)
+        if (issue['nodeId'] is String) issue['nodeId'] as String,
+    };
+    _ready.removeWhere((id, _) => !nodes.containsKey(id));
+    final items = List<Map<String, dynamic>>.from(scene['items'] as List);
+    final readyIds = <String>{};
+    for (final item in items) {
+      if (item['kind'] == 'glyphs' && item['nodeId'] is String) {
+        final id = item['nodeId'] as String;
+        readyIds.add(id);
+        _ready[id] = item;
+      }
+    }
+    _ready.removeWhere(
+      (id, _) => !pending.contains(id) && !readyIds.contains(id),
+    );
+    final retained = pending.intersection(_ready.keys.toSet());
+    var output = scene;
+    if (retained.isNotEmpty) {
+      final matrices = worldMatrices(document),
+          ordered = orderedNodes(document),
+          ranks = {for (var i = 0; i < ordered.length; i++) ordered[i].id: i};
+      for (final id in retained) {
+        final node = nodes[id]!, previous = _ready[id]!;
+        if (!ranks.containsKey(id)) continue;
+        final item =
+            <String, dynamic>{
+                ...previous,
+                'matrix': labelRenderMatrix(
+                  node,
+                  resolveNodeAppearance(document, node).label,
+                  matrices[id]!.map(quantize).toList(),
+                ),
+                'paintOrder': [ranks[id], (previous['paintOrder'] as List)[1]],
+                'pendingTextPreview': true,
+              }
+              ..remove('bounds')
+              ..remove('cullingBounds');
+        item['bounds'] = sceneItemBounds(item);
+        items.add(item);
+      }
+      items.sort((a, b) {
+        final x = a['paintOrder'] as List,
+            y = b['paintOrder'] as List,
+            first = (x[0] as num).compareTo(y[0] as num);
+        return first != 0 ? first : (x[1] as num).compareTo(y[1] as num);
+      });
+      output = {
+        ...scene,
+        'items': items,
+        'pendingTextPreviewIds': retained.toList()..sort(),
+      };
+    }
+    _input = scene;
+    _document = document;
+    _output = output;
+    return output;
   }
 }

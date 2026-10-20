@@ -33,13 +33,14 @@ void main() {
               y: 700,
               width: 180,
               height: 100,
+              surface: const {'type': 'rect'},
             ),
             LayoutNode(
               id: chair,
-              parentId: group,
+              parentId: table,
               kind: 'seat',
-              x: 1000,
-              y: 590,
+              x: 0,
+              y: -110,
               width: 40,
               height: 40,
             ),
@@ -84,12 +85,10 @@ void main() {
             );
         final resizeHandle = find.byTooltip('Resize handle');
         final actual = tester.getCenter(resizeHandle);
-        final outset = tester.getSize(resizeHandle).width / 2 + 2;
         expect(
-          (actual - expected - Offset(outset, outset)).distance,
+          (actual - expected).distance,
           lessThan(1),
-          reason:
-              'Group handles must follow the visible table and chairs, not the dummy group origin',
+          reason: 'The wrapper uses the physical tabletop edit bounds',
         );
         final before = c.document;
         final gesture = await tester.startGesture(actual);
@@ -108,7 +107,7 @@ void main() {
         );
         expect(
           c.document.nodes.firstWhere((n) => n.id == chair).parentId,
-          group,
+          table,
         );
         await gesture.up();
         await tester.pumpAndSettle();
@@ -142,7 +141,8 @@ void main() {
             in find
                 .byWidgetPredicate(
                   (widget) =>
-                      widget is Tooltip && widget.message?.startsWith('Resize') == true,
+                      widget is Tooltip &&
+                      widget.message?.startsWith('Resize') == true,
                 )
                 .evaluate()) {
           expect(
@@ -161,7 +161,7 @@ void main() {
           reason:
               'A commercial table group keeps each imported chair individually selectable',
         );
-        expect(find.byTooltip('Resize handle'), findsNothing);
+        expect(find.byTooltip('Resize handle'), findsOneWidget);
       } finally {
         semantics.dispose();
       }

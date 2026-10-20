@@ -1,823 +1,347 @@
-import 'dart:ui' as ui;
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
-import 'package:venue_seat_picker/editor_ui.dart';
 import '../venue_layout_controller.dart';
+import 'canonical_appearance_panel.dart';
+import 'layout_floor_style.dart';
 import 'layout_strings.dart';
 import 'layout_style.dart';
-import 'layout_appearance_preview.dart';
-import 'layout_appearance_families.dart';
-import 'layout_floor_style.dart';
 
 Future<void> showLayoutGlobalStyleDialog(
   BuildContext context,
   VenueLayoutController controller, {
   Widget Function(BuildContext, String)? globalFontPickerBuilder,
-}) => showDialog<void>(
-  context: context,
-  builder: (_) => _GlobalStyleDialog(
-    controller: controller,
-    globalFontPickerBuilder: globalFontPickerBuilder,
-  ),
+}) => showCanonicalAppearanceDialog(
+  context,
+  controller,
+  global: true,
+  globalFontPickerBuilder: globalFontPickerBuilder,
 );
 
-const _scopes = {
-  'table': 'Tables',
-  'seat': 'Chairs',
-  'shape': 'Shapes',
-  'furniture': 'Couches',
-  'capacityArea': 'Standing areas',
-  'text': 'Text',
-};
-
-class _GlobalStyleDialog extends StatefulWidget {
-  const _GlobalStyleDialog({
+/// A canvas-side appearance workspace. Hover is a reversible gesture; choosing
+/// a preset commits exactly that gesture as a single history entry.
+class LayoutGlobalStylePanel extends StatefulWidget {
+  const LayoutGlobalStylePanel({
+    super.key,
     required this.controller,
+    required this.onClose,
     this.globalFontPickerBuilder,
   });
-  final Widget Function(BuildContext, String)? globalFontPickerBuilder;
+
   final VenueLayoutController controller;
+  final VoidCallback onClose;
+  final Widget Function(BuildContext, String)? globalFontPickerBuilder;
+
   @override
-  State<_GlobalStyleDialog> createState() => _GlobalStyleDialogState();
+  State<LayoutGlobalStylePanel> createState() => LayoutGlobalStylePanelState();
 }
 
-class _GlobalStyleDialogState extends State<_GlobalStyleDialog> {
+class LayoutGlobalStylePanelState extends State<LayoutGlobalStylePanel> {
+  VenueLayoutDocument? _baseline;
+  VenueLayoutDocument? _preview;
+  String? _choice;
+  VenueLayoutDocument? _selectedDocument;
+  String? _selectedFamily;
+  String? _selectedPalette;
   VenueLayoutController get c => widget.controller;
-  String _kind = 'table';
-  bool _showAppearance = false;
-  String? _error;
-  final _seatingDraft = <String, double>{};
-  final _appearanceDraft = <String, double>{};
-  int _previewChairs = 6;
-  late final _samples = {
-    for (final kind in _scopes.keys)
-      kind: LayoutNode(id: newLayoutId(), kind: kind),
-  };
   bool get _enabled => !c.readOnly && !c.saving;
-  String tr(String value) => VenueLayoutStrings.text(context, value);
 
-  void _apply(Map<String, dynamic> patch) {
+  void cancelPreview() {
+    final ownsGesture = _baseline != null && identical(c.document, _preview);
+    _baseline = null;
+    _preview = null;
+    _choice = null;
+    if (ownsGesture && c.gestureActive) c.cancelGesture();
+  }
+
+  void _hover(
+    String id,
+    VenueLayoutDocument Function(VenueLayoutDocument) apply,
+  ) {
     if (!_enabled) return;
-    try {
-      c.apply(
-        setLayoutAppearance(c.document, _kind, patch),
-        label: 'Plan style',
-      );
-      if (mounted) {
-        setState(() {
-          _appearanceDraft.clear();
-          _error = c.error;
-        });
-      }
-    } catch (_) {
-      setState(() {
-        _appearanceDraft.clear();
-        _error = 'Unable to apply plan style. Check the values.';
-      });
+    if (_baseline != null && !identical(c.document, _preview)) {
+      _baseline = null;
+      _preview = null;
+      _choice = null;
+    }
+    if (_baseline == null) {
+      if (c.gestureActive) return;
+      _baseline = c.document;
+      c.beginGesture();
+    }
+    if (c.preview(apply(_baseline!))) {
+      _preview = c.document;
+      _choice = id;
+    } else {
+      // Even a rejected preview must release the gesture we just opened.
+      _preview = c.document;
+      cancelPreview();
     }
   }
 
-  void _tableSeating(String key, double value) {
+  void _choose(
+    String id,
+    VenueLayoutDocument Function(VenueLayoutDocument) apply,
+  ) {
     if (!_enabled) return;
-    try {
-      c.apply(
-        configurePlanTableSeating(
-          c.document,
-          width: key == 'seatWidth' || key == 'seatSize' ? value : null,
-          height: key == 'seatHeight' || key == 'seatSize' ? value : null,
-          gap: key == 'seatGap' ? value : null,
-          spacing: key == 'seatSpacing' ? value : null,
-          edgePadding: key == 'seatEdgePadding' ? value : null,
-        ),
-        label: 'Adjust chair layout',
-      );
-      setState(() {
-        _seatingDraft.clear();
-        _error = c.error;
-      });
-    } catch (_) {
-      setState(() {
-        _seatingDraft.clear();
-        _error =
-            'Unable to change chair layout. Reduce the values or free up space around the tables.';
-      });
-    }
+    if (_choice != id) _hover(id, apply);
+    if (_choice != id || !identical(c.document, _preview)) return;
+    _baseline = null;
+    _preview = null;
+    _choice = null;
+    c.commitGesture();
+    setState(() {
+      _selectedDocument = c.document;
+      if (id.startsWith('family:')) _selectedFamily = id;
+      if (id.startsWith('palette:')) _selectedPalette = id;
+    });
   }
 
-  Widget _chairControl(
-    String key,
-    String label, {
-    required double value,
-    required double defaultValue,
-  }) {
-    final size = const {'seatWidth', 'seatHeight', 'seatSize'}.contains(key);
-    return _GlobalStyleNumber(
-      key: ValueKey('plan-table-${key == 'seatGap' ? 'seat-gap' : key}'),
-      label: label,
-      value: value,
-      min: size ? 1 : 0,
-      max: 1000000,
-      sliderMax: size ? 120 : 80,
-      defaultValue: defaultValue,
-      enabled: _enabled,
-      preview: (value) => setState(() {
-        if (key == 'seatSize') {
-          _seatingDraft['seatWidth'] = value;
-          _seatingDraft['seatHeight'] = value;
-        } else {
-          _seatingDraft[key] = value;
-        }
-      }),
-      save: (value) => _tableSeating(key, value),
-    );
-  }
-
-  double _appearanceDefault(String property) {
-    final family =
-        (c.document.appearance[_kind] as Map?)?['objectStyle'] ?? 'simple';
-    final defaults = layoutMaterialAppearance(
-      layoutMaterialFamilies.containsKey(family) ? family as String : 'simple',
-    )[_kind]!;
-    return (defaults[property] as num? ?? (property == 'cornerRadius' ? 0 : 1))
-        .toDouble();
-  }
-
-  void _preset(LayoutAppearance style) {
-    if (!_enabled) return;
-    try {
-      final next = c.document.copyWith(
-        appearance: {
-          ...c.document.appearance,
-          for (final kind in _scopes.keys)
-            kind: {
-              ...?c.document.appearance[kind] as Map?,
-              ...kind == 'seat' ? style.seats ?? style.object : style.object,
-            },
-        },
-        canvas: style.canvasFill == null
-            ? c.document.canvas
-            : {...c.document.canvas, 'fill': style.canvasFill},
-      );
-      c.apply(next, label: 'Plan style');
-      setState(() => _error = c.error);
-    } catch (_) {
-      setState(() => _error = 'Unable to apply plan style. Check the values.');
-    }
-  }
-
-  Future<void> _color(String key, String label, String value) async {
-    final colors = <String>{
-      (c.document.canvas['fill'] as String? ?? '#FFFFFFFF').substring(1, 7),
-    };
-    final nodesById = {for (final node in c.document.nodes) node.id: node};
-    for (final node in [...c.document.nodes, ..._samples.values]) {
-      final properties = {
-        'fill': layoutNodeFill(c.document, node, nodesById: nodesById),
-        'stroke': '#475569FF',
-        'color': '#202830FF',
-        ...effectiveNodeProperties(c.document, node),
-      };
-      for (final property in ['fill', 'stroke', 'color']) {
-        final color = properties[property];
-        if (color is String && RegExp(r'^#[0-9a-fA-F]{8}$').hasMatch(color)) {
-          colors.add(color.substring(1, 7).toUpperCase());
-        }
-      }
-    }
-    final kind = _kind;
-    final result = await showDialog<EditorColorResult>(
-      context: context,
-      builder: (_) => EditorColorDialog(
-        title: tr(label),
-        value: EditorColorValue.fromRgba(value),
-        usedColors: colors.toList(),
-        image:
-            (c.resources['images'] as Map?)?[c.document.background?['assetRef']]
-                as ui.Image?,
-        enableOpacity: true,
-        translate: tr,
-      ),
-    );
-    if (mounted && result != null && _enabled && kind == _kind) {
-      if (key == 'canvasFill') {
-        c.apply(
-          c.document.copyWith(
-            canvas: {...c.document.canvas, 'fill': result.primary.rgba},
-          ),
-          label: 'Canvas color',
-        );
-      } else {
-        _apply({key: result.primary.rgba});
-      }
-    }
-  }
-
-  Widget _colorField(String key, String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: OutlinedButton(
-      onPressed: _enabled ? () => _color(key, label, value) : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            EditorColorSwatch(value: EditorColorValue.fromRgba(value)),
-            const SizedBox(width: 12),
-            Expanded(child: LayoutText(label)),
-            const Icon(Icons.edit_outlined, size: 18),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  Widget _scopeSelector() => DropdownButtonFormField<String>(
-    initialValue: _kind,
-    decoration: InputDecoration(
-      labelText: tr('Object type'),
-      border: const OutlineInputBorder(),
-    ),
-    items: [
-      for (final entry in _scopes.entries)
-        DropdownMenuItem(value: entry.key, child: LayoutText(entry.value)),
-    ],
-    onChanged: _enabled
-        ? (value) => setState(() {
-            _kind = value!;
-            _appearanceDraft.clear();
-            _error = null;
-          })
-        : null,
-  );
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: c,
-    builder: (context, _) {
-      final properties = {
-        ...c.document.defaultTextStyle,
-        ...effectiveNodeProperties(c.document, _samples[_kind]!),
-        ..._appearanceDraft,
-      };
-      final seating = documentSeating(c.document);
-      return AlertDialog(
-        title: const LayoutText('Plan style'),
-        scrollable: true,
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const LayoutText(
-                'Styles apply to existing and new objects. Local overrides are preserved.',
-              ),
-              const SizedBox(height: 16),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(
-                    value: false,
-                    icon: Icon(Icons.palette_outlined),
-                    label: LayoutText('Colors'),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    icon: Icon(Icons.chair_outlined),
-                    label: LayoutText('Appearance'),
-                  ),
-                ],
-                selected: {_showAppearance},
-                onSelectionChanged: (values) async {
-                  FocusManager.instance.primaryFocus?.unfocus();
-                  await Future<void>.delayed(Duration.zero);
-                  if (mounted) setState(() => _showAppearance = values.single);
-                },
-              ),
-              const SizedBox(height: 16),
-              if (!_showAppearance) ...[
-                const LayoutText('Color palette'),
-                const SizedBox(height: 8),
-                LayoutStylePresets(
-                  controller: c,
-                  onApply: _preset,
-                  colorsOnly: true,
-                ),
-                const SizedBox(height: 16),
-                _colorField(
-                  'canvasFill',
-                  'Canvas color',
-                  c.document.canvas['fill'] as String? ?? '#FFFFFFFF',
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (!_showAppearance) ...[
-                _scopeSelector(),
-                const SizedBox(height: 16),
-              ],
-              if (!_showAppearance) ...[
-                _colorField(
-                  _kind == 'text' ? 'color' : 'fill',
-                  _kind == 'text' ? 'Text color' : 'Fill color',
-                  '${properties[_kind == 'text' ? 'color' : 'fill'] ?? (_kind == 'text' ? '#202830FF' : layoutNodeFill(c.document, _samples[_kind]!))}',
-                ),
-                _colorField(
-                  'stroke',
-                  'Outline color',
-                  '${properties['stroke'] ?? '#475569FF'}',
-                ),
-              ],
-              if (_showAppearance) ...[
-                LayoutAppearanceFamilies(
-                  controller: c,
-                  onApply: (family) {
-                    c.apply(
-                      withAppearanceFamily(c.document, family),
-                      label: 'Plan style',
-                    );
-                    setState(() => _error = c.error);
-                  },
-                ),
-                ExpansionTile(
-                  key: const ValueKey('plan-chair-layout'),
-                  tilePadding: EdgeInsets.zero,
-                  title: const LayoutText('Chair layout'),
-                  childrenPadding: const EdgeInsets.only(top: 8),
-                  children: [
-                    LayoutAppearancePreview(
-                      controller: c,
-                      kind: 'table',
-                      height: 160,
-                      chairCount: _previewChairs,
-                      appearance: {'table': _seatingDraft},
-                    ),
-                    Row(
-                      children: [
-                        const Expanded(child: LayoutText('Chairs in preview')),
-                        IconButton(
-                          tooltip: tr('Fewer chairs'),
-                          onPressed: _previewChairs > 1
-                              ? () => setState(() => _previewChairs--)
-                              : null,
-                          icon: const Icon(Icons.remove_circle_outline),
-                        ),
-                        Text('$_previewChairs'),
-                        IconButton(
-                          tooltip: tr('More chairs'),
-                          onPressed: _previewChairs < 24
-                              ? () => setState(() => _previewChairs++)
-                              : null,
-                          icon: const Icon(Icons.add_circle_outline),
-                        ),
-                      ],
-                    ),
-                    const LayoutText(
-                      'Only changes the preview. The table stays the same size.',
-                    ),
-                    const SizedBox(height: 16),
-                    _chairControl(
-                      'seatSize',
-                      'Chair size',
-                      value:
-                          _seatingDraft['seatWidth'] ??
-                          (seating.width > seating.height
-                              ? seating.width
-                              : seating.height),
-                      defaultValue: const TableSeating().width,
-                    ),
-                    _chairControl(
-                      'seatGap',
-                      'Distance from table',
-                      value: _seatingDraft['seatGap'] ?? seating.gap,
-                      defaultValue: const TableSeating().gap,
-                    ),
-                    ExpansionTile(
-                      key: const ValueKey('advanced-chair-settings'),
-                      tilePadding: EdgeInsets.zero,
-                      title: const LayoutText('Advanced chair settings'),
-                      children: [
-                        for (final entry in const {
-                          'seatWidth': 'Chair width',
-                          'seatHeight': 'Chair depth',
-                          'seatSpacing': 'Space between chairs',
-                          'seatEdgePadding': 'Distance from table corners',
-                        }.entries)
-                          _chairControl(
-                            entry.key,
-                            entry.value,
-                            value:
-                                _seatingDraft[entry.key] ??
-                                seating.properties[entry.key] as double,
-                            defaultValue:
-                                const TableSeating().properties[entry.key]
-                                    as double,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const LayoutText(
-                      'Applies to existing and new tables. Manual chair positions and locked assemblies stay unchanged.',
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: const LayoutText('Fine-tune appearance'),
-                  childrenPadding: const EdgeInsets.only(top: 8),
-                  children: [
-                    LayoutFloorStyleField(controller: c),
-                    const SizedBox(height: 8),
-                    _scopeSelector(),
-                    const SizedBox(height: 16),
-
-                    LayoutAppearancePreview(
-                      key: const ValueKey('global-appearance-preview'),
-                      controller: c,
-                      kind: _kind,
-                      appearance: {_kind: _appearanceDraft},
-                    ),
-                    const SizedBox(height: 16),
-                    if (const {
-                      'table',
-                      'shape',
-                      'capacityArea',
-                      'text',
-                    }.contains(_kind)) ...[
-                      widget.globalFontPickerBuilder?.call(context, _kind) ??
-                          EditorFontPicker(
-                            value: properties['fontId'] as String?,
-                            label: 'Font',
-                            enabled: _enabled,
-                            translate: tr,
-                            options: [
-                              for (final entry
-                                  in (c.resources['fonts'] as Map? ?? {})
-                                      .entries)
-                                EditorFontOption(
-                                  id: '${entry.key}',
-                                  family: '${entry.value['family'] ?? 'Font'}',
-                                ),
-                            ],
-                            onSelected: (id) async {
-                              if (id != null) {
-                                _apply({'fontId': id});
-                                return;
-                              }
-                              _apply({'fontId': null});
-                            },
-                          ),
-                      const SizedBox(height: 12),
-                      _GlobalStyleNumber(
-                        key: ValueKey('$_kind-font-size'),
-                        label: 'Font size',
-                        value: (properties['size'] as num? ?? 24).toDouble(),
-                        min: layoutLimits['fontSizeMin']!.toDouble(),
-                        max: layoutLimits['fontSizeMax']!.toDouble(),
-                        sliderMax: 96,
-                        step: 1,
-                        enabled: _enabled,
-                        preview: (value) =>
-                            setState(() => _appearanceDraft['size'] = value),
-                        save: (value) => _apply({'size': value}),
-                      ),
-                      Row(
-                        children: [
-                          for (final entry in const [
-                            ('bold', 'Bold', Icons.format_bold),
-                            ('italic', 'Italic', Icons.format_italic),
-                          ])
-                            IconButton.filledTonal(
-                              tooltip: tr(entry.$2),
-                              isSelected: properties[entry.$1] == true,
-                              icon: Icon(entry.$3),
-                              onPressed: _enabled
-                                  ? () => _apply({
-                                      entry.$1: properties[entry.$1] != true,
-                                    })
-                                  : null,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    if (_kind == 'seat') ...[
-                      Row(
-                        children: [
-                          for (final entry in const {
-                            'plain': 'Simple',
-                            'round': 'Round seating',
-                            'wood': 'Wooden',
-                            'upholstered': 'Upholstered',
-                            'transit': 'Transport',
-                            'banquet': 'Banquet',
-                          }.entries)
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 3,
-                                ),
-                                child: OutlinedButton(
-                                  key: ValueKey(
-                                    'chair-appearance-${entry.key}',
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.all(6),
-                                    side: BorderSide(
-                                      color:
-                                          (properties['seatStyle'] ??
-                                                  'plain') ==
-                                              entry.key
-                                          ? Theme.of(
-                                              context,
-                                            ).colorScheme.primary
-                                          : Theme.of(
-                                              context,
-                                            ).colorScheme.outlineVariant,
-                                      width:
-                                          (properties['seatStyle'] ??
-                                                  'plain') ==
-                                              entry.key
-                                          ? 2
-                                          : 1,
-                                    ),
-                                  ),
-                                  onPressed: _enabled
-                                      ? () => _apply({'seatStyle': entry.key})
-                                      : null,
-                                  child: Column(
-                                    children: [
-                                      LayoutAppearancePreview(
-                                        controller: c,
-                                        kind: 'seat',
-                                        seatStyle: entry.key,
-                                        height: 52,
-                                      ),
-                                      const SizedBox(height: 6),
-                                      LayoutText(
-                                        entry.value,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.labelSmall,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    for (final property in [
-                      'strokeWidth',
-                      if (_kind != 'text') 'cornerRadius',
-                      'opacity',
-                    ])
-                      _GlobalStyleNumber(
-                        key: ValueKey('$_kind-$property'),
-                        label: property == 'strokeWidth'
-                            ? 'Stroke width'
-                            : property == 'cornerRadius'
-                            ? 'Corner radius'
-                            : 'Opacity',
-                        value:
-                            (properties[property] as num? ??
-                                    _appearanceDefault(property))
-                                .toDouble(),
-                        max: property == 'opacity' ? 1 : 1e9,
-                        sliderMax: property == 'opacity'
-                            ? 1
-                            : property == 'strokeWidth'
-                            ? 12
-                            : 60,
-                        step: property == 'opacity'
-                            ? .01
-                            : property == 'strokeWidth'
-                            ? .1
-                            : 1,
-                        defaultValue: _appearanceDefault(property),
-                        preview: (value) =>
-                            setState(() => _appearanceDraft[property] = value),
-                        enabled: _enabled,
-                        save: (value) => _apply({property: value}),
-                      ),
-                  ],
-                ),
-              ],
-              if (_error != null)
-                Semantics(
-                  liveRegion: true,
-                  child: LayoutText(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              FocusManager.instance.primaryFocus?.unfocus();
-              await Future<void>.delayed(Duration.zero);
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const LayoutText('Done'),
-          ),
-        ],
-      );
-    },
-  );
-}
-
-class _GlobalStyleNumber extends StatefulWidget {
-  const _GlobalStyleNumber({
-    super.key,
-    required this.label,
-    required this.value,
-    required this.max,
-    required this.enabled,
-    required this.save,
-    this.min = 0,
-    this.sliderMax,
-    this.preview,
-    this.defaultValue,
-    this.step = 1,
-  });
-  final String label;
-  final double value, max, min, step;
-  final double? sliderMax, defaultValue;
-  final ValueChanged<double>? preview;
-  final bool enabled;
-  final ValueChanged<double> save;
-  @override
-  State<_GlobalStyleNumber> createState() => _GlobalStyleNumberState();
-}
-
-class _GlobalStyleNumberState extends State<_GlobalStyleNumber> {
-  late final _text = TextEditingController(text: _display(widget.value));
-  bool _edited = false;
-  String _display(double value) => widget.step >= 1
-      ? value.round().toString()
-      : value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
-  late final _focus = FocusNode()..addListener(_blur);
-  String? _error;
-  double? _submitted;
-  double _snap(double value) => double.parse(
-    ((value / widget.step).round() * widget.step).toStringAsFixed(6),
-  );
-  String get _sliderLabel => widget.value.toStringAsFixed(
-    widget.step < .1
-        ? 2
-        : widget.step < 1
-        ? 1
-        : 0,
-  );
-  void _blur() {
-    if (!_focus.hasFocus) _commit();
-  }
-
-  void _commit() {
-    if (!widget.enabled || !_edited) return;
-    final parsed = double.tryParse(_text.text.replaceAll(',', '.'));
-    if (parsed == null ||
-        !parsed.isFinite ||
-        parsed < widget.min ||
-        parsed > widget.max) {
-      if (mounted) {
-        setState(
-          () => _error = widget.max == 1
-              ? 'Enter a number from 0 to 1.'
-              : widget.min > 0
-              ? 'Enter a number of at least 1.'
-              : 'Enter a non-negative number.',
-        );
-      }
-      return;
-    }
-    if (mounted) setState(() => _error = null);
-    final value = _snap(parsed);
-    _edited = false;
-    _text.text = _display(value);
-    if (value != widget.value && value != _submitted) {
-      _submitted = value;
-      widget.save(value);
-    }
-  }
-
-  @override
-  void didUpdateWidget(_GlobalStyleNumber oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value) {
-      _text.text = _display(widget.value);
-      _edited = false;
-      _submitted = null;
-      _error = null;
-    }
+  void _close() {
+    cancelPreview();
+    widget.onClose();
   }
 
   @override
   void dispose() {
-    _focus.removeListener(_blur);
-    _focus.dispose();
-    _text.dispose();
+    final controller = c;
+    final preview = _preview;
+    final owned = _baseline != null;
+    // A responsive layout may unmount this panel during an editor rebuild.
+    // Restore after that build, only if the preview is still ours.
+    if (owned) {
+      scheduleMicrotask(() {
+        if (identical(controller.document, preview) &&
+            controller.gestureActive) {
+          controller.cancelGesture();
+        }
+      });
+    }
     super.dispose();
   }
 
+  Widget _option({
+    required String id,
+    required String label,
+    required Widget preview,
+    required VenueLayoutDocument Function(VenueLayoutDocument) apply,
+    required bool selected,
+  }) => MouseRegion(
+    onEnter: (_) => _hover(id, apply),
+    onExit: (_) => cancelPreview(),
+    child: OutlinedButton(
+      key: ValueKey(
+        id
+            .replaceFirst('family:', 'appearance-family-')
+            .replaceFirst('palette:', 'layout-style-'),
+      ),
+      onPressed: _enabled ? () => _choose(id, apply) : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.all(8),
+        backgroundColor: selected
+            ? Theme.of(context).colorScheme.secondaryContainer
+            : null,
+        side: BorderSide(
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          preview,
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (selected) ...[
+                const Icon(Icons.check, size: 13),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: LayoutText(
+                  label,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _sectionTitle(String title) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: LayoutText(title, style: Theme.of(context).textTheme.titleSmall),
+  );
+
   @override
-  Widget build(BuildContext context) {
-    final field = EditorNumberScroll(
-      enabled: widget.enabled && widget.label != 'Font size',
-      min: widget.min,
-      max: widget.max,
-      step: widget.step,
-      onChanged: () {
-        _edited = true;
-        _commit();
-      },
-      child: TextField(
-        controller: _text,
-        focusNode: _focus,
-        enabled: widget.enabled,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: widget.sliderMax == null
-              ? VenueLayoutStrings.text(context, widget.label)
-              : null,
-          errorText: _error == null
-              ? null
-              : VenueLayoutStrings.text(context, _error!),
-          suffixIcon: IconButton(
-            tooltip: VenueLayoutStrings.text(context, 'Apply'),
-            onPressed: widget.enabled ? _commit : null,
-            icon: const Icon(Icons.check, size: 18),
+  Widget build(BuildContext context) => Focus(
+    autofocus: true,
+    onKeyEvent: (_, event) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        _close();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.palette_outlined, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: LayoutText(
+                  'Plan style',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              IconButton(
+                tooltip: VenueLayoutStrings.text(context, 'Close'),
+                onPressed: _close,
+                icon: const Icon(Icons.close, size: 20),
+              ),
+            ],
           ),
         ),
-        onChanged: (_) {
-          _edited = true;
-          _submitted = null;
-          if (_error != null) setState(() => _error = null);
-        },
-        onSubmitted: (_) => _commit(),
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: widget.sliderMax == null
-          ? field
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LayoutText(widget.label),
-                const SizedBox(height: 4),
-                Row(
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _sectionTitle('Style family'),
+              LayoutBuilder(
+                builder: (context, constraints) => Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: Tooltip(
-                        message: VenueLayoutStrings.text(
-                          context,
-                          'Double-click to reset',
+                    for (final family in const {
+                      'minimal': 'Minimal',
+                      'wood': 'Timber',
+                      'lounge': 'Lounge',
+                      'round': 'Round seating',
+                      'banquet': 'Banquet hall',
+                      'transit': 'Transport',
+                      'cinema': 'Cinema',
+                    }.entries)
+                      SizedBox(
+                        width: (constraints.maxWidth - 8) / 2,
+                        height: 100,
+                        child: _option(
+                          id: 'family:${family.key}',
+                          label: family.value,
+                          selected:
+                              _selectedFamily == 'family:${family.key}' &&
+                              (identical(c.document, _selectedDocument) ||
+                                  identical(_baseline, _selectedDocument)),
+                          preview: LayoutStylePreview(
+                            appearance:
+                                layoutMaterialFamilyAppearances[family.key]!,
+                            size: const Size(88, 44),
+                          ),
+                          apply: (document) =>
+                              applyLayoutFamily(document, family.key),
                         ),
-                        child: GestureDetector(
-                          onDoubleTap:
-                              widget.enabled && widget.defaultValue != null
-                              ? () => widget.save(widget.defaultValue!)
-                              : null,
-                          child: Slider(
-                            min: widget.min,
-                            max: widget.value > widget.sliderMax!
-                                ? widget.value
-                                : widget.sliderMax!,
-                            value: widget.value.clamp(widget.min, widget.max),
-                            label: _sliderLabel,
-                            semanticFormatterCallback: (value) =>
-                                '${VenueLayoutStrings.text(context, widget.label)}: $_sliderLabel',
-                            onChangeStart: widget.enabled
-                                ? (_) => FocusManager.instance.primaryFocus
-                                      ?.unfocus()
-                                : null,
-                            onChanged: widget.enabled
-                                ? (value) => widget.preview?.call(_snap(value))
-                                : null,
-                            onChangeEnd: widget.enabled
-                                ? (value) => widget.save(_snap(value))
-                                : null,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              _sectionTitle('Color palette'),
+              LayoutBuilder(
+                builder: (context, constraints) => Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final palette in layoutColorPalettes.entries)
+                      SizedBox(
+                        width: (constraints.maxWidth - 8) / 2,
+                        child: _option(
+                          id: 'palette:${palette.key}',
+                          label: palette.key,
+                          selected:
+                              _selectedPalette == 'palette:${palette.key}' &&
+                              (identical(c.document, _selectedDocument) ||
+                                  identical(_baseline, _selectedDocument)),
+                          preview: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              for (final hex in [
+                                palette.value.object['fill'] as String,
+                                palette.value.seats!['fill'] as String,
+                                palette.value.canvasFill!,
+                              ])
+                                Container(
+                                  width: 22,
+                                  height: 18,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Color(
+                                      int.parse(
+                                        hex.substring(7, 9) +
+                                            hex.substring(1, 7),
+                                        radix: 16,
+                                      ),
+                                    ),
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          apply: (document) => applyGlobalLayoutAppearance(
+                            document,
+                            palette.value,
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 120,
-                      child: Semantics(
-                        label: VenueLayoutStrings.text(context, widget.label),
-                        child: field,
-                      ),
-                    ),
                   ],
                 ),
-              ],
-            ),
-    );
-  }
+              ),
+              const SizedBox(height: 24),
+              const Divider(height: 1),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const LayoutText('Floor appearance'),
+                children: [
+                  AnimatedBuilder(
+                    animation: c,
+                    builder: (_, _) => LayoutFloorStyleField(controller: c),
+                  ),
+                ],
+              ),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const LayoutText('Detailed settings'),
+                children: [
+                  CanonicalAppearancePanel(
+                    controller: c,
+                    global: true,
+                    globalFontPickerBuilder: widget.globalFontPickerBuilder,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }

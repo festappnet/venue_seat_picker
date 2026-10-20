@@ -1,3 +1,4 @@
+import 'support/style.dart';
 import 'dart:math';
 import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
@@ -17,7 +18,8 @@ void main() {
                             kind: 'seat',
                             width: width,
                             height: height,
-                            properties: {'seatStyle': style},
+                            properties: {},
+                            style: {'seatStyle': style},
                           ),
                         ],
                       ),
@@ -110,7 +112,7 @@ void main() {
         x: 600,
         y: 600,
       );
-      final styled = setLayoutAppearance(
+      final styled = withKindStyle(
         withLayoutMaterialFamily(source, 'lounge'),
         'seat',
         {'seatStyle': 'roundUpholstered'},
@@ -147,7 +149,7 @@ void main() {
     },
   );
   test(
-    'actual pressure redistributes near regular targets and free space restores even spacing',
+    'explicit reflow restores even spacing after pressure is removed',
     () {
       final source = tableLayout(
         shape: 'circle',
@@ -190,7 +192,7 @@ void main() {
       final free = packed.copyWith(
         nodes: packed.nodes.where((node) => node.id != blocker.id).toList(),
       );
-      final restored = moveLayoutWithinCanvas(free, {table.id}, dx: 10);
+      final restored = moveLayoutWithinCanvas(reflowTable(free,table.id,8),{table.id},dx:10);
       for (final gap in gaps(restored)) expect(gap, closeTo(pi / 4, .0001));
       expect(layoutCollisions(restored), isEmpty);
       expect(

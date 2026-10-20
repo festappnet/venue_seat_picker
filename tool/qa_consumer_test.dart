@@ -84,7 +84,9 @@ void main() {
       addTearDown(() => WidgetController.hitTestWarningShouldBeFatal = false);
       await tester.binding.setSurfaceSize(const Size(1440, 1000));
       final resources = (await tester.runAsync(loadLayoutFixtureResources))!;
-      expect(resources['fonts'], isNotEmpty);
+      expect(resources['protocol'], 2);
+      expect(resources['fontFamilies'], isNotEmpty);
+      expect(validateLayoutResources(resources), isEmpty);
       expect(VenueLayoutTemplates.all, isNotEmpty);
       expect(
         VenueLayoutTemplates.all.map((t) => t.id).toSet(),
@@ -128,6 +130,7 @@ void main() {
         // rather than unquantized transient template coordinates.
         expect(roundtrip.toJson(), document.toJson());
         final reopened = VenueLayoutDocument.fromJson(roundtrip.toJson());
+        expect(compileScene(reopened,resources:resources)['issues'],isEmpty,reason:template.id);
         expect(
           compileScene(reopened, resources: resources),
           compileScene(roundtrip, resources: resources),

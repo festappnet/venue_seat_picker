@@ -12,6 +12,7 @@ void main() {
         selectionUnits: [
           {
             'id': newLayoutId(),
+            'kind': 'atomic',
             'nodeIds': [a.id, b.id],
           },
         ],
@@ -49,6 +50,7 @@ void main() {
       ];
       final unit = {
         'id': newLayoutId(),
+        'kind': 'atomic',
         'nodeIds': [seats[1].id, seats[2].id],
       };
       final document = VenueLayoutDocument(
@@ -104,69 +106,48 @@ void main() {
       controller.dispose();
     },
   );
-  for (final explicitNull in [false, true]) {
-    test(
-      'protected legacy ${explicitNull ? 'null' : 'omitted'} unit kind freezes membership on apply and history',
-      () {
-        final a = LayoutNode(id: newLayoutId(), kind: 'seat', x: 200, y: 200),
-            b = LayoutNode(id: newLayoutId(), kind: 'seat', x: 260, y: 200);
-        final raw = VenueLayoutDocument(
-          nodes: [a, b],
-          selectionUnits: [
-            {
-              'id': newLayoutId(),
-              'nodeIds': [a.id, b.id],
-              if (explicitNull) 'kind': null,
-            },
-          ],
-        ).toJson();
-        final unit = (raw['selectionUnits'] as List).single as Map;
-        if (explicitNull) {
-          unit['kind'] = null;
-        } else {
-          unit.remove('kind');
-        }
-        final document = VenueLayoutDocument.fromJson(raw);
-        final reduced = document.copyWith(
-          selectionUnits: [
-            {
-              ...document.selectionUnits.single,
-              'nodeIds': [a.id],
-            },
-          ],
-        );
-        var protected = <String>{a.id};
-        final c = VenueLayoutController(
-          document,
-          protectedSeatIds: () => protected,
-        );
-        expect(c.apply(reduced), isFalse);
-        expect(c.document, same(document));
-        expect(
-          c.error,
-          'Reserved or blocked seats prevent changing this seat group.',
-        );
-        protected = {};
-        expect(c.apply(reduced), isTrue);
-        protected = {a.id};
-        c.undo();
-        expect(
-          c.document,
-          same(reduced),
-          reason: 'A protected atomic group may not change through history.',
-        );
-        protected = {};
-        c.undo();
-        expect(c.document, same(document));
-        protected = {a.id};
-        c.redo();
-        expect(c.document, same(document));
-        expect(
-          c.error,
-          'Reserved or blocked seats prevent changing this seat group.',
-        );
-        c.dispose();
-      },
-    );
-  }
+  test(
+    'canonical unit membership remains protected through apply and history',
+    () {
+      final a = LayoutNode(id: newLayoutId(), kind: 'seat', x: 200, y: 200),
+          b = LayoutNode(id: newLayoutId(), kind: 'seat', x: 260, y: 200);
+      final document = VenueLayoutDocument(
+        nodes: [a, b],
+        selectionUnits: [
+          {
+            'id': newLayoutId(),
+            'kind': 'atomic',
+            'nodeIds': [a.id, b.id],
+          },
+        ],
+      );
+      final reduced = document.copyWith(
+        selectionUnits: [
+          {
+            ...document.selectionUnits.single,
+            'nodeIds': [a.id],
+          },
+        ],
+      );
+      var protected = <String>{a.id};
+      final c = VenueLayoutController(
+        document,
+        protectedSeatIds: () => protected,
+      );
+      addTearDown(c.dispose);
+      expect(c.apply(reduced), isFalse);
+      expect(c.document, same(document));
+      protected = {};
+      expect(c.apply(reduced), isTrue);
+      protected = {a.id};
+      c.undo();
+      expect(c.document, same(reduced));
+      protected = {};
+      c.undo();
+      expect(c.document, same(document));
+      protected = {a.id};
+      c.redo();
+      expect(c.document, same(document));
+    },
+  );
 }

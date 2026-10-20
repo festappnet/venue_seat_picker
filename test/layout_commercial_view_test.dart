@@ -18,6 +18,7 @@ void main() {
         label: 'T1',
         x: 100,
         y: 100,
+        surface: const {'type': 'rect'},
       );
       final text = LayoutNode(
         id: newLayoutId(),
@@ -82,6 +83,7 @@ void main() {
         y: 100,
         width: 80,
         height: 60,
+        surface: const {'type': 'rect'},
       );
       final table2 = LayoutNode(
         id: newLayoutId(),
@@ -91,6 +93,7 @@ void main() {
         y: 100,
         width: 80,
         height: 60,
+        surface: const {'type': 'rect'},
       );
       final floor = LayoutNode(
         id: newLayoutId(),
@@ -132,13 +135,10 @@ void main() {
       LayoutSceneSurface surface() =>
           tester.widget(find.byType(LayoutSceneSurface));
       expect(find.text('Standing areas and tables'), findsOneWidget);
-      await tester.tap(find.byTooltip('Pan'));
-      await tester.pump();
-      expect(surface().onTap, isNull);
-      expect(c.document, same(original));
-      await tester.tap(find.byTooltip('Select'));
-      await tester.pump();
+      expect(find.byTooltip('Pan'), findsNothing);
+      expect(find.byTooltip('Select'), findsNothing);
       expect(surface().onTap, isNotNull);
+      expect(c.document, same(original));
 
       final region = find
           .descendant(

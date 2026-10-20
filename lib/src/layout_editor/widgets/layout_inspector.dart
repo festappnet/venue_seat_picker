@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'package:venue_seat_picker/editor_ui.dart';
@@ -7,9 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'layout_scene_surface.dart';
 import 'layout_style.dart';
+import 'layout_number_slider_control.dart';
+import 'canonical_appearance_panel.dart';
 import 'layout_global_style.dart';
 import 'layout_floor_style.dart';
-import 'layout_font_size_control.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 
 class LayoutInspector extends StatefulWidget {
@@ -22,6 +22,7 @@ class LayoutInspector extends StatefulWidget {
     this.onRenameNode,
     this.fontPickerBuilder,
     this.globalFontPickerBuilder,
+    this.onOpenGlobalStyle,
     this.canvasSelected = false,
     this.onImportBackground,
     this.onClearSelection,
@@ -35,6 +36,7 @@ class LayoutInspector extends StatefulWidget {
   final Widget Function(BuildContext, LayoutNode)? fontPickerBuilder;
   final Widget Function(BuildContext, String)? globalFontPickerBuilder;
   final void Function(LayoutNode, String)? onRenameNode;
+  final VoidCallback? onOpenGlobalStyle;
   final Set<String> readOnlyLabelNodeIds;
   final bool cornerPivot;
   final bool canvasSelected;
@@ -125,23 +127,30 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     return _layerRows = Column(
       children: [
         for (final n in layers.take(200))
-          ListTile(
-            contentPadding: EdgeInsets.only(left: depth(n) * 12.0),
-            leading: Icon(
-              n.kind == 'group' ? Icons.folder_outlined : Icons.layers_outlined,
-              size: 16,
+          MouseRegion(
+            onEnter: (_) => c.highlightObjects({n.id}),
+            onExit: (_) => c.highlightObjects({}),
+            child: ListTile(
+              key: ValueKey('layout-layer-${n.id}'),
+              contentPadding: EdgeInsets.only(left: depth(n) * 12.0),
+              leading: Icon(
+                n.kind == 'group'
+                    ? Icons.folder_outlined
+                    : Icons.layers_outlined,
+                size: 16,
+              ),
+              dense: true,
+              selected: selection.contains(n.id),
+              title: LayoutText(
+                n.label.isEmpty ? n.kind : n.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: LayoutText(n.kind),
+              trailing: n.locked ? const Icon(Icons.lock_outline) : null,
+              onTap: () => c.select({n.id}),
+              onLongPress: () => c.select({...c.selection, n.id}),
             ),
-            dense: true,
-            selected: selection.contains(n.id),
-            title: LayoutText(
-              n.label.isEmpty ? n.kind : n.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: LayoutText(n.kind),
-            trailing: n.locked ? const Icon(Icons.lock_outline) : null,
-            onTap: () => c.select({n.id}),
-            onLongPress: () => c.select({...c.selection, n.id}),
           ),
         if (layers.length > 200)
           LayoutText(
@@ -162,7 +171,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
 
   String _nodeFill(LayoutNode node) =>
       '${effectiveNodeProperties(c.document, node)['fill'] ?? switch (node.kind) {
-            'seat' => _nodesById[node.parentId]?.properties['furniture'] == 'couch' ? '#F8FAFCFF' : '#DCFCE7FF',
+            'seat' => _nodesById[node.parentId]?.assembly?['kind'] == 'couch' ? '#F8FAFCFF' : layoutDefaultSeatFill,
             'table' => '#E2E8F0FF',
             'capacityArea' => '#DBEAFEFF',
             _ => '#F1F5F9FF',
@@ -188,31 +197,6 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     return colors.toList();
   }
 
-  Widget _seatAppearance(LayoutNode root) {
-    final descendants = layoutSubtree(c.document, {root.id});
-    final seats = c.document.nodes
-        .where((n) => n.kind == 'seat' && descendants.contains(n.id))
-        .toList();
-    if (seats.isEmpty) return const SizedBox.shrink();
-    final seatIds = seats.map((n) => n.id).toSet();
-    return _field('Seat fill #RRGGBBAA', _nodeFill(seats.first), (value) {
-      c.apply(
-        c.document.copyWith(
-          nodes: [
-            for (final n in c.document.nodes)
-              if (seatIds.contains(n.id))
-                n.copyWith(
-                  properties: localAppearanceProperties(n, {'fill': value}),
-                )
-              else
-                n,
-          ],
-        ),
-        label: 'Seat color',
-      );
-    });
-  }
-
   Widget _field(
     String label,
     String value,
@@ -228,6 +212,8 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       enabled: !(c.readOnly || c.saving),
       multiline: multiline,
       numeric: numeric,
+      onUndo: c.undo,
+      onRedo: c.redo,
       save: (v) => _run(() => save(v)),
       usedColors: _collectUsedColors,
       paletteImage:
@@ -276,47 +262,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     },
     numeric: true,
   );
-  void _resizeDimension(LayoutNode node, double value, {required bool width}) {
-    if (node.kind == 'table' && node.properties['shape'] == 'polygon') {
-      c.apply(
-        resizeGridTableSurface(
-          c.document,
-          node.id,
-          width ? value : node.width,
-          width ? node.height : value,
-          protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
-        ),
-        label: 'Resize surface',
-      );
-      return;
-    }
-    final keepRound =
-        node.kind == 'table' &&
-        const [
-          'round',
-          'circle',
-          'ellipse',
-          'oval',
-        ].contains(node.properties['shape']) &&
-        !HardwareKeyboard.instance.isShiftPressed;
-    c.resizeObject(
-      node.id,
-      width
-          ? value
-          : keepRound
-          ? value * node.width / node.height
-          : node.width,
-      !width
-          ? value
-          : keepRound
-          ? value * node.height / node.width
-          : node.height,
-    );
-  }
 
-  void _property(LayoutNode n, String key, dynamic value) => c.updateNode(
-    n.copyWith(properties: localAppearanceProperties(n, {key: value})),
-  );
   Future<void> _preview(
     String title,
     VenueLayoutDocument Function(Map<String, double>) generate,
@@ -326,7 +272,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     final values = Map<String, double>.of(initial);
     c.beginGesture();
     String? error;
-    final accepted = await showDialog<bool>(
+    final accepted = await showEditorDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -424,11 +370,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       spacing: values['spacing']!.toDouble(),
       rowSpacing: values['rowSpacing']!.toDouble(),
       aisle: values['aisle']!.toDouble(),
-      seating: documentSeating(
-        c.document.copyWith(
-          nodes: c.document.nodes.where((n) => n.parentId == node.id).toList(),
-        ),
-      ),
+      seating: TableSeating.fromDocument(c.document, node),
     );
     c.apply(
       reconcileAssembly(c.document, node.id, generated),
@@ -508,6 +450,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                 },
         ),
         ExpansionTile(
+          minTileHeight: 44,
           tilePadding: EdgeInsets.zero,
           title: const LayoutText('Row arrangement'),
           children: [
@@ -533,31 +476,6 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       ],
     );
   }
-
-  Widget _outlineStyle(LayoutNode n, Map<String, dynamic> p) =>
-      DropdownButtonFormField<String>(
-        initialValue: (p['dash'] is List && (p['dash'] as List).isNotEmpty)
-            ? ((p['dash'] as List).first == 2 ? 'Dotted' : 'Dashed')
-            : 'Solid',
-        decoration: InputDecoration(
-          labelText: VenueLayoutStrings.text(context, 'Outline style'),
-        ),
-        items: [
-          for (final value in ['Solid', 'Dashed', 'Dotted'])
-            DropdownMenuItem(value: value, child: LayoutText(value)),
-        ],
-        onChanged: (c.readOnly || c.saving)
-            ? null
-            : (value) => _property(
-                n,
-                'dash',
-                value == 'Dashed'
-                    ? [12, 8]
-                    : value == 'Dotted'
-                    ? [2, 6]
-                    : <int>[],
-              ),
-      );
 
   Widget _countControl(
     String label,
@@ -593,7 +511,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
   );
 
   Widget _transportControls(LayoutNode n) {
-    final p = n.properties;
+    final p = {...n.assembly ?? {}, 'assembly': n.assembly?['kind']};
     void bus({
       int? rows,
       int? left,
@@ -735,31 +653,42 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     );
   }
 
-  Widget _couchControls(LayoutNode node) {
-    final count = couchSeatCount(c.document, node.id);
-    final enabled = !(c.readOnly || c.saving);
+  Widget _seatCountControls(LayoutNode node) {
+    final couch = isCouchNode(node), minimum = isCouchNode(node) ? 1 : 0;
+    final count = couch
+        ? couchSeatCount(c.document, node.id)
+        : c.document.nodes
+              .where((n) => n.parentId == node.id && n.kind == 'seat')
+              .length;
+    final enabled = !(c.readOnly || c.saving || node.locked);
+    final remaining =
+        layoutMaxSeats - c.document.nodes.where((n) => n.kind == 'seat').length;
+    final maximum = math.min(
+      couch ? layoutMaxSeats : tableCapacity(node),
+      count + remaining,
+    );
     return Row(
       children: [
         Expanded(
-          child: _number('Seats on couch', count, (value) {
-            if (value != value.roundToDouble() || value < 1) {
-              throw const FormatException(
-                'Enter a whole seat count of at least one.',
-              );
+          child: _number(couch ? 'Seats on couch' : 'Seats', count, (value) {
+            if (value != value.roundToDouble() || value < minimum) {
+              throw const FormatException('Enter a valid whole seat count.');
             }
             c.setSeatCount(node.id, value.toInt());
           }),
         ),
         IconButton(
           tooltip: VenueLayoutStrings.text(context, 'Remove one seat'),
-          onPressed: enabled && count > 1
+          onPressed: enabled && count > minimum
               ? () => c.setSeatCount(node.id, count - 1)
               : null,
           icon: const Icon(Icons.remove_circle_outline),
         ),
         IconButton(
           tooltip: VenueLayoutStrings.text(context, 'Add one seat'),
-          onPressed: enabled ? () => c.setSeatCount(node.id, count + 1) : null,
+          onPressed: enabled && count < maximum
+              ? () => c.setSeatCount(node.id, count + 1)
+              : null,
           icon: const Icon(Icons.add_circle_outline),
         ),
       ],
@@ -775,7 +704,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       ? 'Bar stool'
       : isCouchNode(node)
       ? 'Couch'
-      : node.properties['assembly'] == 'rows'
+      : node.assembly?['kind'] == 'rows'
       ? 'Seat rows'
       : node.kind == 'shape'
       ? const {
@@ -802,60 +731,25 @@ class _LayoutInspectorState extends State<LayoutInspector> {
             }[node.kind] ??
             node.kind;
 
-  String _tableShape(LayoutNode node) => node.properties['shape'] == 'polygon'
-      ? 'polygon'
-      : const [
-          'round',
-          'circle',
-          'ellipse',
-          'oval',
-        ].contains(node.properties['shape'])
-      ? 'round'
-      : 'rectangle';
+  String _tableShape(LayoutNode node) => switch (node.surface!['type']) {
+    'circle' => 'round',
+    'grid' => 'polygon',
+    _ => 'rectangle',
+  };
 
   void _changeTableShape(LayoutNode node, String shape) {
     if (shape == _tableShape(node)) return;
-    final before = c.document;
-    final seats = before.nodes
-        .where((n) => n.kind == 'seat' && n.parentId == node.id)
-        .map((n) => n.id)
-        .toSet();
-    final properties = Map<String, dynamic>.from(node.properties)
-      ..remove('points')
-      ..remove('holes');
-    properties['shape'] = shape == 'rectangle' ? 'roundedRect' : shape;
-    final diameter = math.max(node.width, node.height);
-    var nextNode = node.copyWith(
-      width: shape == 'round' ? diameter : node.width,
-      height: shape == 'round' ? diameter : node.height,
-      properties: properties,
-    );
-    if (shape == 'polygon') {
-      nextNode = snapTableSurfaceToGrid(nextNode, preset: 'L');
-    }
-    if (tableCapacity(nextNode) < seats.length) {
-      throw StateError(
-        'The selected shape cannot fit the existing chairs. Increase the table size first.',
+    {
+      c.apply(
+        setTableSurfaceKind(c.document, node.id, switch (shape) {
+          'round' => 'circle',
+          'polygon' => 'grid',
+          _ => 'rect',
+        }, protectedSeatIds: c.protectedSeatIds?.call() ?? const {}),
+        label: 'Change table shape',
       );
+      return;
     }
-    final next = reflowTable(
-      before.copyWith(
-        nodes: [for (final n in before.nodes) n.id == node.id ? nextNode : n],
-      ),
-      node.id,
-      seats.length,
-      protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
-    );
-    final retained = next.nodes
-        .where((n) => n.kind == 'seat' && n.parentId == node.id)
-        .map((n) => n.id)
-        .toSet();
-    if (!setEquals(seats, retained)) {
-      throw StateError(
-        'The selected shape cannot fit the existing chairs. Increase the table size first.',
-      );
-    }
-    c.apply(next, label: 'Change table shape');
   }
 
   Widget _tableShapeControls(LayoutNode node) => Padding(
@@ -938,563 +832,611 @@ class _LayoutInspectorState extends State<LayoutInspector> {
     );
   }
 
-  Widget _textAppearance(LayoutNode n) {
-    final p = {
-      ...c.document.defaultTextStyle,
-      ...effectiveNodeProperties(c.document, n),
-    };
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          widget.fontPickerBuilder?.call(context, n) ??
-              EditorFontPicker(
-                value: p['fontId'] as String?,
-                label: 'Font',
-                enabled: !(c.readOnly || c.saving),
-                translate: (text) => VenueLayoutStrings.text(context, text),
-                options: [
-                  for (final entry
-                      in (c.resources['fonts'] as Map? ?? {}).entries)
-                    EditorFontOption(
-                      id: '${entry.key}',
-                      family: '${entry.value['family'] ?? 'Font'}',
-                    ),
-                ],
-                onSelected: (id) async {
-                  final properties = Map<String, dynamic>.from(n.properties);
-                  if (id == null) {
-                    properties.remove('fontId');
-                  } else {
-                    properties.addAll(
-                      localAppearanceProperties(n, {'fontId': id}),
-                    );
-                  }
-                  c.updateNode(n.copyWith(properties: properties));
-                },
-              ),
-          const SizedBox(height: 12),
-          LayoutFontSizeControl(
-            key: ValueKey('font-size-${n.id}'),
-            controller: c,
-            node: n,
-            value: (p['size'] as num? ?? 24).toDouble(),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final style in const [
-                ('bold', 'Bold', Icons.format_bold),
-                ('italic', 'Italic', Icons.format_italic),
-              ])
-                IconButton.filledTonal(
-                  tooltip: VenueLayoutStrings.text(context, style.$2),
-                  isSelected: p[style.$1] == true,
-                  icon: Icon(style.$3),
-                  onPressed: c.readOnly || c.saving
-                      ? null
-                      : () => _property(n, style.$1, p[style.$1] != true),
+  Future<String?> _styleName(
+    String heading, {
+    String initial = '',
+    String? id,
+  }) {
+    var name = initial, error = '';
+    return showEditorDialog<String>(
+      context: context,
+      builder: (dialogContext) => EditorDialogDismissal(
+        child: StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: Row(
+              children: [
+                Expanded(child: LayoutText(heading)),
+                IconButton(
+                  tooltip: VenueLayoutStrings.text(context, 'Close'),
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
                 ),
+              ],
+            ),
+            content: TextFormField(
+              autofocus: true,
+              initialValue: initial,
+              maxLength: 80,
+              decoration: InputDecoration(
+                labelText: VenueLayoutStrings.text(context, 'Style name'),
+                errorText: error.isEmpty
+                    ? null
+                    : VenueLayoutStrings.text(context, error),
+              ),
+              onChanged: (value) => name = value,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const LayoutText('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final title = name.trim();
+                  if (title.isEmpty) {
+                    update(() => error = 'Enter a style name.');
+                    return;
+                  }
+                  if (c.document.presets.any(
+                    (p) =>
+                        p['id'] != id &&
+                        (p['title'] as String).toLowerCase() ==
+                            title.toLowerCase(),
+                  )) {
+                    update(
+                      () => error = 'A style with this name already exists.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(dialogContext, title);
+                },
+                child: const LayoutText('Save'),
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _node(LayoutNode n) {
-    final facingRotation = tableSeatFacingRotation(n, _nodesById[n.parentId]);
-    final p = effectiveNodeProperties(c.document, n);
-    final openPath = const ['line', 'polyline', 'arrow'].contains(p['shape']);
-    final styleIds = layoutAppearanceTargets(c.document, {n.id});
-    final followsPlan = c.document.nodes
-        .where((node) => styleIds.contains(node.id))
-        .every(
-          (node) =>
-              ((node.properties['appearanceOverrides'] as List?) ?? const [])
-                  .isEmpty,
-        );
+  Future<void> _saveNamedStyle(LayoutNode node) async {
+    final name = await _styleName('Save as style');
+    if (name == null || !mounted) return;
+    _run(
+      () => c.apply(
+        saveLayoutAppearancePreset(c.document, node, name),
+        label: 'Save style',
+      ),
+    );
+  }
+
+  Future<void> _manageNamedStyles(String kind) => showEditorDialog<void>(
+    context: context,
+    builder: (dialogContext) => EditorDialogDismissal(
+      child: AnimatedBuilder(
+        animation: c,
+        builder: (context, _) {
+          final ids = namedLayoutAppearances(c.document, kind).keys.toSet();
+          final styles = c.document.presets
+              .where((p) => ids.contains(p['id']))
+              .toList();
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Expanded(child: LayoutText('My styles')),
+                IconButton(
+                  tooltip: VenueLayoutStrings.text(context, 'Close'),
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              height: 320,
+              child: styles.isEmpty
+                  ? const LayoutText('No saved styles yet.')
+                  : ListView(
+                      children: [
+                        for (final preset in styles)
+                          ListTile(
+                            title: Text(preset['title'] as String),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Rename style',
+                                  ),
+                                  icon: const Icon(Icons.edit_outlined),
+                                  onPressed: c.readOnly || c.saving
+                                      ? null
+                                      : () async {
+                                          final name = await _styleName(
+                                            'Rename style',
+                                            initial: preset['title'] as String,
+                                            id: preset['id'] as String,
+                                          );
+                                          if (name == null || !mounted) return;
+                                          _run(
+                                            () => c.apply(
+                                              c.document.copyWith(
+                                                presets: [
+                                                  for (final p
+                                                      in c.document.presets)
+                                                    p['id'] == preset['id']
+                                                        ? {...p, 'title': name}
+                                                        : p,
+                                                ],
+                                              ),
+                                              label: 'Rename style',
+                                            ),
+                                          );
+                                        },
+                                ),
+                                IconButton(
+                                  tooltip: VenueLayoutStrings.text(
+                                    context,
+                                    'Delete style',
+                                  ),
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: c.readOnly || c.saving
+                                      ? null
+                                      : () => _run(
+                                          () => c.apply(
+                                            c.document.copyWith(
+                                              presets: [
+                                                for (final p
+                                                    in c.document.presets)
+                                                  if (p['id'] != preset['id'])
+                                                    p,
+                                              ],
+                                            ),
+                                            label: 'Delete style',
+                                          ),
+                                        ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget _quickObjectStyles(LayoutNode node) {
+    final custom = namedLayoutAppearances(c.document, node.kind);
+    const families = {
+      'minimal': 'Minimal',
+      'wood': 'Timber',
+      'lounge': 'Lounge',
+      'round': 'Round seating',
+      'banquet': 'Banquet hall',
+      'transit': 'Transport',
+      'cinema': 'Cinema',
+    };
+    final canSave = const {
+      'table',
+      'seat',
+      'text',
+      'shape',
+      'capacityArea',
+    }.contains(node.kind);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LayoutText(
-          n.kind == 'table'
-              ? isBarNode(n)
-                    ? 'Bar'
-                    : 'Table and seats'
-              : p['assembly'] == 'rows'
-              ? 'Seat rows'
-              : isZigzagNode(n)
-              ? 'Zigzag'
-              : openPath
-              ? {
-                  'line': 'Line',
-                  'polyline': 'Polyline',
-                  'arrow': 'Arrow',
-                }[p['shape']]!
-              : _typeTitle(n),
-          style: Theme.of(context).textTheme.titleMedium,
+        Row(
+          children: [
+            if (widget.onCopyStyle != null)
+              IconButton(
+                tooltip: VenueLayoutStrings.text(context, 'Copy style'),
+                onPressed: widget.onCopyStyle,
+                icon: const Icon(Icons.format_paint_outlined),
+              ),
+            if (widget.onCopyStyle != null || widget.onPasteStyle != null)
+              IconButton(
+                tooltip: VenueLayoutStrings.text(context, 'Paste style'),
+                onPressed: c.readOnly || c.saving ? null : widget.onPasteStyle,
+                icon: const Icon(Icons.content_paste),
+              ),
+            if (canSave)
+              PopupMenuButton<String>(
+                tooltip: VenueLayoutStrings.text(context, 'Style actions'),
+                enabled: !c.readOnly && !c.saving && !node.locked,
+                onSelected: (action) {
+                  if (action == 'save') {
+                    _saveNamedStyle(node);
+                  } else {
+                    _manageNamedStyles(node.kind);
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'save',
+                    child: LayoutText('Save as style'),
+                  ),
+                  if (custom.isNotEmpty)
+                    const PopupMenuItem(
+                      value: 'manage',
+                      child: LayoutText('My styles'),
+                    ),
+                ],
+              ),
+          ],
         ),
-        const SizedBox(height: 12),
-        if (!widget.readOnlyLabelNodeIds.contains(n.id) ||
-            widget.onRenameNode != null)
-          _field('Name', n.label, (v) {
-            if (widget.readOnlyLabelNodeIds.contains(n.id)) {
-              widget.onRenameNode!(n, v);
-            } else {
-              c.updateNode(n.copyWith(label: v));
-            }
-          }),
-        if (n.kind == 'table' &&
-            c.document.nodes.any(
-              (seat) => seat.kind == 'seat' && seat.parentId == n.id,
-            ))
-          Padding(
-            padding: const EdgeInsets.only(top: 8, bottom: 8),
-            child: LayoutText(
-              'Chairs move with the table. Resize handles change the tabletop.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+        if (node.kind == 'table' || custom.isNotEmpty)
+          LayoutStylePresets(
+            controller: c,
+            appearances: {
+              if (node.kind == 'table')
+                for (final key in families.keys)
+                  key: layoutMaterialFamilyAppearances[key]!,
+              ...custom,
+            },
+            labelFor: (key) => families[key] == null
+                ? c.document.presets.firstWhere((p) => p['id'] == key)['title']
+                      as String
+                : VenueLayoutStrings.text(context, families[key]!),
+            onApply: (appearance) => _run(
+              () => c.apply(
+                applyLayoutAppearance(c.document, {node.id}, appearance),
+                label: 'Apply style',
               ),
             ),
           ),
-        if (n.kind == 'table' && !isBarNode(n))
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: const LayoutText('Chair layout'),
-            childrenPadding: const EdgeInsets.only(top: 12, bottom: 8),
-            children: [
-              for (final entry in const {
-                'width': 'Chair width',
-                'height': 'Chair depth',
-                'gap': 'Distance from table',
-                'spacing': 'Space between chairs',
-              }.entries)
-                Builder(
-                  builder: (context) {
-                    final current = TableSeating.fromDocument(c.document, n);
-                    final values = {
-                      'width': current.width,
-                      'height': current.height,
-                      'gap': current.gap,
-                      'spacing': current.spacing,
-                    };
-                    return _number(entry.value, values[entry.key]!, (value) {
-                      final next = {...values, entry.key: value};
-                      c.setTableSeating(
-                        n.id,
-                        TableSeating(
-                          width: next['width']!,
-                          height: next['height']!,
-                          gap: next['gap']!,
-                          spacing: next['spacing']!,
-                          edgePadding: current.edgePadding,
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _canonicalNode(LayoutNode node) {
+    final rowBounds = isRowAssemblyNode(node)
+        ? rowAssemblyBounds(c.document, node.id)
+        : null;
+    final currentWidth = rowBounds?['width'] ?? node.width,
+        currentHeight = rowBounds?['height'] ?? node.height;
+    final seating = node.kind == 'table'
+        ? TableSeating.fromDocument(c.document, node)
+        : null;
+    void dimension(double value, {required bool width}) {
+      if (node.surface?['type'] == 'grid') {
+        c.apply(
+          resizeGridTableSurface(
+            c.document,
+            node.id,
+            width ? value : currentWidth,
+            width ? currentHeight : value,
+            protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
+          ),
+          label: 'Resize grid surface',
+        );
+        return;
+      }
+
+      final uniform = node.surface?['type'] == 'circle';
+      c.resizeObject(
+        node.id,
+        width
+            ? value
+            : uniform
+            ? currentWidth * value / currentHeight
+            : currentWidth,
+        !width
+            ? value
+            : uniform
+            ? currentHeight * value / currentWidth
+            : currentHeight,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!widget.readOnlyLabelNodeIds.contains(node.id) ||
+            widget.onRenameNode != null)
+          _field('Name', node.label, (value) {
+            if (widget.readOnlyLabelNodeIds.contains(node.id)) {
+              widget.onRenameNode!(node, value);
+            } else {
+              c.updateNode(node.copyWith(label: value));
+            }
+          }),
+        if (node.kind == 'text')
+          _field(
+            'Text',
+            '${node.properties['text'] ?? ''}',
+            (value) => c.updateNode(
+              node.copyWith(properties: {...node.properties, 'text': value}),
+            ),
+            multiline: true,
+          ),
+        if (node.kind == 'table') _tableShapeControls(node),
+        if (seating != null || isCouchNode(node)) _seatCountControls(node),
+        if (isBarNode(node))
+          DropdownButtonFormField<String>(
+            initialValue: node.properties['guestSide'] as String? ?? 'bottom',
+            decoration: InputDecoration(
+              labelText: VenueLayoutStrings.text(context, 'Guest side'),
+            ),
+            items: [
+              for (final side in barGuestSides)
+                DropdownMenuItem(value: side, child: LayoutText(side)),
+            ],
+            onChanged: c.readOnly || c.saving || node.locked
+                ? null
+                : (side) {
+                    if (side != null)
+                      _run(
+                        () => c.apply(
+                          setBarGuestSide(
+                            c.document,
+                            node.id,
+                            side,
+                            protectedSeatIds:
+                                c.protectedSeatIds?.call() ?? const {},
+                          ),
+                          label: 'Change bar side',
                         ),
                       );
-                    });
                   },
-                ),
-            ],
           ),
-        if (p['assembly'] == 'rows') _rowControls(n),
-        if (isCouchNode(n)) _couchControls(n),
-        if (isZigzagNode(n)) ...[
+        if (isZigzagNode(node)) ...[
           Row(
             children: [
-              Expanded(
-                child: _number('Number of teeth', p['zigzagTeeth'] as num, (v) {
-                  if (v != v.roundToDouble() || v < 1 || v > 255) {
-                    throw const FormatException(
-                      'Enter a whole number from 1 to 255.',
-                    );
-                  }
-                  c.apply(
-                    updateZigzag(c.document, n.id, teeth: v.toInt()),
-                    label: 'Adjust zigzag',
-                  );
-                }),
-              ),
               IconButton(
                 tooltip: VenueLayoutStrings.text(context, 'Remove one tooth'),
                 onPressed:
-                    !(c.readOnly || c.saving) && (p['zigzagTeeth'] as num) > 1
-                    ? () => _run(
+                    c.readOnly ||
+                        c.saving ||
+                        node.locked ||
+                        (node.properties['zigzagTeeth'] as int) <= 1
+                    ? null
+                    : () => _run(
                         () => c.apply(
                           updateZigzag(
                             c.document,
-                            n.id,
-                            teeth: (p['zigzagTeeth'] as num).toInt() - 1,
+                            node.id,
+                            teeth: (node.properties['zigzagTeeth'] as int) - 1,
                           ),
                           label: 'Adjust zigzag',
                         ),
-                      )
-                    : null,
-                icon: const Icon(Icons.remove_circle_outline),
+                      ),
+                icon: const Icon(Icons.remove),
               ),
               IconButton(
                 tooltip: VenueLayoutStrings.text(context, 'Add one tooth'),
                 onPressed:
-                    !(c.readOnly || c.saving) && (p['zigzagTeeth'] as num) < 255
-                    ? () => _run(
+                    c.readOnly ||
+                        c.saving ||
+                        node.locked ||
+                        2 * (node.properties['zigzagTeeth'] as int) + 4 >
+                            layoutLimits['verticesMax']!
+                    ? null
+                    : () => _run(
                         () => c.apply(
                           updateZigzag(
                             c.document,
-                            n.id,
-                            teeth: (p['zigzagTeeth'] as num).toInt() + 1,
+                            node.id,
+                            teeth: (node.properties['zigzagTeeth'] as int) + 1,
                           ),
                           label: 'Adjust zigzag',
                         ),
-                      )
-                    : null,
-                icon: const Icon(Icons.add_circle_outline),
+                      ),
+                icon: const Icon(Icons.add),
               ),
             ],
           ),
           _number(
+            'Number of teeth',
+            node.properties['zigzagTeeth'] as num,
+            (value) => c.apply(
+              updateZigzag(c.document, node.id, teeth: value.toInt()),
+              label: 'Adjust zigzag',
+            ),
+          ),
+          _number(
             'Zigzag height',
-            (p['zigzagAmplitude'] as num) * 2,
-            (v) => c.apply(
-              updateZigzag(c.document, n.id, amplitude: v / 2),
+            (node.properties['zigzagAmplitude'] as num) * 2,
+            (value) => c.apply(
+              updateZigzag(c.document, node.id, amplitude: value / 2),
               label: 'Adjust zigzag',
             ),
           ),
         ],
-        if (['bus', 'compartments'].contains(p['assembly']))
-          _transportControls(n),
-        if (n.kind == 'seat') _chairSide(n),
-        if (n.kind == 'seat' && n.parentId != null)
+
+        if (node.kind == 'capacityArea')
+          _number(
+            'Standing capacity',
+            node.properties['capacity'] as num? ?? 0,
+            (value) => c.updateNode(
+              node.copyWith(
+                properties: {...node.properties, 'capacity': value.toInt()},
+              ),
+            ),
+          ),
+        if (node.kind == 'seat') _chairSide(node),
+        if (isRowAssemblyNode(node)) _rowControls(node),
+        if (const {'bus', 'compartments'}.contains(node.assembly?['kind']))
+          _transportControls(node),
+        const SizedBox(height: 12),
+        if (node.kind == 'image')
           TextButton(
             onPressed: (c.readOnly || c.saving)
                 ? null
-                : () => _run(
-                    () => c.apply(
-                      detachSeat(c.document, n.id),
-                      label: 'Detach seat',
-                    ),
-                  ),
-            child: const LayoutText('Detach from assembly'),
-          ),
-
-        if (n.kind == 'table') _tableShapeControls(n),
-        if (n.kind == 'shape' && p['shape'] == 'polygon')
-          OutlinedButton(
-            onPressed: c.readOnly || c.saving
-                ? null
-                : () => _run(
-                    () => c.apply(
-                      surfaceFromPolygon(c.document, n.id, bar: true),
-                      label: 'Create surface',
-                    ),
-                  ),
-            child: const LayoutText('Use as bar'),
-          ),
-        if (n.kind == 'table' && !isBarNode(n)) ...[
-          Builder(
-            builder: (context) {
-              final count = c.document.nodes
-                  .where((x) => x.parentId == n.id && x.kind == 'seat')
-                  .length;
-              return Column(
-                children: [
-                  LayoutText('$count seats · maximum ${tableCapacity(n)}'),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: VenueLayoutStrings.text(
-                          context,
-                          'Remove one seat',
-                        ),
-                        onPressed: !(c.readOnly || c.saving) && count > 0
-                            ? () => _run(() => c.setSeatCount(n.id, count - 1))
-                            : null,
-                        icon: const Icon(Icons.remove_circle_outline),
+                : () {
+                    final base = c.document,
+                        graphic = node.graphic!,
+                        crop = graphic['crop'] as Map;
+                    _preview(
+                      'Crop image',
+                      (values) => base.copyWith(
+                        nodes: [
+                          for (final current in base.nodes)
+                            current.id == node.id
+                                ? current.copyWith(
+                                    graphic: {
+                                      ...graphic,
+                                      'crop': {
+                                        'x': values['Left'],
+                                        'y': values['Top'],
+                                        'width': values['Width'],
+                                        'height': values['Height'],
+                                      },
+                                    },
+                                  )
+                                : current,
+                        ],
                       ),
-                      IconButton(
-                        tooltip: VenueLayoutStrings.text(
-                          context,
-                          'Add one seat',
-                        ),
-                        onPressed:
-                            !(c.readOnly || c.saving) &&
-                                count < tableCapacity(n)
-                            ? () => _run(() => c.setSeatCount(n.id, count + 1))
-                            : null,
-                        icon: const Icon(Icons.add_circle_outline),
-                      ),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
-        if (n.kind == 'text' ||
-            (n.label.isNotEmpty &&
-                n.kind != 'seat' &&
-                n.kind != 'group' &&
-                !isBarNode(n) &&
-                n.properties['furniture'] != 'couch'))
-          _textAppearance(n),
-        if (n.kind == 'group')
-          for (final table in c.document.nodes.where(
-            (child) =>
-                child.parentId == n.id &&
-                child.kind == 'table' &&
-                !isBarNode(child),
-          ))
-            KeyedSubtree(
-              key: ValueKey('table-text-${table.id}'),
-              child: _textAppearance(table),
-            ),
-        if (n.kind == 'text') ...[
-          _field(
-            'Text',
-            '${p['text'] ?? n.label}',
-            (v) => _property(n, 'text', v),
-            multiline: true,
-          ),
-          _number(
-            'Line height',
-            p['lineHeight'] as num? ?? 1.2,
-            (v) => _property(n, 'lineHeight', v),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: '${p['align'] ?? 'left'}',
-            decoration: InputDecoration(
-              labelText: VenueLayoutStrings.text(context, 'Text alignment'),
-            ),
-            items: [
-              for (final v in ['left', 'center', 'right'])
-                DropdownMenuItem(value: v, child: LayoutText(v)),
-            ],
-            onChanged: (c.readOnly || c.saving)
-                ? null
-                : (v) => _property(n, 'align', v),
-          ),
-          const SizedBox(height: 12),
-        ],
-        if (n.kind == 'capacityArea')
-          _number(
-            'Standing capacity',
-            p['capacity'] as num? ?? 0,
-            (v) => _property(n, 'capacity', v.toInt()),
-          ),
-        if (openPath) ...[
-          _field(
-            'Outline #RRGGBBAA',
-            '${p['stroke'] ?? '#334155FF'}',
-            (v) => _property(n, 'stroke', v),
-          ),
-          _number(
-            'Outline width',
-            p['strokeWidth'] as num? ?? 1,
-            (v) => _property(n, 'strokeWidth', v),
-          ),
-          _outlineStyle(n, p),
-        ],
-        ExpansionTile(
-          key: ValueKey('geometry-${n.id}'),
-          title: const LayoutText('Geometry'),
-          tilePadding: EdgeInsets.zero,
-          childrenPadding: const EdgeInsets.only(top: 8),
-          children: [
-            _number('Position X', n.x, (v) => c.updateNode(n.copyWith(x: v))),
-            _number('Position Y', n.y, (v) => c.updateNode(n.copyWith(y: v))),
-            if (p['assembly'] != 'rows') ...[
-              const SizedBox(height: 12),
-              if (n.kind != 'group')
-                _number(
-                  'Width',
-                  n.width,
-                  (v) => _resizeDimension(n, v, width: true),
-                ),
-              if (n.kind != 'group')
-                _number(
-                  'Height',
-                  n.height,
-                  (v) => _resizeDimension(n, v, width: false),
-                ),
-            ],
-            _number(
-              'Rotation °',
-              facingRotation,
-              (v) => c.rotateSelection(
-                v - facingRotation,
-                cornerPivot: widget.cornerPivot,
-              ),
-            ),
-            Wrap(
-              children: [
-                IconButton(
-                  tooltip: VenueLayoutStrings.text(
-                    context,
-                    'Rotate left 90 degrees',
-                  ),
-                  onPressed: (c.readOnly || c.saving)
-                      ? null
-                      : () => c.rotateSelection(
-                          -90,
-                          cornerPivot: widget.cornerPivot,
-                        ),
-                  icon: const Icon(Icons.rotate_left),
-                ),
-                IconButton(
-                  tooltip: VenueLayoutStrings.text(
-                    context,
-                    'Rotate right 90 degrees',
-                  ),
-                  onPressed: (c.readOnly || c.saving)
-                      ? null
-                      : () => c.rotateSelection(
-                          90,
-                          cornerPivot: widget.cornerPivot,
-                        ),
-                  icon: const Icon(Icons.rotate_right),
-                ),
-                TextButton(
-                  onPressed: (c.readOnly || c.saving)
-                      ? null
-                      : () => c.rotateSelection(-facingRotation),
-                  child: const LayoutText('Reset angle'),
-                ),
-              ],
-            ),
-          ],
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const LayoutText('Lock object'),
-          value: n.locked,
-          onChanged: (c.readOnly || c.saving)
-              ? null
-              : (v) => c.updateNode(n.copyWith(locked: v)),
-        ),
-        ExpansionTile(
-          key: ValueKey('local-appearance-${n.id}'),
-          tilePadding: EdgeInsets.zero,
-          title: const LayoutText('Object appearance'),
-          subtitle: LayoutText(
-            followsPlan ? 'Follows plan style' : 'Local appearance overrides',
-          ),
-          children: [
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: LayoutText(
-                    'Style',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-                IconButton(
-                  tooltip: VenueLayoutStrings.text(context, 'Copy style'),
-                  onPressed: widget.onCopyStyle,
-                  icon: const Icon(Icons.content_copy, size: 18),
-                ),
-                IconButton(
-                  tooltip: VenueLayoutStrings.text(context, 'Paste style'),
-                  onPressed: widget.onPasteStyle,
-                  icon: const Icon(Icons.content_paste, size: 18),
-                ),
-              ],
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const LayoutText('Use plan style'),
-              subtitle: LayoutText(
-                followsPlan
-                    ? 'Follows plan style'
-                    : 'Local appearance overrides',
-              ),
-              value: followsPlan,
-              onChanged: c.readOnly || c.saving || styleIds.isEmpty
-                  ? null
-                  : (value) => c.apply(
-                      followPlanAppearance(c.document, {n.id}, value),
-                      label: 'Use plan style',
-                    ),
-            ),
-            LayoutStylePresets(controller: c),
-            const SizedBox(height: 12),
-            if (n.kind == 'table' || n.kind == 'group' || isCouchNode(n))
-              _seatAppearance(n),
-            if (p['assembly'] != 'rows') ...[
-              if (!openPath && n.kind != 'group')
-                _field(
-                  n.kind == 'text' ? 'Text color #RRGGBBAA' : 'Fill #RRGGBBAA',
-                  n.kind == 'text'
-                      ? '${p['color'] ?? '#202830FF'}'
-                      : _nodeFill(n),
-                  (v) {
-                    if (!RegExp(r'^#[0-9a-fA-F]{8}$').hasMatch(v)) {
-                      throw const FormatException(
-                        'Use #RRGGBBAA including opacity.',
-                      );
-                    }
-                    _property(n, n.kind == 'text' ? 'color' : 'fill', v);
+                      {
+                        'Left': (crop['x'] as num).toDouble(),
+                        'Top': (crop['y'] as num).toDouble(),
+                        'Width': (crop['width'] as num).toDouble(),
+                        'Height': (crop['height'] as num).toDouble(),
+                      },
+                      detail:
+                          'Normalized image coordinates, from 0 to 1. Original pixels are retained.',
+                    );
                   },
-                ),
-            ],
-          ],
+            child: const LayoutText('Crop image'),
+          ),
+        if (node.kind == 'seat' &&
+            c.document.nodes.any(
+              (parent) => parent.id == node.parentId && parent.kind == 'table',
+            ) &&
+            seatAttachment(c.document, node.id)?['placement']?['mode'] !=
+                'automatic')
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: OutlinedButton.icon(
+              key: const ValueKey('restore-automatic-chair'),
+              onPressed: c.readOnly || c.saving || node.locked
+                  ? null
+                  : () => c.restoreAutomaticChairPosition(node.id),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const LayoutText('Restore automatic position'),
+            ),
+          ),
+        _quickObjectStyles(node),
+        CanonicalAppearancePanel(
+          controller: c,
+          nodeId: node.id,
+          fontPickerBuilder: widget.fontPickerBuilder,
         ),
         ExpansionTile(
-          title: const LayoutText('Advanced object properties'),
+          minTileHeight: 44,
+          key: ValueKey('object-geometry:${node.id}'),
+          childrenPadding: const EdgeInsets.only(top: 12, bottom: 8),
           tilePadding: EdgeInsets.zero,
-          childrenPadding: const EdgeInsets.only(top: 8),
+          title: const LayoutText(
+            'Position and size',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
           children: [
-            if (n.kind == 'shape')
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const LayoutText('Blocks seat placement'),
-                value: p['obstacle'] == true,
-                onChanged: (c.readOnly || c.saving)
-                    ? null
-                    : (v) => _property(n, 'obstacle', v),
-              ),
-            if (!openPath) _outlineStyle(n, p),
-            const SizedBox(height: 12),
-            if (!openPath)
-              _field(
-                'Outline #RRGGBBAA',
-                '${p['stroke'] ?? '#334155FF'}',
-                (v) => _property(n, 'stroke', v),
-              ),
             _number(
-              'Opacity',
-              p['opacity'] as num? ?? 1,
-              (v) => _property(n, 'opacity', v),
+              'X',
+              node.x,
+              (value) => c.updateNode(node.copyWith(x: value)),
             ),
-            if (n.kind == 'shape' && !openPath)
+            _number(
+              'Y',
+              node.y,
+              (value) => c.updateNode(node.copyWith(y: value)),
+            ),
+            if (!const {
+              'bus',
+              'compartments',
+            }.contains(node.assembly?['kind'])) ...[
               _number(
-                'Corner radius',
-                p['cornerRadius'] as num? ??
-                    (n.kind == 'table' || p['shape'] == 'roundedRect' ? 6 : 0),
-                (v) => _property(n, 'cornerRadius', v),
+                'Width',
+                currentWidth,
+                (value) => dimension(value, width: true),
               ),
-            if (!openPath)
               _number(
-                'Outline width',
-                p['strokeWidth'] as num? ?? 1,
-                (v) => _property(n, 'strokeWidth', v),
+                'Height',
+                currentHeight,
+                (value) => dimension(value, width: false),
               ),
-            if (p['points'] != null && (n.kind != 'table' || isBarNode(n)))
-              _field(
-                'Vertices [[x,y], ...]',
-                jsonEncode(p['points']),
-                (v) => _property(n, 'points', jsonDecode(v)),
-                multiline: true,
-              ),
+            ],
+            _number(
+              'Rotation',
+              node.rotation,
+              (value) => c.updateNode(node.copyWith(rotation: value)),
+            ),
           ],
         ),
-        if (widget.hostBuilder != null) widget.hostBuilder!(context, n),
+        if (seating != null)
+          ExpansionTile(
+            minTileHeight: 44,
+            key: ValueKey('chair-layout:${node.id}'),
+            childrenPadding: const EdgeInsets.only(top: 12, bottom: 8),
+            tilePadding: EdgeInsets.zero,
+            title: const LayoutText(
+              'Chair layout',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            children: [
+              for (final field in seating.record.entries)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: LayoutNumberSliderControl(
+                    key: ValueKey('chair-slider:${node.id}:${field.key}'),
+                    controller: c,
+                    node: node,
+                    label: switch (field.key) {
+                      'width' => 'Chair width',
+                      'height' => 'Chair height',
+                      'gap' => 'Chair gap',
+                      'spacing' => 'Chair spacing',
+                      _ => 'Edge padding',
+                    },
+                    value: (field.value as num).toDouble(),
+                    min: const {'width', 'height'}.contains(field.key) ? 1 : 0,
+                    max: 1000000000,
+                    rangeMax: const {'width', 'height'}.contains(field.key)
+                        ? 160
+                        : 64,
+                    onReset: () => c.apply(
+                      configureTableSeating(
+                        c.document,
+                        node.id,
+                        TableSeating.fromRecord({
+                          ...TableSeating.fromDocument(c.document, node).record,
+                          field.key: documentSeating(
+                            c.document,
+                          ).record[field.key],
+                        }),
+                        protectedSeatIds:
+                            c.protectedSeatIds?.call() ?? const {},
+                      ),
+                      label: 'Reset chair layout',
+                    ),
+                    updateDocument: (document, value) => configureTableSeating(
+                      document,
+                      node.id,
+                      TableSeating.fromRecord({
+                        ...TableSeating.fromDocument(
+                          document,
+                          document.nodes.firstWhere((n) => n.id == node.id),
+                        ).record,
+                        field.key: value,
+                      }),
+                      protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
+                    ),
+                  ),
+                ),
+            ],
+          ),
       ],
     );
+  }
+
+  Widget _node(LayoutNode n) {
+    return _canonicalNode(n);
   }
 
   Future<void> _backgroundSource() async {
@@ -1506,7 +1448,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       );
       return;
     }
-    final ref = await showDialog<String>(
+    final ref = await showEditorDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const LayoutText('Choose background image'),
@@ -1558,7 +1500,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
       );
     }
 
-    final apply = await showDialog<bool>(
+    final apply = await showEditorDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -1637,7 +1579,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
         'crop': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
       },
     );
-    final apply = await showDialog<bool>(
+    final apply = await showEditorDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) {
@@ -1856,6 +1798,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
   }
 
   Widget _canvas() => ExpansionTile(
+    minTileHeight: 44,
     key: ValueKey('canvas-${widget.canvasSelected}'),
     initiallyExpanded: widget.canvasSelected,
     tilePadding: EdgeInsets.zero,
@@ -2032,6 +1975,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Semantics(
+                  key: const ValueKey('layout-inspector-error'),
                   liveRegion: true,
                   child: LayoutText(
                     _error!,
@@ -2053,13 +1997,34 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                   ),
                 ),
               ),
+            if (selected.length > 1 &&
+                (widget.onCopyStyle != null || widget.onPasteStyle != null))
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: VenueLayoutStrings.text(context, 'Copy style'),
+                    onPressed: widget.onCopyStyle,
+                    icon: const Icon(Icons.format_paint_outlined),
+                  ),
+                  IconButton(
+                    tooltip: VenueLayoutStrings.text(context, 'Paste style'),
+                    onPressed: c.readOnly || c.saving
+                        ? null
+                        : widget.onPasteStyle,
+                    icon: const Icon(Icons.content_paste),
+                  ),
+                ],
+              ),
             if (selected.length == 1)
               KeyedSubtree(
                 key: ValueKey(selected.first.id),
                 child: _node(selected.first),
               ),
+            if (selected.length == 1 && widget.hostBuilder != null)
+              widget.hostBuilder!(context, selected.single),
             if (selected.length > 1)
               ExpansionTile(
+                minTileHeight: 44,
                 tilePadding: EdgeInsets.zero,
                 title: const LayoutText('Object appearance'),
                 children: [
@@ -2089,9 +2054,13 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                 !n.locked &&
                                 n.kind != 'group')
                               n.copyWith(
-                                properties: localAppearanceProperties(n, {
-                                  n.kind == 'text' ? 'color' : 'fill': value,
-                                }),
+                                style: patchCanonicalStyle(
+                                  n.style,
+                                  n.kind == 'text'
+                                      ? ['label', 'color']
+                                      : ['fill'],
+                                  value: value,
+                                ),
                               )
                             else
                               n,
@@ -2104,23 +2073,59 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               ),
             if (selected.isNotEmpty) const Divider(height: 24),
             if (selected.isNotEmpty)
-              Wrap(
-                spacing: 8,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  OutlinedButton(
-                    onPressed: (c.readOnly || c.saving)
-                        ? null
-                        : c.duplicateSelection,
-                    child: const LayoutText('Duplicate'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(0, 40),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                          onPressed: (c.readOnly || c.saving)
+                              ? null
+                              : c.duplicateSelection,
+                          icon: const Icon(Icons.copy_outlined, size: 16),
+                          label: const LayoutText('Duplicate'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(0, 40),
+                            foregroundColor: Theme.of(
+                              context,
+                            ).colorScheme.error,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                          onPressed: (c.readOnly || c.saving)
+                              ? null
+                              : c.deleteSelection,
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const LayoutText('Delete'),
+                        ),
+                      ),
+                    ],
                   ),
-                  TextButton(
-                    onPressed: (c.readOnly || c.saving)
-                        ? null
-                        : c.deleteSelection,
-                    child: const LayoutText('Delete'),
-                  ),
-                  if (selected.length > 1)
-                    TextButton(
+                  if (selected.length > 1) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 40),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
                       onPressed: (c.readOnly || c.saving)
                           ? null
                           : () => _run(
@@ -2129,14 +2134,25 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                 label: 'Group',
                               ),
                             ),
-                      child: const LayoutText('Group'),
+                      icon: const Icon(Icons.group_work_outlined, size: 16),
+                      label: const LayoutText('Group'),
                     ),
+                  ],
                   if (selected.any(
                     (node) =>
                         node.kind == 'group' &&
-                        node.properties['assembly'] == null,
-                  ))
-                    TextButton(
+                        (node.assembly?['kind'] == null ||
+                            node.assembly?['kind'] == 'rows'),
+                  )) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 40),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
                       onPressed: (c.readOnly || c.saving)
                           ? null
                           : () => _run(
@@ -2145,14 +2161,24 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                 label: 'Ungroup',
                               ),
                             ),
-                      child: const LayoutText('Ungroup'),
+                      icon: const Icon(Icons.grid_view_outlined, size: 16),
+                      label: LayoutText(
+                        selected.any((n) => n.assembly?['kind'] == 'rows')
+                            ? 'Split into seats'
+                            : 'Ungroup',
+                      ),
                     ),
+                  ],
                 ],
               ),
             if (selected.length > 1)
               ExpansionTile(
+                minTileHeight: 44,
                 tilePadding: EdgeInsets.zero,
-                title: const LayoutText('Align and distribute'),
+                title: const LayoutText(
+                  'Align and distribute',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 children: [
                   Wrap(
                     spacing: 8,
@@ -2165,7 +2191,11 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                         'centerY': 'Center vertically',
                         'bottom': 'Align bottom',
                       }.entries)
-                        TextButton(
+                        IconButton(
+                          tooltip: VenueLayoutStrings.text(
+                            context,
+                            entry.value,
+                          ),
                           onPressed: (c.readOnly || c.saving)
                               ? null
                               : () => _run(
@@ -2178,9 +2208,20 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                     label: entry.value,
                                   ),
                                 ),
-                          child: LayoutText(entry.value),
+                          icon: Icon(switch (entry.key) {
+                            'left' => Icons.align_horizontal_left,
+                            'centerX' => Icons.align_horizontal_center,
+                            'right' => Icons.align_horizontal_right,
+                            'top' => Icons.align_vertical_top,
+                            'centerY' => Icons.align_vertical_center,
+                            _ => Icons.align_vertical_bottom,
+                          }),
                         ),
-                      TextButton(
+                      IconButton(
+                        tooltip: VenueLayoutStrings.text(
+                          context,
+                          'Distribute horizontally',
+                        ),
                         onPressed:
                             (c.readOnly || c.saving) || selected.length < 3
                             ? null
@@ -2194,9 +2235,13 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                   label: 'Distribute horizontally',
                                 ),
                               ),
-                        child: const LayoutText('Distribute horizontally'),
+                        icon: const Icon(Icons.horizontal_distribute),
                       ),
-                      TextButton(
+                      IconButton(
+                        tooltip: VenueLayoutStrings.text(
+                          context,
+                          'Distribute vertically',
+                        ),
                         onPressed:
                             (c.readOnly || c.saving) || selected.length < 3
                             ? null
@@ -2210,22 +2255,24 @@ class _LayoutInspectorState extends State<LayoutInspector> {
                                   label: 'Distribute vertically',
                                 ),
                               ),
-                        child: const LayoutText('Distribute vertically'),
+                        icon: const Icon(Icons.vertical_distribute),
                       ),
                     ],
                   ),
                 ],
               ),
-            const Divider(height: 24),
+            if (selected.isEmpty) const Divider(height: 16),
             if (selected.isEmpty) ...[
               OutlinedButton.icon(
                 onPressed: c.readOnly || c.saving
                     ? null
-                    : () => showLayoutGlobalStyleDialog(
-                        context,
-                        c,
-                        globalFontPickerBuilder: widget.globalFontPickerBuilder,
-                      ),
+                    : widget.onOpenGlobalStyle ??
+                          () => showLayoutGlobalStyleDialog(
+                            context,
+                            c,
+                            globalFontPickerBuilder:
+                                widget.globalFontPickerBuilder,
+                          ),
                 icon: const Icon(Icons.palette_outlined),
                 label: const LayoutText('Plan style'),
               ),
@@ -2233,6 +2280,7 @@ class _LayoutInspectorState extends State<LayoutInspector> {
               _canvas(),
             ],
             ExpansionTile(
+              minTileHeight: 44,
               title: const LayoutText('Layers'),
               initiallyExpanded: _layersExpanded,
               onExpansionChanged: (value) =>
@@ -2293,6 +2341,8 @@ class _PropertyField extends StatefulWidget {
     required this.enabled,
     required this.multiline,
     this.numeric = false,
+    required this.onUndo,
+    required this.onRedo,
     required this.save,
     this.usedColors,
     this.paletteImage,
@@ -2301,6 +2351,7 @@ class _PropertyField extends StatefulWidget {
   final ui.Image? paletteImage;
   final String label, value;
   final bool enabled, multiline, numeric;
+  final VoidCallback onUndo, onRedo;
   final ValueChanged<String> save;
   @override
   State<_PropertyField> createState() => _PropertyFieldState();
@@ -2377,7 +2428,7 @@ class _PropertyFieldState extends State<_PropertyField> {
       initial = EditorColorValue.fromRgba(widget.value);
     }
     final usedColors = widget.usedColors?.call() ?? const <String>[];
-    final result = await showDialog<EditorColorResult>(
+    final result = await showEditorDialog<EditorColorResult>(
       context: context,
       builder: (_) => EditorColorDialog(
         value: initial,
@@ -2392,38 +2443,46 @@ class _PropertyFieldState extends State<_PropertyField> {
   }
 
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: _text,
-    focusNode: _focus,
-    enabled: widget.enabled,
-    minLines: widget.multiline ? 2 : 1,
-    maxLines: widget.multiline ? 6 : 1,
-    decoration: InputDecoration(
-      labelText: VenueLayoutStrings.text(context, widget.label),
-      border: const OutlineInputBorder(),
-      isDense: true,
-      prefixIcon: widget.label.contains('#RRGGBBAA')
-          ? IconButton(
-              tooltip: VenueLayoutStrings.text(context, 'Choose color'),
-              onPressed: widget.enabled ? _chooseColor : null,
-              icon: EditorColorSwatch(
-                value: EditorColorValue.fromRgba(widget.value),
-              ),
-            )
-          : null,
-      suffixIcon: IconButton(
-        tooltip: VenueLayoutStrings.text(context, 'Apply ${widget.label}'),
-        onPressed: widget.enabled ? _save : null,
-        icon: const Icon(Icons.check),
+  Widget build(BuildContext context) => EditorFieldHistory(
+    hasUncommittedChanges: () => _text.text != widget.value,
+    onUndo: widget.onUndo,
+    onRedo: widget.onRedo,
+    child: EditorNumberScroll(
+      enabled: widget.enabled && widget.numeric,
+      onChanged: _save,
+      child: TextField(
+        controller: _text,
+        focusNode: _focus,
+        enabled: widget.enabled,
+        keyboardType: widget.numeric
+            ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+            : null,
+        minLines: widget.multiline ? 2 : 1,
+        maxLines: widget.multiline ? 6 : 1,
+        decoration: InputDecoration(
+          labelText: VenueLayoutStrings.text(context, widget.label),
+          border: const OutlineInputBorder(),
+          isDense: true,
+          prefixIcon: widget.label.contains('#RRGGBBAA')
+              ? IconButton(
+                  tooltip: VenueLayoutStrings.text(context, 'Choose color'),
+                  onPressed: widget.enabled ? _chooseColor : null,
+                  icon: EditorColorSwatch(
+                    value: EditorColorValue.fromRgba(widget.value),
+                  ),
+                )
+              : null,
+        ),
+        onTapOutside: (_) {
+          if (_text.value.composing.isValid) {
+            _text.value = _text.value.copyWith(composing: TextRange.empty);
+          }
+          _save();
+          _focus.unfocus();
+        },
+        onEditingComplete: _save,
+        onSubmitted: (_) => _save(),
       ),
     ),
-    onTapOutside: (_) {
-      if (_text.value.composing.isValid) {
-        _text.value = _text.value.copyWith(composing: TextRange.empty);
-      }
-      _save();
-      _focus.unfocus();
-    },
-    onSubmitted: (_) => _save(),
   );
 }

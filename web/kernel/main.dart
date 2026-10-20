@@ -8,6 +8,8 @@ external set _kernel(JSObject value);
 @JSExport()
 class VenueLayoutKernel {
   int get protocol => core.layoutProtocol;
+  int get documentVersion => core.canonicalDocumentVersion;
+  int get resourceProtocol => core.canonicalTextResourceProtocol;
   final _documents = <String, core.VenueLayoutDocument>{};
   final _resources = <String, Map<String, dynamic>>{};
   final _indices = <String, core.LayoutSpatialIndex>{};

@@ -68,6 +68,7 @@ void main() {
         y: 300,
         width: 190,
         height: 110,
+        surface: const {'type': 'rect'},
       );
       final seat = LayoutNode(
         id: newLayoutId(),
@@ -84,24 +85,22 @@ void main() {
       );
       final c = VenueLayoutController(doc)..select({table.id});
       await open(tester, c);
-      await tester.ensureVisible(find.text('Object appearance'));
-      await tester.tap(find.text('Object appearance'));
       await tester.pumpAndSettle();
-      final seatField = field('Seat fill #RRGGBBAA');
+      tester
+          .widget<SegmentedButton<String>>(find.byWidgetPredicate((w) => w is SegmentedButton<String> && w.segments.any((s) => s.value == 'children')))
+          .onSelectionChanged!({'children'});
+      await tester.pumpAndSettle();
+      final seatField = find.byKey(const ValueKey('canonical-style-fill'));
       await tester.ensureVisible(seatField);
-      await tester.tap(
-        find.descendant(
-          of: seatField,
-          matching: find.byTooltip('Choose color'),
-        ),
-      );
+      await tester.tap(seatField);
       await tester.pumpAndSettle();
+
       expect(
         find.byKey(const ValueKey('editor-color-Used colors-123456')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('editor-color-Used colors-DCFCE7')),
+        find.byKey(const ValueKey('editor-color-Used colors-267329')),
         findsOneWidget,
       );
       await tester.tap(
@@ -109,9 +108,13 @@ void main() {
       );
       await tester.tap(find.widgetWithText(FilledButton, 'Apply'));
       await tester.pumpAndSettle();
-      expect(c.document.nodes.last.properties['fill'], '#123456FF');
+      expect(
+        effectiveNodeProperties(c.document, c.document.nodes.last)['fill'],
+        '#123456FF',
+      );
       expect(c.document.nodes.last.id, seat.id);
-      expect(c.document.nodes.first.toJson(), table.toJson());
+      expect(c.document.nodes.first.childStyles['seat']['fill'], '#123456FF');
+      expect(c.document.nodes.last.toJson(), seat.toJson());
       c.undo();
       expect(c.document.toJson(), doc.toJson());
     },

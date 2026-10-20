@@ -10,7 +10,18 @@ void main() {
               File('test/fixtures/public_layout_wire.json').readAsStringSync(),
             )
             as Map<String, dynamic>;
-    final document = VenueLayoutDocument.fromJson(fixture);
+    final imported = importLegacyLayout(
+      fixture,
+      fontFamilies: {
+        'family:fixture': {
+          'id': 'family:fixture',
+          'family': 'Fixture',
+          'faces': {'400:normal': 'fixture:sans'},
+        },
+      },
+      sourceRevision: 0,
+    );
+    final document = imported.document!;
     expect(validateDocument(document), isEmpty);
     expect(document.nodes.length, 7);
     expect(

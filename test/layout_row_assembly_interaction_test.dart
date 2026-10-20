@@ -18,11 +18,12 @@ void main() {
       width: 2400,
       height: 1600,
       z: -1,
-      properties: {'fill': '#FFFFFFFF'},
+      properties: {},
+      style: {'fill': '#FFFFFFFF'},
     );
     final original = rows.copyWith(nodes: [...rows.nodes, backdrop]);
     final root = original.nodes.firstWhere(
-      (n) => n.properties['assembly'] == 'rows',
+      (n) => n.assembly?['kind'] == 'rows',
     );
     final controller = VenueLayoutController(original);
     addTearDown(controller.dispose);
@@ -86,7 +87,8 @@ void main() {
       width: 20,
       height: 20,
       z: 10,
-      properties: {'fill': '#000000FF'},
+      properties: {},
+      style: {'fill': '#000000FF'},
     );
     expect(
       controller.apply(

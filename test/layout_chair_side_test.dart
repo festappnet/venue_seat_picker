@@ -3,10 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_inspector.dart';
 
+String seatAtSide(VenueLayoutDocument d, String side) => d.nodes
+    .firstWhere((n) => n.kind == 'seat' && tableSideForSeat(d, n) == side)
+    .id;
+
 void main() {
   for (final native in [false, true]) {
     testWidgets(
-      'two chair side transfers redistribute rows, persist on resize and undo native=$native',
+      'explicit chair side pins preserve identities, persist on resize and undo native=$native',
       (tester) async {
         var original = tableLayout(
           shape: 'roundedRect',
@@ -15,16 +19,8 @@ void main() {
           count: 10,
         );
         final table = original.nodes.firstWhere((n) => n.kind == 'table');
-        final right =
-            original.attachments.firstWhere(
-                  (a) => a['edge'] == 'right',
-                )['seatId']
-                as String;
-        final left =
-            original.attachments.firstWhere(
-                  (a) => a['edge'] == 'left',
-                )['seatId']
-                as String;
+        final right = seatAtSide(original, 'right');
+        final left = seatAtSide(original, 'left');
         final ids = original.nodes
             .where((n) => n.kind == 'seat')
             .map((n) => n.id)
@@ -45,9 +41,8 @@ void main() {
               for (final node in original.nodes)
                 node.id == table.id
                     ? node.copyWith(parentId: group.id, x: 0, y: 0)
-                    : node.copyWith(parentId: group.id),
+                    : node,
             ],
-            attachments: [],
           );
         }
         final c = VenueLayoutController(original, protectedSeatIds: () => ids)
@@ -84,7 +79,9 @@ void main() {
         await move(right, 'Top side');
         await move(left, 'Bottom side');
         String side(String id) =>
-            c.document.attachments.firstWhere((a) => a['seatId'] == id)['edge']
+            c.document.attachments.firstWhere(
+                  (a) => a['seatId'] == id,
+                )['placement']['side']
                 as String;
         expect(side(right), 'top');
         expect(side(left), 'bottom');
@@ -95,21 +92,7 @@ void main() {
               .toSet(),
           ids,
         );
-        for (final edge in ['top', 'bottom']) {
-          final rowIds = c.document.attachments
-              .where((a) => a['edge'] == edge)
-              .map((a) => a['seatId'])
-              .toSet();
-          final xs =
-              c.document.nodes
-                  .where((n) => rowIds.contains(n.id))
-                  .map((n) => n.x)
-                  .toList()
-                ..sort();
-          expect(xs.length, 5);
-          for (var i = 2; i < xs.length; i++)
-            expect(xs[i] - xs[i - 1], closeTo(xs[1] - xs[0], .01));
-        }
+        expect(layoutCollisions(c.document), isEmpty);
         c.select({table.id});
         c.resizeObject(table.id, 600, 150);
         await tester.pumpAndSettle();
@@ -135,10 +118,23 @@ void main() {
         height: 100,
         count: 10,
       );
-      final seat =
-          doc.attachments.firstWhere((a) => a['edge'] == 'top')['seatId']
-              as String;
-      expect(() => moveTableSeatToSide(doc, seat, 'right'), throwsStateError);
+      final seat = seatAtSide(doc, 'top');
+      final bottom = seatAtSide(doc, 'bottom');
+      final target = doc.nodes.firstWhere((n) => n.id == seat),
+          table = doc.nodes.firstWhere((n) => n.kind == 'table');
+      final pinned = setTableSeatPlacement(doc, seat, {
+        'mode': 'sidePinned',
+        'side': 'top',
+        't': target.x / table.width + .5,
+      });
+      expect(
+        () => setTableSeatPlacement(pinned, bottom, {
+          'mode': 'sidePinned',
+          'side': 'top',
+          't': target.x / table.width + .5,
+        }),
+        throwsStateError,
+      );
       final locked = doc.copyWith(
         nodes: [
           for (final n in doc.nodes)
@@ -162,20 +158,21 @@ void main() {
         height: 100,
         count: 10,
       );
-      final right =
-          doc.attachments.firstWhere((a) => a['edge'] == 'right')['seatId']
-              as String;
-      final freeId =
-          doc.attachments.firstWhere((a) => a['edge'] == 'left')['seatId']
-              as String;
+      final right = seatAtSide(doc, 'right');
+      final freeId = seatAtSide(doc, 'left');
       final free = doc.nodes
           .firstWhere((n) => n.id == freeId)
-          .copyWith(x: -320, y: 100, properties: {'manual': true});
+          .copyWith(x: -320, y: 100);
       final staged = doc.copyWith(
         nodes: [for (final n in doc.nodes) n.id == freeId ? free : n],
         attachments: [
           for (final a in doc.attachments)
-            a['seatId'] == freeId ? {...a, 'manual': true} : a,
+            a['seatId'] == freeId
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                  }
+                : a,
         ],
       );
       final moved = moveTableSeatToSide(staged, right, 'top');

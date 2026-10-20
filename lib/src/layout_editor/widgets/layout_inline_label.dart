@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../editor_ui/editor_field_history.dart';
 
 /// A transient text draft. The editor owns the eventual undo transaction.
 class LayoutInlineLabel extends StatefulWidget {
@@ -9,6 +10,8 @@ class LayoutInlineLabel extends StatefulWidget {
     required this.style,
     required this.onSubmit,
     required this.onCancel,
+    this.onUndo,
+    this.onRedo,
     this.textAlign = TextAlign.center,
     this.background = Colors.white,
   });
@@ -18,6 +21,7 @@ class LayoutInlineLabel extends StatefulWidget {
   final Color background;
   final ValueChanged<String> onSubmit;
   final VoidCallback onCancel;
+  final VoidCallback? onUndo, onRedo;
   @override
   State<LayoutInlineLabel> createState() => _LayoutInlineLabelState();
 }
@@ -96,43 +100,54 @@ class _LayoutInlineLabelState extends State<LayoutInlineLabel> {
       },
       child: Material(
         color: Colors.transparent,
-        child: TextField(
-          key: const ValueKey('layout-inline-label'),
-          controller: _text,
-          focusNode: _focus,
-          autofocus: true,
-          style: widget.style,
-          textAlign: widget.textAlign,
-          textAlignVertical: TextAlignVertical.center,
-          expands: true,
-          maxLines: null,
-          minLines: null,
-          textInputAction: TextInputAction.newline,
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: widget.background,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 3,
-              vertical: 2,
-            ),
-            border: const OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(2)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderSide: BorderSide(
-                color: Theme.of(context).colorScheme.primary,
-                width: 1,
+        child: EditorFieldHistory(
+          hasUncommittedChanges: () => _text.text != widget.value || _composing,
+          onUndo: () {
+            _finished = true;
+            widget.onUndo?.call();
+          },
+          onRedo: () {
+            _finished = true;
+            widget.onRedo?.call();
+          },
+          child: TextField(
+            key: const ValueKey('layout-inline-label'),
+            controller: _text,
+            focusNode: _focus,
+            autofocus: true,
+            style: widget.style,
+            textAlign: widget.textAlign,
+            textAlignVertical: TextAlignVertical.center,
+            expands: true,
+            maxLines: null,
+            minLines: null,
+            textInputAction: TextInputAction.newline,
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: widget.background,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 3,
+                vertical: 2,
+              ),
+              border: const OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(2)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 1,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 1,
+                ),
               ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderSide: BorderSide(
-                color: Theme.of(context).colorScheme.primary,
-                width: 1,
-              ),
-            ),
+            onTapOutside: (_) => _focus.unfocus(),
           ),
-          onTapOutside: (_) => _focus.unfocus(),
         ),
       ),
     ),

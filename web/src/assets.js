@@ -15,10 +15,7 @@ export async function loadLayoutAssets(resources = {}, options = {}) {
       throw new Error('invalid_asset_manifest');
     }
     let bytes;
-    if (asset.data && asset.mime === asset.mimeType) {
-      if (asset.data.length > Math.ceil(maxBytes / 3) * 4 + 4) throw new Error('asset_size_limit');
-      bytes = Uint8Array.from(atob(asset.data), c => c.charCodeAt(0));
-    } else {
+    {
       const url = new URL(asset.url, globalThis.location?.href);
       if (!['http:', 'https:', 'data:'].includes(url.protocol)) throw new Error('invalid_asset_url');
       const response = await fetcher(url, {signal, credentials: 'omit', cache: 'force-cache'});
@@ -49,7 +46,7 @@ export async function loadLayoutAssets(resources = {}, options = {}) {
     signal?.throwIfAborted();
     let binary = '';
     for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    assets[ref] = {...asset, mime: asset.mimeType, data: btoa(binary)};
+    assets[ref] = {hash:asset.hash,url:`data:${asset.mimeType};base64,${btoa(binary)}`,width:asset.width,height:asset.height,mimeType:asset.mimeType,byteLength:asset.byteLength};
   }
   return Object.keys(assets).length ? {...resources, assets} : resources;
 }

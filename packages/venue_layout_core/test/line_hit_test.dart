@@ -15,11 +15,8 @@ LayoutNode line({
   y: y,
   width: 100,
   height: 1,
-  properties: {
-    'shape': shape,
-    'strokeWidth': stroke,
-    if (points != null) 'points': points,
-  },
+  properties: {'shape': shape, if (points != null) 'points': points},
+  style: {'strokeWidth': stroke},
 );
 
 void main() {

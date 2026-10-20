@@ -7,6 +7,23 @@ import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface
 
 void main() {
   for (final kind in ['table', 'shape', 'group']) {
+    testWidgets('duplicated furniture marks only copied collision footprints', (
+      tester,
+    ) async {
+      final document = tableLayout(shape: 'round', x: 500, y: 500, width: 180);
+      final table = document.nodes.firstWhere((n) => n.kind == 'table');
+      final c = VenueLayoutController(document)..select({table.id});
+      addTearDown(c.dispose);
+      c.duplicateSelection(dx: 0, dy: 0);
+      final copied = layoutSubtree(c.document, c.selection);
+      expect(c.placementWarningIds, isNotEmpty);
+      expect(c.placementWarningIds.every(copied.contains), isTrue);
+      expect(c.placementWarningIds.contains(table.id), isFalse);
+      c.undo();
+      expect(c.document.toJson(), document.toJson());
+      expect(c.placementWarningIds, isEmpty);
+    });
+
     testWidgets(
       '$kind move previews coalesce samples and flush release/cancel safely',
       (tester) async {
@@ -151,6 +168,7 @@ void main() {
             y: 500,
             width: 500,
             height: 600,
+            surface: const {'type': 'rect'},
           ),
         ],
       );
@@ -175,6 +193,11 @@ void main() {
       expect(lastValid.x, greaterThan(550));
       surface().onDragUpdate!(const Offset(1100, 500));
       await tester.pump();
+      expect(surface().blockedPlacementHulls, isNotEmpty);
+      expect(
+        boundsOfPoints(surface().blockedPlacementHulls.first)['x'],
+        greaterThan(900),
+      );
       expect(
         c.document.nodes.singleWhere((n) => n.id == root.id).x,
         lastValid.x,
@@ -185,6 +208,7 @@ void main() {
         c.document.nodes.singleWhere((n) => n.id == root.id).x,
         lastValid.x,
       );
+      expect(surface().blockedPlacementHulls, isEmpty);
       c.undo();
       expect(c.document.toJson(), document.toJson());
     },

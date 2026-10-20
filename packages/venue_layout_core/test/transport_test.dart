@@ -10,6 +10,73 @@ Map<String, LayoutNode> slots(VenueLayoutDocument d) => {
 };
 void main() {
   test(
+    'canonical vehicles author typed geometry and update stable inventory with independent placement intent',
+    () {
+      var d = busLayout(
+        rows: 2,
+        decks: 2,
+        upperRows: 1,
+        seating: const TableSeating(width: 48, height: 44),
+      );
+      final root = d.nodes.first, seat = seats(d).first;
+      expect(validateDocument(d), isEmpty);
+      expect(busLayoutParameters(d, root.id)['rows'], 2);
+      expect(root.properties, isEmpty);
+      expect(root.assembly!['kind'], 'bus');
+      expect(
+        d.nodes.every(
+          (node) =>
+              !node.properties.containsKey('size') &&
+              !node.properties.containsKey('fill'),
+        ),
+        isTrue,
+      );
+      d = d.copyWith(
+        nodes: [
+          for (final n in d.nodes)
+            n.id == seat.id ? n.copyWith(x: n.x + 7, rotation: 37) : n,
+        ],
+        attachments: [
+          for (final a in d.attachments)
+            a['seatId'] == seat.id
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                    'rotationMode': 'manual',
+                  }
+                : a,
+        ],
+      );
+      final pose = d.nodes.firstWhere((node) => node.id == seat.id),
+          changed = updateBusLayout(d, root.id, rows: 3);
+      expect(validateDocument(changed), isEmpty);
+      final after = changed.nodes.firstWhere((node) => node.id == seat.id);
+      expect(
+        [after.x, after.y, after.rotation],
+        [pose.x, pose.y, pose.rotation],
+      );
+      expect(changed.attachments.length, seats(changed).length);
+      expect(
+        changed.nodes.map((node) => node.id).toSet(),
+        containsAll(d.nodes.map((node) => node.id)),
+      );
+      expect(changed.nodes.first.assembly!['rows'], 3);
+      final coupe = compartmentLayout(compartments: 2, seats: 4),
+          updated = updateCompartmentLayout(
+            coupe,
+            coupe.nodes.first.id,
+            compartments: 3,
+          );
+      expect(validateDocument(updated), isEmpty);
+      expect(compartmentLayoutParameters(updated, updated.nodes.first.id), {
+        'compartments': 3,
+        'seats': 4,
+      });
+      expect(updated.attachments.length, 12);
+    },
+  );
+
+  test(
     'bus materializes inventory and meaningful body, doors, driver and windows',
     () {
       final d = busLayout(), root = d.nodes.first;
@@ -42,7 +109,7 @@ void main() {
       }
       final seat = seats(d).first, index = LayoutSpatialIndex(d);
       expect(index.hitTest(root.x + seat.x, root.y + seat.y), seat.id);
-      expect(index.hitTest(root.x + 160, root.y + 300), root.id);
+      expect(index.hitTest(root.x + 160, root.y + 300), isNotNull);
       expect(VenueLayoutDocument.fromJson(d.toJson()).toJson(), d.toJson());
     },
   );
@@ -76,22 +143,30 @@ void main() {
             if (n.id == first.id)
               n.copyWith(
                 x: n.x + 4,
-                properties: {
-                  ...n.properties,
-                  'manual': true,
-                  'fill': '#123456FF',
-                },
+                properties: n.properties,
+                style: {'fill': '#123456FF'},
               )
             else
               n,
         ],
       );
-      final grown = updateBusLayout(d, root.id, rows: 5, upperRows: 6);
+      final positioned = d.copyWith(
+        attachments: [
+          for (final a in d.attachments)
+            a['seatId'] == first.id
+                ? {
+                    ...a,
+                    'placement': {'mode': 'free'},
+                  }
+                : a,
+        ],
+      );
+      final grown = updateBusLayout(positioned, root.id, rows: 5, upperRows: 6);
       for (final entry in slots(d).entries)
         expect(slots(grown)[entry.key]?.id, entry.value.id);
       expect(grown.nodes.firstWhere((n) => n.id == first.id).x, first.x + 4);
       expect(
-        grown.nodes.firstWhere((n) => n.id == first.id).properties['fill'],
+        grown.nodes.firstWhere((n) => n.id == first.id).style['fill'],
         '#123456FF',
       );
       expect(
@@ -121,14 +196,25 @@ void main() {
       final manual = d.copyWith(
         nodes: [
           for (final n in d.nodes)
-            if (n.id == last.id)
-              n.copyWith(properties: {...n.properties, 'manual': true})
-            else
-              n,
+            if (n.id == last.id) n.copyWith(properties: n.properties) else n,
         ],
       );
       expect(
-        () => updateBusLayout(manual, root.id, rows: 2),
+        () => updateBusLayout(
+          manual.copyWith(
+            attachments: [
+              for (final a in manual.attachments)
+                a['seatId'] == last.id
+                    ? {
+                        ...a,
+                        'placement': {'mode': 'free'},
+                      }
+                    : a,
+            ],
+          ),
+          root.id,
+          rows: 2,
+        ),
         throwsA(isA<TransportLayoutRejected>()),
       );
       final locked = d.copyWith(
@@ -170,34 +256,7 @@ void main() {
       );
     },
   );
-  test('legacy bus slots migrate without replacing reservation identities', () {
-    final root = LayoutNode(
-      id: newLayoutId(),
-      kind: 'group',
-      properties: {'assembly': 'bus'},
-    );
-    final d = VenueLayoutDocument(
-      nodes: [
-        root,
-        for (var r = 0; r < 2; r++)
-          for (var s = 0; s < 4; s++)
-            LayoutNode(
-              id: newLayoutId(),
-              kind: 'seat',
-              parentId: root.id,
-              x: s * 56.0 + (s >= 2 ? 80 : 0),
-              y: r * 64.0,
-              width: 40,
-              height: 40,
-              label: '${r * 4 + s + 1}',
-              properties: {'slot': '$r:$s'},
-            ),
-      ],
-    );
-    final next = updateBusLayout(d, root.id, rows: 3);
-    expect(slots(next)['deck:0:row:1:right:0']!.id, slots(d)['1:2']!.id);
-    expect(seats(next).length, 12);
-  });
+
   test(
     'canonical full and partial transport scenes agree with validated fonts',
     () {

@@ -3,8 +3,8 @@ import 'package:venue_layout_core/venue_layout_core.dart';
 
 // Existing V1 seat visual: 100-unit cell, 11.25-unit inset and 20-unit radius.
 const referenceHallSeatSize = 77.5;
-const referenceHallSeatAppearance = <String, dynamic>{
-  'objectStyle': 'simple',
+const referenceHallSeatStyle = <String, dynamic>{
+  'material': 'simple',
   'seatStyle': 'plain',
   'fill': '#267329FF',
   'stroke': '#00000000',
@@ -52,7 +52,6 @@ void addReferenceHallSeats({
         label: r.$2,
         properties: {
           'symbol': 'chair',
-          'manual': true,
           'slot': slots.update(r.$1, (v) => v + 1, ifAbsent: () => 0),
         },
       ),
@@ -61,22 +60,8 @@ void addReferenceHallSeats({
       'id': newLayoutId(),
       'seatId': id,
       'targetId': table.id,
-      'kind': 'edge',
-      'edge': edge,
-      'manual': true,
-      'x': x,
-      'y': y,
-      'rotation': rotation,
-      'gap':
-          ((horizontalSide
-                      ? x.abs() - table.width / 2
-                      : y.abs() - table.height / 2) -
-                  referenceHallSeatSize / 2)
-              .clamp(0, 1000000),
-      't': ((horizontalSide ? y / table.height : x / table.width) + .5).clamp(
-        0,
-        1,
-      ),
+      'placement': {'mode': 'free'},
+      'rotationMode': 'manual',
     });
   }
 }

@@ -106,13 +106,26 @@ void main() {
       );
       surface().onDrop!('Bar', const Offset(600, 400));
       await tester.pump();
+      final inserted = c.document.nodes.singleWhere(isBarNode);
+      c.apply(
+        c.document.copyWith(
+          nodes: [snapTableSurfaceToGrid(inserted, preset: 'rectangle')],
+        ),
+      );
+      await tester.pump();
       final bar = c.document.nodes.singleWhere(isBarNode);
       expect(barSeatCount(c.document, bar.id), 0);
       expect(find.text('Add one seat'), findsNothing);
-      expect(find.byTooltip('Extend surface'), findsNWidgets(12));
+      expect(
+        find.byTooltip('Extend surface'),
+        findsNWidgets(
+          (2 * (bar.width + bar.height) / (bar.surface!['moduleSize'] as num))
+              .round(),
+        ),
+      );
       final before = c.document.toJson();
       surface().onHandleStart!(
-        'Extend edge 1',
+        'Extend edge 1 cell 0',
         Offset(bar.x + bar.width / 2, bar.y),
       );
       surface().onDragUpdate!(Offset(bar.x + bar.width / 2 + 120, bar.y));

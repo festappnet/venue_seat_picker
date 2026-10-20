@@ -1,6 +1,6 @@
 {
   "name": "@festapp/venue-layout",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Venue layout SVG viewer using a shared Dart geometry kernel",
   "type": "module",
   "main": "src/index.js",
@@ -12,13 +12,15 @@
     "./kernel": {
       "types": "./src/kernel.d.ts",
       "default": "./dist/venue_layout_kernel.js"
-    }
+    },
+    "./document-schema": "./dist/layout-v2.schema.json"
   },
   "files": [
     "src",
     "dist/venue_layout_kernel.js",
     "dist/demo.js",
     "dist/manifest.json",
+    "dist/layout-v2.schema.json",
     "demo",
     "README.md",
     "LICENSE",

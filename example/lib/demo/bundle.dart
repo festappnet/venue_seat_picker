@@ -9,7 +9,7 @@ class DemoBundle {
   final VenueLayoutDocument document;
   final Map<String, dynamic> resources, host;
   static const maxBytes = 16 * 1024 * 1024;
-  static const maxAssetBytes = 8 * 1024 * 1024;
+  static const maxAssetBytes = 800 * 1024;
   String encode() {
     final portable = Map<String, dynamic>.from(resources)..remove('images');
     _validateResources(portable);
@@ -21,7 +21,7 @@ class DemoBundle {
     final resourceBytes = utf8.encode(jsonEncode(portable));
     final payload = jsonEncode({
       'format': 'venue-layout-demo',
-      'version': 1,
+      'version': 2,
       'protocol': 1,
       'layout': document.toJson(),
       'host': host,
@@ -58,7 +58,7 @@ class DemoBundle {
       throw const FormatException('Unknown portable bundle field');
     }
     if (value['format'] != 'venue-layout-demo' ||
-        value['version'] != 1 ||
+        value['version'] != 2 ||
         value['protocol'] != 1) {
       throw const FormatException('Unsupported demo file version');
     }
@@ -114,7 +114,13 @@ class DemoBundle {
       throw FormatException('Invalid font resource: ${fontIssues.first.path}');
     }
     if (resources.keys.any(
-      (k) => !const {'protocol', 'fonts', 'assets'}.contains(k),
+      (k) => !const {
+        'protocol',
+        'fontFamilies',
+        'textLayouts',
+        'numberSymbols',
+        'assets',
+      }.contains(k),
     )) {
       throw const FormatException('Unknown portable resource field');
     }
@@ -125,45 +131,19 @@ class DemoBundle {
     if (assets is Map) {
       for (final entry in assets.entries) {
         final asset = entry.value;
-        if (entry.key is! String ||
-            (entry.key as String).isEmpty ||
-            asset is! Map ||
-            asset['data'] is! String ||
-            asset.keys.any(
-              (k) => !const {
-                'data',
-                'size',
-                'sha256',
-                'mime',
-                'width',
-                'height',
-              }.contains(k),
-            )) {
+        if (entry.key is! String || asset is! Map || asset['url'] is! String)
           throw const FormatException('Asset must contain embedded bytes');
-        }
-        final width = asset['width'], height = asset['height'];
-        if (width is! int ||
-            height is! int ||
-            width <= 0 ||
-            height <= 0 ||
-            width > 40000000 ||
-            height > 40000000 ||
-            width * height > 40000000) {
-          throw const FormatException('Invalid embedded image dimensions');
-        }
-        final data = base64Decode(asset['data'] as String);
-        if (data.length > maxAssetBytes ||
-            data.length != asset['size'] ||
-            sha256.convert(data).toString() != asset['sha256']) {
+        final uri = Uri.tryParse(asset['url'] as String), data = uri?.data;
+        if (uri?.scheme != 'data' ||
+            data == null ||
+            !data.isBase64 ||
+            data.mimeType != asset['mimeType'])
+          throw const FormatException('Asset must contain embedded bytes');
+        final bytes = data.contentAsBytes();
+        if (bytes.length > maxAssetBytes ||
+            bytes.length != asset['byteLength'] ||
+            sha256.convert(bytes).toString() != asset['hash'])
           throw const FormatException('Invalid embedded asset');
-        }
-        if (![
-          'image/png',
-          'image/jpeg',
-          'image/webp',
-        ].contains(asset['mime'])) {
-          throw const FormatException('Unsupported embedded image');
-        }
       }
     }
   }
@@ -178,27 +158,11 @@ class DemoBundle {
             !(resources['assets'] as Map).containsKey(ref))) {
       throw const FormatException('Missing embedded background resource');
     }
-    final fonts = resources['fonts'] as Map? ?? {};
-    for (final node in doc.nodes) {
-      final text = node.kind == 'text'
-          ? '${node.properties['text'] ?? ''}'
-          : node.label;
-      if (text.isEmpty) continue;
-      final fontId =
-          node.properties['fontId'] ?? doc.defaultTextStyle['fontId'];
-      final font = fonts[fontId];
-      if (font is! Map || font['glyphs'] is! Map) {
-        throw const FormatException('Missing embedded font resource');
-      }
-      for (final rune in text.runes) {
-        if (rune != 10 &&
-            !(font['glyphs'] as Map).containsKey(String.fromCharCode(rune))) {
-          throw const FormatException(
-            'Embedded font is missing a required glyph',
-          );
-        }
-      }
-    }
+    final issues = compileScene(doc, resources: resources)['issues'] as List;
+    if (issues.isNotEmpty)
+      throw FormatException(
+        'Missing or invalid prepared resource: ${issues.first}',
+      );
   }
 
   static VenueLayoutDocument? _validateHost(

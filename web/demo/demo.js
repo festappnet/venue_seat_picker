@@ -22,9 +22,9 @@ async function digest(data){return [...new Uint8Array(await crypto.subtle.digest
 async function decode(text){
   if(new TextEncoder().encode(text).length>maxBytes)throw Error('Import exceeds 16 MiB');
   const value=JSON.parse(text);
-  if(value.schemaVersion===1)return {layout:value,resources};
+  if(value.schemaVersion===2)return {layout:value,resources};
   if(Object.keys(value).some(k=>!['format','version','protocol','layout','host','resources'].includes(k)))throw Error('Unknown portable bundle field');
-  if(value.format!=='venue-layout-demo'||value.version!==1||value.protocol!==1)throw Error('Unsupported file version');
+  if(value.format!=='venue-layout-demo'||value.version!==2||value.protocol!==1)throw Error('Unsupported file version');
   const loaded={};
   for(const item of value.resources){
     if(Object.keys(item).some(k=>!['path','size','sha256','data'].includes(k))||item.path!=='resources/fixtures.json')throw Error('Unknown portable resource');
@@ -35,13 +35,14 @@ async function decode(text){
   }
   if(!loaded['resources/fixtures.json'])throw Error('Missing bundled resources');
   const resources=loaded['resources/fixtures.json'];
-  if(Object.keys(resources).some(k=>!['protocol','fonts','assets'].includes(k)))throw Error('Unknown portable resource field');
+  if(Object.keys(resources).some(k=>!['protocol','fontFamilies','fontFaces','textLayouts','numberSymbols','assets'].includes(k)))throw Error('Unknown portable resource field');
   if('assets' in resources&&(!resources.assets||typeof resources.assets!=='object'||Array.isArray(resources.assets)))throw Error('Embedded assets must be a map');
   for(const [id,asset] of Object.entries(resources.assets??{})){
-    if(!id||!asset||typeof asset!=='object'||Array.isArray(asset)||Object.keys(asset).some(k=>!['data','size','sha256','mime','width','height'].includes(k)))throw Error('Invalid embedded asset fields');
-    if(!['image/png','image/jpeg','image/webp'].includes(asset.mime)||typeof asset.data!=='string'||!Number.isInteger(asset.width)||!Number.isInteger(asset.height)||asset.width<=0||asset.height<=0||asset.width*asset.height>40000000)throw Error('Unsupported embedded image');
-    const bytes=Uint8Array.from(atob(asset.data),c=>c.charCodeAt(0));
-    if(bytes.length>8*1024*1024||bytes.length!==asset.size||await digest(bytes)!==asset.sha256)throw Error('Embedded asset integrity failed');
+    if(!id||!asset||typeof asset!=='object'||Array.isArray(asset)||Object.keys(asset).some(k=>!['hash','url','byteLength','mimeType','width','height'].includes(k)))throw Error('Invalid embedded asset fields');
+    const prefix=`data:${asset.mimeType};base64,`;
+    if(!['image/png','image/jpeg','image/webp'].includes(asset.mimeType)||typeof asset.url!=='string'||!asset.url.startsWith(prefix))throw Error('Embedded image required');
+    const bytes=Uint8Array.from(atob(asset.url.slice(prefix.length)),c=>c.charCodeAt(0));
+    if(bytes.length>800*1024||bytes.length!==asset.byteLength||await digest(bytes)!==asset.hash)throw Error('Embedded asset integrity failed');
   }
   return {layout:value.layout,resources,host:value.host||{}};
 }
@@ -88,12 +89,13 @@ async function load(text){
   validatePrices(host.prices,parsed.layout);
   if(host.savedBaseline){const errors=JSON.parse(VenueLayoutKernel.validate(JSON.stringify(host.savedBaseline)));if(errors.length)throw Error('Invalid saved baseline');validatePrices(host.savedPrices,host.savedBaseline);}
   for(const asset of Object.values(parsed.resources.assets??{})){
-    const bytes=Uint8Array.from(atob(asset.data),c=>c.charCodeAt(0));
-    const image=await createImageBitmap(new Blob([bytes],{type:asset.mime}));
+    const bytes=Uint8Array.from(atob(asset.url.split(',')[1]),c=>c.charCodeAt(0));
+    const image=await createImageBitmap(new Blob([bytes],{type:asset.mimeType}));
     const valid=image.width===asset.width&&image.height===asset.height;image.close();if(!valid)throw Error('Embedded image dimensions differ');
   }
   if(parsed.layout.background&&!parsed.resources.assets?.[parsed.layout.background.assetRef])throw Error('Missing embedded background');
-  for(const node of parsed.layout.nodes){const text=node.kind==='text'?(node.text||''):(node.label||'');if(!text)continue;const font=parsed.resources.fonts?.[node.fontId||parsed.layout.defaultTextStyle.fontId];if(!font)throw Error('Missing embedded font');for(const ch of text)if(ch!=='\n'&&!font.glyphs[ch])throw Error('Missing required glyph');}
+  const scene=JSON.parse(VenueLayoutKernel.compileScene(JSON.stringify(parsed.layout),JSON.stringify(parsed.resources),'{}'));
+  if(scene.issues.length)throw Error('Missing or invalid prepared resource: '+scene.issues[0].reason);
   if(request!==loadRequest)return;
   const nextPrices=host.prices||{},nextPresentation=Object.fromEntries(parsed.layout.nodes.filter(n=>n.kind==='seat').map(n=>[n.id,{label:n.label||'Seat',status:'available'}]));
   const staging=document.createElement('div');let next;
@@ -149,5 +151,5 @@ window.venueDemo={load,get document(){return documentData;},get selected(){retur
   const bytes=new TextEncoder().encode(JSON.stringify(resources));
   let binary=""; for(let i=0;i<bytes.length;i+=8192) binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
   const data=btoa(binary);
-  load(JSON.stringify({format:'venue-layout-demo',version:1,protocol:1,layout,host:{},resources:[{path:'resources/fixtures.json',size:bytes.length,sha256:await digest(bytes),data}]})).catch(error=>status(`Seed failed: ${error.message}`));
+  load(JSON.stringify({format:'venue-layout-demo',version:2,protocol:1,layout,host:{},resources:[{path:'resources/fixtures.json',size:bytes.length,sha256:await digest(bytes),data}]})).catch(error=>status(`Seed failed: ${error.message}`));
 } })();

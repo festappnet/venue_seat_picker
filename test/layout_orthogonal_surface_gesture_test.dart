@@ -4,6 +4,61 @@ import 'package:venue_seat_picker/venue_seat_picker.dart';
 import 'package:venue_seat_picker/src/layout_editor/widgets/layout_scene_surface.dart';
 
 void main() {
+  testWidgets(
+    'bottom boundary drag retains its pointer across topology changes',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      var d = tableLayout(
+        shape: 'rect',
+        count: 4,
+        x: 600,
+        y: 400,
+        width: 300,
+        height: 200,
+      );
+      final root = d.nodes.firstWhere((n) => n.kind == 'table');
+      final table = snapTableSurfaceToGrid(root, preset: 'rectangle');
+      d = d.copyWith(
+        nodes: [for (final n in d.nodes) n.id == table.id ? table : n],
+      );
+      final c = VenueLayoutController(d)..select({table.id});
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VenueLayoutEditor(controller: c, showGallery: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final handle = find.byKey(
+        const ValueKey('layout-handle-Extend edge 2 cell 0'),
+      );
+      final origin = tester.getCenter(handle);
+      final drag = await tester.startGesture(origin);
+      await drag.moveTo(origin + const Offset(0, 20));
+      await tester.pump();
+      double height() =>
+          c.document.nodes.firstWhere((n) => n.id == table.id).height;
+      await drag.moveTo(origin + const Offset(0, 70));
+      await tester.pump();
+      final first = height();
+      expect(first, greaterThan(table.height));
+      expect(c.gestureActive, isTrue);
+      await drag.moveTo(origin + const Offset(0, 140));
+      await tester.pump();
+      expect(height(), greaterThan(first));
+      expect(c.gestureActive, isTrue);
+      await drag.up();
+      await tester.pump();
+      expect(c.error, isNull);
+      expect(c.gestureActive, isFalse);
+      expect(validateDocument(c.document), isEmpty);
+      c.undo();
+      expect(c.document.toJson(), d.toJson());
+    },
+  );
   for (final bar in [false, true]) {
     for (final wrapped in [false, true]) {
       testWidgets(
@@ -25,15 +80,10 @@ void main() {
             (n) => n.kind == 'table',
           );
           final wrapper = LayoutNode(id: newLayoutId(), kind: 'group');
-          final table = originalTable.copyWith(
-            parentId: wrapped ? wrapper.id : null,
-            rotation: 25,
-            properties: {
-              ...originalTable.properties,
-              'shape': 'polygon',
-              'points': surfacePresetPoints('rectangle', 300, bar ? 120 : 200),
-            },
-          );
+          final table = snapTableSurfaceToGrid(
+            originalTable,
+            preset: 'rectangle',
+          ).copyWith(parentId: wrapped ? wrapper.id : null, rotation: 25);
           document = document.copyWith(
             nodes: [
               if (wrapped) wrapper,

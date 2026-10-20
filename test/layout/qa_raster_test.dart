@@ -23,7 +23,7 @@ void main() {
       await tester.runAsync(() async {
         for (final entry in (resources['assets'] as Map? ?? {}).entries) {
           final codec = await ui.instantiateImageCodec(
-            base64Decode(entry.value['data'] as String),
+            Uri.parse(entry.value['url'] as String).data!.contentAsBytes(),
           );
           images[entry.key as String] = (await codec.getNextFrame()).image;
           codec.dispose();
@@ -38,12 +38,18 @@ void main() {
 
       for (final f in fixture['fixtures'] as List) {
         for (final motion in f['motion'] as List) {
-          for (final width in [360, 900, 1440]) {
-            for (final dpr in [1, 2]) {
-              for (final zoom in [.5, 1.0, 2.0]) {
+          for (final width in fixture['widths'] as List? ?? [360, 900, 1440]) {
+            for (final dpr in fixture['dprs'] as List? ?? [1, 2]) {
+              for (final zoom
+                  in motion['zoom'] != null
+                      ? [motion['zoom']]
+                      : [.5, 1.0, 2.0]) {
                 final key = GlobalKey();
                 await tester.binding.setSurfaceSize(
-                  Size(width.toDouble(), 900),
+                  Size(
+                    (width as num).toDouble(),
+                    (fixture['viewportHeight'] as num? ?? 900).toDouble(),
+                  ),
                 );
                 await tester.pumpWidget(
                   Directionality(
@@ -57,7 +63,7 @@ void main() {
                             scene: Map<String, dynamic>.from(motion['scene']),
                             resources: resources,
                             selected: {},
-                            scale: zoom,
+                            scale: (zoom as num).toDouble(),
                             offset: Offset.zero,
                             canvasColor: Colors.white,
                             selectionColor: Colors.blue,
@@ -72,7 +78,7 @@ void main() {
                     key.currentContext!.findRenderObject()!
                         as RenderRepaintBoundary;
                 final image = (await tester.runAsync(
-                  () => boundary.toImage(pixelRatio: dpr.toDouble()),
+                  () => boundary.toImage(pixelRatio: (dpr as num).toDouble()),
                 ))!;
                 final bytes = (await tester.runAsync(
                   () => image.toByteData(format: ui.ImageByteFormat.png),

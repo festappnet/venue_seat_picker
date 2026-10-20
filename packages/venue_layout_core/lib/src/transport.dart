@@ -2,6 +2,7 @@ import 'dart:math';
 import 'geometry.dart';
 import 'model.dart';
 import 'table_seating.dart';
+import 'placement.dart';
 
 /// Configurable schematic, not a manufacturer-specific seating certification.
 VenueLayoutDocument busLayout({
@@ -41,8 +42,9 @@ VenueLayoutDocument busLayout({
         width: decks * width + (decks - 1) * 96,
         height: height,
         label: decks == 2 ? 'Double-decker bus' : 'Bus',
-        properties: {
-          'assembly': 'bus',
+        seating: seating.record,
+        assembly: {
+          'kind': 'bus',
           'rows': rows,
           'left': left,
           'right': right,
@@ -51,6 +53,7 @@ VenueLayoutDocument busLayout({
           'upperRows': upper,
           'upperRear': upperBack,
         },
+        properties: const {},
       );
   final b = _Vehicle(root);
   var number = 1;
@@ -312,7 +315,24 @@ VenueLayoutDocument busLayout({
       );
   }
   return _checked(
-    _transportSeating(VenueLayoutDocument(nodes: b.nodes), seating),
+    _transportSeating(
+      VenueLayoutDocument(
+        schemaVersion: 2,
+        nodes: b.nodes,
+        seatingDefaults: seating.record,
+        attachments: [
+          for (final seat in b.nodes.where((node) => node.kind == 'seat'))
+            {
+              'id': newLayoutId(),
+              'seatId': seat.id,
+              'targetId': root.id,
+              'placement': {'mode': 'automatic'},
+              'rotationMode': 'auto',
+            },
+        ],
+      ),
+      seating,
+    ),
   );
 }
 
@@ -344,11 +364,13 @@ VenueLayoutDocument compartmentLayout({
     width: width,
     height: height,
     label: 'Carriage',
-    properties: {
-      'assembly': 'compartments',
+    seating: seating.record,
+    assembly: {
+      'kind': 'compartments',
       'compartments': compartments,
       'seats': seats,
     },
+    properties: const {},
   );
   final b = _Vehicle(root);
   var number = 1;
@@ -505,12 +527,29 @@ VenueLayoutDocument compartmentLayout({
     ], strokeWidth: 4);
   }
   return _checked(
-    _transportSeating(VenueLayoutDocument(nodes: b.nodes), seating),
+    _transportSeating(
+      VenueLayoutDocument(
+        schemaVersion: 2,
+        nodes: b.nodes,
+        seatingDefaults: seating.record,
+        attachments: [
+          for (final seat in b.nodes.where((node) => node.kind == 'seat'))
+            {
+              'id': newLayoutId(),
+              'seatId': seat.id,
+              'targetId': root.id,
+              'placement': {'mode': 'automatic'},
+              'rotationMode': 'auto',
+            },
+        ],
+      ),
+      seating,
+    ),
   );
 }
 
 Map<String, int> busLayoutParameters(VenueLayoutDocument document, String id) {
-  final root = _root(document, id, 'bus'), p = root.properties;
+  final root = _root(document, id, 'bus'), p = root.assembly!;
   if (p['decks'] is int)
     return {
       for (final key in [
@@ -524,81 +563,20 @@ Map<String, int> busLayoutParameters(VenueLayoutDocument document, String id) {
       ])
         key: p[key] as int,
     };
-  final seats = document.nodes
-      .where((n) => n.parentId == id && n.kind == 'seat')
-      .toList();
-  var rows = 0, rear = 0, total = 0;
-  final first = <LayoutNode>[];
-  for (final seat in seats) {
-    final slot = '${seat.properties['slot']}',
-        match = RegExp(r'^(\d+):(\d+)$').firstMatch(slot);
-    if (match != null) {
-      final r = int.parse(match[1]!);
-      rows = max(rows, r + 1);
-      total = max(total, int.parse(match[2]!) + 1);
-      if (r == 0) first.add(seat);
-    } else if (slot.startsWith('rear:'))
-      rear++;
-  }
-  if (first.isEmpty)
-    throw StateError(
-      'Legacy bus layout requires explicit row and seat-block parameters.',
-    );
-  first.sort((a, b) => a.x.compareTo(b.x));
-  var left = total, right = 0;
-  var largest = 0.0, index = -1;
-  for (var i = 1; i < first.length; i++) {
-    final gap = first[i].x - first[i - 1].x;
-    if (gap > largest) {
-      largest = gap;
-      index = i;
-    }
-  }
-  if (largest > 80) {
-    left = index;
-    right = total - left;
-  } else if (first.first.x >= 80) {
-    left = 0;
-    right = total;
-  }
-  return {
-    'rows': rows,
-    'left': left,
-    'right': right,
-    'rear': rear,
-    'decks': 1,
-    'upperRows': rows + 2,
-    'upperRear': rear,
-  };
+  throw StateError('Missing canonical bus parameters');
 }
 
 Map<String, int> compartmentLayoutParameters(
   VenueLayoutDocument document,
   String id,
 ) {
-  final root = _root(document, id, 'compartments'), p = root.properties;
+  final root = _root(document, id, 'compartments'), p = root.assembly!;
   if (p['compartments'] is int && p['seats'] is int)
     return {
       'compartments': p['compartments'] as int,
       'seats': p['seats'] as int,
     };
-  var compartments = 0, seats = 0;
-  for (final node in document.nodes.where(
-    (n) => n.parentId == id && n.kind == 'seat',
-  )) {
-    final match = RegExp(
-      r'^(\d+):(\d+)$',
-    ).firstMatch('${node.properties['slot']}');
-    if (match != null) {
-      compartments = max(compartments, int.parse(match[1]!) + 1);
-      seats = max(seats, int.parse(match[2]!) + 1);
-    }
-  }
-  if (compartments == 0 || seats < 2)
-    throw StateError(
-      'Legacy carriage requires explicit compartment parameters.',
-    );
-  return {'compartments': compartments, 'seats': seats};
+  throw StateError('Missing canonical compartment parameters');
 }
 
 VenueLayoutDocument updateBusLayout(
@@ -616,11 +594,7 @@ VenueLayoutDocument updateBusLayout(
   final root = _root(document, id, 'bus'),
       p = busLayoutParameters(document, id);
   final generated = busLayout(
-    seating: documentSeating(
-      document.copyWith(
-        nodes: document.nodes.where((n) => n.parentId == id).toList(),
-      ),
-    ),
+    seating: TableSeating.fromDocument(document, root),
     id: id,
     x: root.x,
     y: root.y,
@@ -651,11 +625,7 @@ VenueLayoutDocument updateCompartmentLayout(
   final root = _root(document, id, 'compartments'),
       p = compartmentLayoutParameters(document, id);
   final generated = compartmentLayout(
-    seating: documentSeating(
-      document.copyWith(
-        nodes: document.nodes.where((n) => n.parentId == id).toList(),
-      ),
-    ),
+    seating: TableSeating.fromDocument(document, root),
     id: id,
     x: root.x,
     y: root.y,
@@ -727,7 +697,7 @@ VenueLayoutDocument _reconcile(
         (n) =>
             n.kind == 'seat' &&
             removed.contains(n.id) &&
-            (protectedAll.contains(n.id) || n.properties['manual'] == true),
+            (protectedAll.contains(n.id) || seatPlacementFree(d, n)),
       )
       .map((n) => n.id)
       .toSet();
@@ -758,12 +728,13 @@ VenueLayoutDocument _reconcile(
       replacement.add(added);
       continue;
     }
-    final manual = old.kind == 'seat' && old.properties['manual'] == true;
+    final manual = old.kind == 'seat' && seatPlacementFree(d, old),
+        manualRotation = old.kind == 'seat' && seatRotationManual(d, old);
     replacement.add(
       old.copyWith(
         x: manual ? old.x : candidate.x,
         y: manual ? old.y : candidate.y,
-        rotation: manual ? old.rotation : candidate.rotation,
+        rotation: manualRotation ? old.rotation : candidate.rotation,
         width: old.kind == 'seat' ? old.width : candidate.width,
         height: old.kind == 'seat' ? old.height : candidate.height,
         properties: {
@@ -784,6 +755,7 @@ VenueLayoutDocument _reconcile(
     width: generated.nodes.first.width,
     height: generated.nodes.first.height,
     properties: {...root.properties, ...generated.nodes.first.properties},
+    assembly: generated.nodes.first.assembly,
   );
   return _checked(
     d.copyWith(
@@ -795,22 +767,21 @@ VenueLayoutDocument _reconcile(
       selectionUnits: d.selectionUnits
           .where((u) => !(u['nodeIds'] as List).any(removed.contains))
           .toList(),
-      attachments: d.attachments
-          .where(
-            (a) =>
-                !removed.contains(a['seatId']) &&
-                !removed.contains(a['targetId']),
-          )
-          .toList(),
-      generators: [
-        for (final g in d.generators)
-          {
-            ...g,
-            if (g['nodeIds'] is List)
-              'nodeIds': (g['nodeIds'] as List)
-                  .where((id) => !removed.contains(id))
-                  .toList(),
-          },
+      attachments: [
+        ...d.attachments.where(
+          (a) =>
+              !removed.contains(a['seatId']) &&
+              !removed.contains(a['targetId']),
+        ),
+        for (final seat in replacement.where((node) => node.kind == 'seat'))
+          if (!d.attachments.any((a) => a['seatId'] == seat.id))
+            {
+              'id': newLayoutId(),
+              'seatId': seat.id,
+              'targetId': root.id,
+              'placement': {'mode': 'automatic'},
+              'rotationMode': 'auto',
+            },
       ],
     ),
   );
@@ -835,7 +806,7 @@ String _coupeSlot(String slot, int seats) {
 
 LayoutNode _root(VenueLayoutDocument d, String id, String assembly) {
   final node = d.nodes.firstWhere((n) => n.id == id);
-  if (node.kind != 'group' || node.properties['assembly'] != assembly)
+  if (node.kind != 'group' || ((node.assembly?['kind'])) != assembly)
     throw ArgumentError('Expected $assembly transport assembly');
   return node;
 }
@@ -906,23 +877,19 @@ class _Vehicle {
         width: width,
         height: height,
         z: z,
-        properties: {
-          'shape': shape,
+        style: {
           'fill': fill,
           'stroke': stroke,
           'strokeWidth': strokeWidth,
           'cornerRadius': radius,
-          'objectStyle': 'simple',
+          'material': 'simple',
+        },
+        properties: {
+          'shape': shape,
+
           'role': 'decoration',
           'slot': slot,
           if (deck != null) 'deck': deck,
-          'appearanceOverrides': [
-            'fill',
-            'stroke',
-            'strokeWidth',
-            'cornerRadius',
-            'objectStyle',
-          ],
         },
       ),
     );
@@ -939,15 +906,16 @@ class _Vehicle {
     final node = shapeFromPoints(
       'polyline',
       points,
-      properties: {
+      style: {
         'fill': '#00000000',
         'stroke': stroke,
         'strokeWidth': strokeWidth,
-        if (dash != null) 'dash': dash,
+        if (dash != null) 'strokePattern': {'type': 'custom', 'lengths': dash},
+      },
+      properties: {
         'role': 'decoration',
         'slot': slot,
         if (deck != null) 'deck': deck,
-        'appearanceOverrides': ['fill', 'stroke', 'strokeWidth'],
       },
     );
     nodes.add(node.copyWith(parentId: root.id));
@@ -972,15 +940,15 @@ class _Vehicle {
         y: y,
         width: width,
         height: height,
+        style: {
+          'label': {'size': size, 'align': 'center', 'color': '#46596BFF'},
+        },
         properties: {
           'text': text,
-          'size': size,
-          'align': 'center',
-          'color': '#46596BFF',
+
           'role': 'decoration',
           'slot': slot,
           if (deck != null) 'deck': deck,
-          'appearanceOverrides': ['color'],
         },
       ),
     );
@@ -1003,12 +971,13 @@ class _Vehicle {
         y: y,
         rotation: rotation,
         label: label,
+        style: {
+          'label': {'size': 12, 'align': 'center'},
+        },
         properties: {
           'slot': slot,
           if (deck != null) 'deck': deck,
           'symbol': 'chair',
-          'size': 12,
-          'align': 'center',
         },
       ),
     );
@@ -1031,6 +1000,26 @@ VenueLayoutDocument _transportSeating(
           y: node.parentId == null ? node.y : node.y * scale,
           width: node.kind == 'seat' ? seating.width : node.width * scale,
           height: node.kind == 'seat' ? seating.height : node.height * scale,
+          style: {
+            ...node.style,
+            for (final key in ['cornerRadius', 'strokeWidth'])
+              if (node.style[key] is num) key: (node.style[key] as num) * scale,
+            if (node.style['label'] is Map)
+              'label': {
+                ...node.style['label'] as Map,
+                if (node.style['label']['size'] is num)
+                  'size': (node.style['label']['size'] as num) * scale,
+              },
+            if (node.style['strokePattern']?['type'] == 'custom')
+              'strokePattern': {
+                'type': 'custom',
+                'lengths': [
+                  for (final value
+                      in node.style['strokePattern']['lengths'] as List)
+                    (value as num) * scale,
+                ],
+              },
+          },
           properties: {
             ...node.properties,
             for (final key in ['cornerRadius', 'size', 'strokeWidth'])

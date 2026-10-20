@@ -15,6 +15,8 @@ function message(options, key, values = {}) {
 
 const kernelLoads = new Map();
 const kernelReady = () => globalThis.VenueLayoutKernel?.protocol === 1 &&
+  globalThis.VenueLayoutKernel.documentVersion === 2 &&
+  globalThis.VenueLayoutKernel.resourceProtocol === 2 &&
   typeof globalThis.VenueLayoutKernel.validate === 'function' &&
   typeof globalThis.VenueLayoutKernel.compileScene === 'function';
 
@@ -176,7 +178,6 @@ export function update(handle, options = {}) {
   if (options.document && options.document !== handle.options.document) {const issues=JSON.parse(globalThis.VenueLayoutKernel.validate(JSON.stringify(options.document)));if(issues.length)throw new Error(issues.map(i=>`${i.path}: ${i.reason}`).join('; '));}
   if (resourcesChanged && globalThis.VenueLayoutKernel.validateResources) {const issues=JSON.parse(globalThis.VenueLayoutKernel.validateResources(JSON.stringify(options.resources)));if(issues.length)throw new Error(issues.map(i=>`${i.path}: ${i.reason}`).join('; '));}
   const replacingDocument = options.document && options.document !== handle.options.document;
-  if (options.assets && options.assets !== handle.options.assets) handle.elements = null;
   handle.options = {...handle.options, ...options};
   if (!handle.options.document) throw new Error('A document is required');
   if (replacingDocument) {handle.generation++; handle.pending.clear(); handle.selected.clear(); handle.quantities.clear(); handle.detail.replaceChildren(); handle.scene = null; handle.sceneItems = null; handle.elements = null; handle.listDocument = null;}
@@ -199,11 +200,15 @@ function render(handle, dirtyIds) {
   let scene;
   if (handle.sceneItems && globalThis.VenueLayoutKernel.compileSceneNodes) {
     const changed = dirtyIds || [...new Set([...Object.keys(presentation), ...Object.keys(handle.previousPresentation || {})])].filter(id => JSON.stringify(presentation[id]) !== JSON.stringify(handle.previousPresentation?.[id]));
+    if (changed.length === 0) {
+      scene = handle.scene;
+    } else {
     scene = JSON.parse(globalThis.VenueLayoutKernel.compileSceneNodes(handle.json, JSON.stringify(changed), handle.resourcesJson, JSON.stringify(presentation)));
     const changedSet = new Set(changed);
     for (const [id, item] of handle.sceneItems) if (changedSet.has(item.nodeId || item.id)) handle.sceneItems.delete(id);
     for (const item of scene.items) handle.sceneItems.set(item.id, item);
     scene = {...scene, items: [...handle.sceneItems.values()].sort((a, b) => a.paintOrder[0] - b.paintOrder[0] || a.paintOrder[1] - b.paintOrder[1])};
+    }
   } else {
     scene = JSON.parse(globalThis.VenueLayoutKernel.compileScene(handle.json, handle.resourcesJson, JSON.stringify(presentation)));
     handle.sceneItems = new Map(scene.items.map(item => [item.id, item]));
@@ -215,33 +220,55 @@ function render(handle, dirtyIds) {
   handle.camera = boundCamera(handle, handle.camera);
   svg.setAttribute('viewBox', `${handle.camera.x} ${handle.camera.y} ${handle.camera.width} ${handle.camera.height}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  updateCanvasFrame(handle, c);
   const limits = cameraMetrics(handle, handle.camera);
   options.onCameraChanged?.({canZoomIn: handle.camera.width > limits.minWidth + .001, canZoomOut: handle.camera.width < limits.maxWidth - .001});
   if (!handle.elements) {svg.replaceChildren(element('rect', {x: c.x || 0, y: c.y || 0, width: c.width, height: c.height, fill: color(c.fill)})); handle.elements = new Map();}
-  let previousNode = svg.firstElementChild;
-  const placeNode = node => {if (node.previousSibling !== previousNode) svg.insertBefore(node, previousNode.nextSibling); previousNode = node;};
+  const containers=[svg],previous=new Map([[svg,svg.firstElementChild]]);
+  const placeNode = node => {const parent=containers.at(-1),before=previous.get(parent)||null;if(node.parentNode!==parent||node.previousSibling!==before)parent.insertBefore(node,before?before.nextSibling:parent.firstChild);previous.set(parent,node);};
   const wanted = new Set(), screenMatrix=svg.getScreenCTM(), zoom=screenMatrix?Math.hypot(screenMatrix.a,screenMatrix.b):1, viewport=visibleWorldBounds(svg, screenMatrix);
   for (const item of scene.items) {
     if (zoom < (item.minZoom || 0)) continue;
-    const b = item.bounds, v = viewport;
+    const b = item.cullingBounds || item.bounds, v = viewport;
     if (b && v && (b.x + b.width < v.x || b.y + b.height < v.y || b.x > v.x + v.width || b.y > v.y + v.height)) continue;
+    if(item.kind==='vectorRestore'){containers.pop();continue;}
     wanted.add(item.id);
     const old = handle.elements.get(item.id);
+    if(item.kind==='vectorClip'||item.kind==='vectorLayer'){
+      let group=old?.item===item?old.node:null;
+      if(!group){
+        group=element('g',{'data-node-id':item.nodeId});
+        if(item.kind==='vectorLayer')group.setAttribute('opacity',item.opacity);
+        else{
+          const id=`venue-${handle.serial}-${item.id.replace(/[^a-zA-Z0-9_-]/g,'-')}-clip`,defs=element('defs'),clip=element('clipPath',{id,clipPathUnits:'userSpaceOnUse'});
+          clip.append(element('path',{d:pathData(item.path),'clip-rule':item.fillRule,transform:`matrix(${item.matrix.join(' ')})`}));defs.append(clip);group.append(defs);group.setAttribute('clip-path',`url(#${id})`);
+        }
+        if(old)old.node.replaceWith(group);handle.elements.set(item.id,{item,node:group});
+      }
+      placeNode(group);containers.push(group);previous.set(group,item.kind==='vectorClip'?group.firstElementChild:null);continue;
+    }
     if (old?.item === item) {placeNode(old.node); continue;}
     const group = element('g', {transform: `matrix(${item.matrix.join(' ')})`, opacity: item.kind === 'image' ? item.opacity ?? 1 : null, 'data-node-id': item.nodeId || item.id});
     if (item.kind === 'image') {
-      const asset = options.assets?.[item.assetRef] || options.resources?.assets?.[item.assetRef];
-      const href = typeof asset === 'string' ? asset : asset?.data && asset?.mime ? `data:${asset.mime};base64,${asset.data}` : asset?.url;
+      const asset = options.resources?.assets?.[item.assetRef];
+      const href = asset?.url;
       if (href && /^(data:image\/(png|jpeg|webp);base64,|blob:|https?:|file:|\.\.?\/)/i.test(href)) {
         const source = item.sourceRect, destination = item.destinationRect;
-        const nested = element('svg', {x: destination.x, y: destination.y, width: destination.width, height: destination.height, viewBox: `${source.x} ${source.y} ${source.width} ${source.height}`, preserveAspectRatio: 'xMinYMin meet', overflow: 'hidden'});
+        const nested = element('svg', {x: destination.x, y: destination.y, width: destination.width, height: destination.height, viewBox: `${source.x} ${source.y} ${source.width} ${source.height}`, preserveAspectRatio: 'none', overflow: 'hidden'});
         nested.append(element('image', {href, width: item.width, height: item.height}));
         const local = element('g', {transform: group.getAttribute('transform')}); local.append(nested); group.removeAttribute('transform');
         if (item.clip) {const clipId = `venue-${handle.serial}-background-clip`, defs = element('defs'), clip = element('clipPath', {id: clipId, clipPathUnits:'userSpaceOnUse'}); clip.append(element('rect', item.clip)); defs.append(clip); group.append(defs); group.setAttribute('clip-path', `url(#${clipId})`);}
         group.append(local);
       } else {handle.live.textContent = message(options, 'backgroundUnavailable'); options.onIssues?.([{reason: 'asset_unavailable', path: 'background', assetRef: item.assetRef}]);}
     } else {
-      group.append(element('path', {d: pathData(item.path || []), fill: color(item.fill), stroke: color(item.stroke), 'fill-opacity': item.opacity ?? 1, 'stroke-opacity': item.opacity ?? 1, 'stroke-width': item.strokeWidth || 0, 'vector-effect': item.kind === 'floor' ? 'non-scaling-stroke' : null, 'stroke-dasharray': item.dash?.join?.(' '), 'stroke-linecap': item.kind==='state'?'round':'butt', 'stroke-linejoin': item.kind==='state'?'round':'miter'}));
+      const paint=(kind)=>{
+        const gradient=item[kind+'Gradient'];if(!gradient)return color(item[kind]);
+        const id=`venue-${handle.serial}-${item.id.replace(/[^a-zA-Z0-9_-]/g,'-')}-${kind}`,defs=element('defs');
+        const g=gradient.type==='linear'?element('linearGradient',{id,gradientUnits:'userSpaceOnUse',x1:gradient.from[0],y1:gradient.from[1],x2:gradient.to[0],y2:gradient.to[1],spreadMethod:gradient.spread}):element('radialGradient',{id,gradientUnits:'userSpaceOnUse',cx:gradient.center[0],cy:gradient.center[1],r:gradient.radius,fx:gradient.focal?.[0]??gradient.center[0],fy:gradient.focal?.[1]??gradient.center[1],gradientTransform:`matrix(${gradient.matrix.join(' ')})`,spreadMethod:gradient.spread});
+        gradient.colors.forEach((c,i)=>g.append(element('stop',{offset:gradient.stops[i],'stop-color':color(c)})));defs.append(g);group.append(defs);return `url(#${id})`;
+      };
+      if(item.localClip){const id=`venue-${handle.serial}-${item.id.replace(/[^a-zA-Z0-9_-]/g,'-')}-text-clip`,defs=element('defs'),clip=element('clipPath',{id,clipPathUnits:'userSpaceOnUse'});clip.append(element('rect',item.localClip));defs.append(clip);group.append(defs);group.setAttribute('clip-path',`url(#${id})`);}
+      group.append(element('path', {d: pathData(item.path || []), fill: paint('fill'), stroke: paint('stroke'), 'fill-rule':item.fillRule||'nonzero', 'stroke-miterlimit':item.miterLimit||4, 'fill-opacity': item.opacity ?? 1, 'stroke-opacity': item.opacity ?? 1, 'stroke-width': item.strokeWidth || 0, 'vector-effect': item.kind === 'floor' ? 'non-scaling-stroke' : null, 'stroke-dasharray': item.dash?.join?.(' '), 'stroke-linecap': item.kind==='state'?'round':item.strokeCap||'butt', 'stroke-linejoin': item.kind==='state'?'round':item.strokeJoin||'miter'}));
     }
     const tooltip = options.seatPresentation?.[item.nodeId || item.id]?.tooltip ?? item.label;
     if (tooltip) {const title = element('title'); title.textContent = tooltip; group.append(title);}
@@ -250,7 +277,7 @@ function render(handle, dirtyIds) {
     handle.elements.set(item.id, {item, node: group});
   }
   for (const [id, entry] of handle.elements) if (!wanted.has(id)) {entry.node.remove(); handle.elements.delete(id);}
-  renderList(handle);
+  if (dirtyIds?.length !== 0) renderList(handle);
 }
 function installTooltip(handle, options) {
   const tooltip = document.createElement('aside');
@@ -301,6 +328,18 @@ function installTooltip(handle, options) {
   handle.tooltipWindow.addEventListener?.('scroll', handle.hideTooltip, true);
   handle.tooltipWindow.addEventListener?.('resize', handle.hideTooltip);
 }
+// Presentation-only canvas framing in CSS pixels, independent of document
+// geometry and zoom. Clipping includes imported artwork that covers the fill.
+function updateCanvasFrame(handle, canvas) {
+  const requested = Number(handle.options.canvasCornerRadius) || 0;
+  const svg = handle.svg, matrix = svg.getScreenCTM();
+  if (requested <= 0 || !matrix) {svg.style.clipPath = ''; return;}
+  const rect = svg.getBoundingClientRect();
+  const a = new DOMPoint(canvas.x || 0, canvas.y || 0).matrixTransform(matrix);
+  const b = new DOMPoint((canvas.x || 0) + canvas.width, (canvas.y || 0) + canvas.height).matrixTransform(matrix);
+  const radius = Math.min(requested, Math.abs(b.x-a.x)/2, Math.abs(b.y-a.y)/2);
+  svg.style.clipPath = `inset(${a.y-rect.top}px ${rect.right-b.x}px ${rect.bottom-b.y}px ${a.x-rect.left}px round ${radius}px)`;
+}
 function cameraMetrics(handle, camera) {
   const canvas = handle.options.document.canvas, rect = handle.svg.getBoundingClientRect();
   const width = rect.width || canvas.width, height = rect.height || canvas.height;
@@ -321,6 +360,8 @@ function boundCamera(handle, camera) {
   const viewportWidth = width / scale, viewportHeight = height / scale;
   const shiftX = (viewportWidth - camera.width) / 2, shiftY = (viewportHeight - camera.height) / 2;
   const clampAxis = (position, start, extent, viewport) => {
+    // Spare space belongs on both sides, never in an off-center pan range.
+    if (extent <= viewport + 1e-6) return start + (extent - viewport) / 2;
     const a = start - margin, b = start + extent + margin - viewport;
     return Math.min(Math.max(a, b), Math.max(Math.min(a, b), position));
   };

@@ -16,7 +16,8 @@ void main() {
         y: 50,
         width: 60,
         height: 60,
-        properties: {
+        properties: {},
+        style: {
           'fill': '#FFFFFFFF',
           'stroke': '#0000FFFF',
           'strokeWidth': width,
