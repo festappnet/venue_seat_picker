@@ -203,3 +203,24 @@ test('camera-only updates retain the compiled scene and assistive keyboard targe
   assert.deepEqual(retained,{sceneRetained:true,buttonRetained:true,focusRetained:true});
  }finally{await p.close();}
 });
+
+test('standing starts at one, has bounded plus/minus controls and rejects unavailable clicks',async()=>{
+ const p=await setup();try{
+ const area='00000000-0000-4000-8000-000000000003';
+ await p.evaluate(area=>viewer.update({document:{...viewer.options.document,nodes:[...viewer.options.document.nodes,{id:area,kind:'capacityArea',label:'Standing',transform:{x:400,y:300,rotation:0},width:160,height:100}]},capacityPresentation:{[area]:{available:2,selectable:true}},onQuantityRequested:async()=>({accepted:true})}),area);
+ await p.locator(`[role=list] [data-node-id="${area}"]`).press('Space');
+ assert.equal(await p.getByRole('spinbutton').inputValue(),'1');
+ await p.getByRole('button',{name:'Add one',exact:true}).click();
+ assert.equal(await p.getByRole('spinbutton').inputValue(),'2');
+ assert.equal(await p.getByRole('button',{name:'Add one',exact:true}).isDisabled(),true);
+ await p.getByRole('button',{name:'Remove one',exact:true}).click();
+ await p.getByRole('button',{name:'Remove one',exact:true}).click();
+ assert.equal(await p.getByRole('spinbutton').inputValue(),'0');
+ assert.equal(await p.getByRole('button',{name:'Remove one',exact:true}).isDisabled(),true);
+ await p.evaluate(area=>viewer.update({capacityPresentation:{[area]:{available:0,selectable:false,status:'unavailable',tooltip:'Sold out'}}}),area);
+ await p.locator(`[role=list] [data-node-id="${area}"]`).press('Space');
+ assert.equal(await p.getByRole('spinbutton').count(),0);
+ assert.equal(await p.getByRole('status').textContent(),'Sold out');
+ assert.equal(await p.locator(`[role=list] [data-node-id="${area}"]`).getAttribute('aria-disabled'),'true');
+ }finally{await p.close();}
+});

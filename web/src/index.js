@@ -1,7 +1,7 @@
 export {loadLayoutAssets} from './assets.js';
 const defaultMessages = Object.freeze({
   viewerLabel: 'Venue layout', places: 'Places', place: 'Place', standing: 'Standing',
-  availableCount: '{count} available', confirmQuantity: 'Confirm quantity', selectedQuantity: 'Selected quantity {count}',
+  availableCount: '{count} available', addOne: 'Add one', removeOne: 'Remove one', confirmQuantity: 'Confirm quantity', selectedQuantity: 'Selected quantity {count}',
   quantityRejected: 'Quantity rejected', placeUnavailable: 'Place unavailable',
   selectedPlaces: 'Selected {count} places', releasedPlaces: 'Released {count} places',
   selectionRejected: 'Selection rejected', backgroundUnavailable: 'Background resource unavailable',
@@ -130,10 +130,30 @@ async function requestSelection(handle, id) {
   if (node.kind === 'capacityArea') {
     if(handle.pending.has(id))return;
     const state = options.capacityPresentation?.[id] || {};
+    const selected = handle.quantities.get(id) ?? 0;
+    const maximum = Math.max(0, Number(state.available ?? state.capacity ?? 0));
+    const unavailable = maximum === 0 || ['occupied','unavailable','disabled','blocked','sold','reserved'].includes(state.status) || state.selectable === false;
+    if (unavailable && selected === 0) {
+      handle.detail.replaceChildren();
+      handle.live.textContent = state.tooltip || message(options, 'placeUnavailable');
+      return;
+    }
     const generation=handle.generation, callback=options.onQuantityRequested;
     handle.detail.replaceChildren();
     const label = document.createElement('label'); label.textContent = `${node.label || message(options, 'standing')} - ${message(options, 'availableCount', {count: state.available ?? state.capacity ?? 0})}`;
-    const quantity = document.createElement('input'); quantity.type = 'number'; quantity.min = '0'; quantity.max = String(state.available ?? state.capacity ?? 0); quantity.value = String(handle.quantities.get(id) ?? 0);
+    const quantity = document.createElement('input'); quantity.type = 'number'; quantity.min = '0'; quantity.max = String(state.available ?? state.capacity ?? 0); quantity.value = String(Math.min(maximum, handle.quantities.get(id) ?? 1));
+    const stepper = document.createElement('span');
+    Object.assign(stepper.style, {display:'inline-flex', alignItems:'center', gap:'8px'});
+    const minus = document.createElement('button'), plus = document.createElement('button');
+    minus.type = plus.type = 'button';
+    minus.textContent = '−'; plus.textContent = '+';
+    minus.setAttribute('aria-label', message(options, 'removeOne'));
+    plus.setAttribute('aria-label', message(options, 'addOne'));
+    for (const button of [minus, plus]) Object.assign(button.style, {minWidth:'48px', minHeight:'48px'});
+    const updateSteps = () => {minus.disabled = Number(quantity.value) <= 0; plus.disabled = Number(quantity.value) >= maximum || unavailable;};
+    minus.onclick = () => {quantity.stepDown(); updateSteps();};
+    plus.onclick = () => {quantity.stepUp(); updateSteps();};
+    quantity.oninput = updateSteps; updateSteps();
     const confirm = document.createElement('button'); confirm.textContent = message(options, 'confirmQuantity');
     confirm.onclick = async () => {
       if(handle.disposed||generation!==handle.generation||handle.pending.has(id))return;
@@ -150,7 +170,7 @@ async function requestSelection(handle, id) {
       } catch (error) {if (!handle.disposed&&generation===handle.generation) handle.live.textContent = String(error.message || error);}
       finally {if(!handle.disposed&&generation===handle.generation){handle.pending.delete(id);confirm.disabled=false;render(handle,[id]);}}
     };
-    label.append(quantity); handle.detail.append(label, confirm); quantity.focus(); return;
+    stepper.append(minus, quantity, plus); label.append(stepper); handle.detail.append(label, confirm); quantity.focus(); return;
   }
   if (node.kind !== 'seat' || !options.onSelectionRequested) return;
   const unavailable = new Set(['occupied','unavailable','disabled','blocked','sold','reserved']);
@@ -185,7 +205,7 @@ export function update(handle, options = {}) {
     if (!handle.pending.has(id) && typeof state.selected==='boolean') state.selected ? handle.selected.add(id) : handle.selected.delete(id);
   }
   if(options.capacityPresentation)for(const [id,state] of Object.entries(options.capacityPresentation)) {
-    if(!handle.pending.has(id)&&Number.isInteger(state.quantity)&&state.quantity>=0)handle.quantities.set(id,state.quantity);
+    if(!handle.pending.has(id)&&Number.isInteger(state.quantity)&&state.quantity>=0&&(state.quantity>0||handle.quantities.has(id)))handle.quantities.set(id,state.quantity);
   }
   if (replacingDocument || !handle.json) handle.json = JSON.stringify(handle.options.document);
   if (resourcesChanged || !handle.resourcesJson) {handle.resourcesJson = JSON.stringify(handle.options.resources || {}); handle.sceneItems = null; handle.elements = null;}
@@ -270,7 +290,7 @@ function render(handle, dirtyIds) {
       if(item.localClip){const id=`venue-${handle.serial}-${item.id.replace(/[^a-zA-Z0-9_-]/g,'-')}-text-clip`,defs=element('defs'),clip=element('clipPath',{id,clipPathUnits:'userSpaceOnUse'});clip.append(element('rect',item.localClip));defs.append(clip);group.append(defs);group.setAttribute('clip-path',`url(#${id})`);}
       group.append(element('path', {d: pathData(item.path || []), fill: paint('fill'), stroke: paint('stroke'), 'fill-rule':item.fillRule||'nonzero', 'stroke-miterlimit':item.miterLimit||4, 'fill-opacity': item.opacity ?? 1, 'stroke-opacity': item.opacity ?? 1, 'stroke-width': item.strokeWidth || 0, 'vector-effect': item.kind === 'floor' ? 'non-scaling-stroke' : null, 'stroke-dasharray': item.dash?.join?.(' '), 'stroke-linecap': item.kind==='state'?'round':item.strokeCap||'butt', 'stroke-linejoin': item.kind==='state'?'round':item.strokeJoin||'miter'}));
     }
-    const tooltip = options.seatPresentation?.[item.nodeId || item.id]?.tooltip ?? item.label;
+    const tooltip = options.seatPresentation?.[item.nodeId || item.id]?.tooltip ?? options.capacityPresentation?.[item.nodeId || item.id]?.tooltip ?? item.label;
     if (tooltip) {const title = element('title'); title.textContent = tooltip; group.append(title);}
     if (old) old.node.replaceWith(group);
     placeNode(group);
@@ -306,7 +326,7 @@ function installTooltip(handle, options) {
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
     const id = globalThis.VenueLayoutKernel.hitTest(handle.json, point.x, point.y);
     const node = handle.options.document.nodes.find(node => node.id === id);
-    const content = handle.options.seatPresentation?.[id]?.tooltip ?? node?.label;
+    const content = handle.options.seatPresentation?.[id]?.tooltip ?? handle.options.capacityPresentation?.[id]?.tooltip ?? node?.label;
     if (!content) {handle.hideTooltip(); return;}
     tooltip.textContent = String(content);
     tooltip.hidden = false;
@@ -409,6 +429,11 @@ function renderList(handle) {
     button.textContent = `${state.accessibilityLabel || state.label || node.label || message(handle.options, 'place')}${unit ? ` - ${message(handle.options, 'placesTogether', {count: unit.nodeIds.length})}` : ''} - ${message(handle.options, handle.pending.has(node.id) ? 'pending' : state.status || 'available')}`;
     button.tabIndex = node.id === focused ? 0 : -1;
     button.setAttribute('aria-pressed', String(handle.selected.has(node.id)));
+    if (node.kind === 'capacityArea') {
+      const unavailable = Number(state.available ?? state.capacity ?? 0) <= 0 || state.selectable === false || ['occupied','unavailable','disabled','blocked','sold','reserved'].includes(state.status);
+      button.setAttribute('aria-disabled', String(unavailable));
+      if (state.tooltip) button.title = state.tooltip;
+    }
     button.onclick = () => requestSelection(handle, node.id);
     button.onfocus = () => {handle.focused = node.id;};
     button.onkeydown = event => {
