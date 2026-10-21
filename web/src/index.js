@@ -360,8 +360,8 @@ function boundCamera(handle, camera) {
   const viewportWidth = width / scale, viewportHeight = height / scale;
   const shiftX = (viewportWidth - camera.width) / 2, shiftY = (viewportHeight - camera.height) / 2;
   const clampAxis = (position, start, extent, viewport) => {
-    // Match the Flutter camera: half of the smaller plan/viewport stays visible.
-    const visible = Math.min(extent, viewport) / 2;
+    // Match Flutter: empty space cannot extend beyond the viewport midpoint.
+    const visible = viewport / 2;
     return Math.min(start + extent - visible, Math.max(start + visible - viewport, position));
   };
   return {...camera, x: clampAxis(camera.x - shiftX, canvas.x || 0, canvas.width, viewportWidth) + shiftX,

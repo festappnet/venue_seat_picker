@@ -120,13 +120,13 @@ test('real pointer hover shows supplied tooltip on an unavailable seat and clean
 });
 
 
-test('portrait can pan on spare axes while retaining half-visible bounds',async()=>{
+test('portrait can pan until its edges reach the viewport midpoint',async()=>{
  const p=await browser.newPage({viewport:{width:2100,height:1000}});
  try{
   await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
   await p.evaluate(async()=>{const {mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:2000px;height:900px';document.body.append(host);window.viewer=mount(host,{minZoom:1,maxZoom:8,canvasCornerRadius:12,document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:1920,height:3456,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:2000px;height:900px;display:block';viewer.update({});});
   const bounds=()=>p.evaluate(()=>{const s=viewer.svg,m=s.getScreenCTM(),r=s.getBoundingClientRect(),a=new DOMPoint(0,0).matrixTransform(m),b=new DOMPoint(1920,3456).matrixTransform(m);return {left:a.x,right:b.x,top:a.y,bottom:b.y,viewport:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},clip:s.style.clipPath};});
-  const visible=(b)=>{for(const axis of ['x','y']){const [start,end,extent]=axis==='x'?['left','right','width']:['top','bottom','height'];const overlap=Math.min(b[end],b.viewport[end])-Math.max(b[start],b.viewport[start]);const minimum=Math.min(b[end]-b[start],(b.viewport[end]-b.viewport[start]))/2;assert.ok(overlap>=minimum-.1,`Half visible ${axis}: ${JSON.stringify(b)}`);}};
+  const visible=(b)=>{for(const axis of ['x','y']){const [start,end,extent]=axis==='x'?['left','right','width']:['top','bottom','height'];const overlap=Math.min(b[end],b.viewport[end])-Math.max(b[start],b.viewport[start]);const minimum=Math.min(b[end]-b[start],(b.viewport[end]-b.viewport[start]))/2;assert.ok(overlap>=minimum-.1,`Half visible ${axis}: ${JSON.stringify(b)}`);const middle=(b.viewport[start]+b.viewport[end])/2;assert.ok(b[start]<=middle+.1&&b[end]>=middle-.1,`Plan must still reach viewport center on ${axis}: ${JSON.stringify(b)}`);}};
 
   for(const x of [1900,100]){const before=await bounds();const sx=(Math.max(before.left,before.viewport.left)+Math.min(before.right,before.viewport.right))/2,sy=(Math.max(before.top,before.viewport.top)+Math.min(before.bottom,before.viewport.bottom))/2;await p.mouse.move(sx,sy);await p.mouse.down();await p.mouse.move(x,850,{steps:3});await p.mouse.up();const b=await bounds();visible(b);assert.ok(Math.abs(b.left-before.left)>1,'Fitted plan can pan instead of snapping to center');assert.match(b.clip,/round 12px/);}
   await p.evaluate(()=>viewer.zoomBy(2));
