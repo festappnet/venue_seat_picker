@@ -23,3 +23,8 @@ build-demo-*.log
 
 # JS ships as its own npm artifact, never inside the Flutter wrapper.
 /web/
+
+# Keep showcase videos in the repository; README images use public GitHub URLs.
+doc/demo.mp4
+doc/media/
+doc/showcase.html

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "table-basics",
+    "title": "Place a table. Make it yours.",
+    "caption": "Drag a table onto the plan, animate its chairs and try a round shape.",
+    "start": 0,
+    "duration": 9.766667
+  },
+  {
+    "id": "copy-style",
+    "title": "Copy the table. Style the whole row.",
+    "caption": "Hold Ctrl to drag out copies, then select the row and apply one appearance.",
+    "start": 9.767,
+    "duration": 12.533333
+  },
+  {
+    "id": "custom-table",
+    "title": "Draw the table. Add chairs one by one.",
+    "caption": "Paint a custom outline, then click to add each chair around its perimeter.",
+    "start": 22.3,
+    "duration": 10.533333
+  },
+  {
+    "id": "arc",
+    "title": "Drag in an arc. Shape the audience.",
+    "caption": "Drop curved seating in the center, adjust rows and columns, then try the viewer.",
+    "start": 32.833,
+    "duration": 13.933333
+  },
+  {
+    "id": "mobile-pick",
+    "title": "Simple seats. Clear selection.",
+    "caption": "Explore the same plan with a minimal appearance, then choose your places.",
+    "start": 46.767,
+    "duration": 5.4
+  },
+  {
+    "id": "mobile-review",
+    "title": "Review your selected tickets",
+    "caption": "Your places and their total, in a clean mobile summary.",
+    "start": 52.167,
+    "duration": 2.766667
+  }
+]
