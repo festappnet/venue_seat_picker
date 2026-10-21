@@ -1,4 +1,4 @@
-## 0.2.0 (unreleased)
+## 0.2.0
 
 - Add a backend-independent object layout document, controller and shared Dart/JS scene runtime alongside the existing grid API.
 - Add an editor, viewer, async picker, public nine-template library and licensed local resource fixtures.

@@ -23,5 +23,6 @@ Stage A does not migrate Festapp or its pins/fonts/assets/SQL/setup/orders. The
 local demo's success/conflict/timeout/resource and storage responses are synthetic.
 No database atomicity, authorization, real inventory, payments, ticket issuance,
 cancellation or customer relocation is proved by these mock callbacks. Stage B
-requires a new task; publication, activation and registry uploads require their
-own explicit scope. These artifacts have not been published or deployed.
+requires a new task. Registry distribution of `venue_seat_picker` 0.2.0 and
+`venue_layout_core` 0.1.0 is separate from activating this API in a host app;
+publishing the packages does not migrate any host data or deploy a host app.

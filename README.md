@@ -77,6 +77,13 @@ count and price, then review the selected places in one clean summary.
 
 ## Start building
 
+Add the package to your Flutter application's `pubspec.yaml`:
+
+```yaml
+dependencies:
+  venue_seat_picker: ^0.2.0
+```
+
 The object API uses `VenueLayoutController`, `VenueLayoutEditor`,
 `VenueLayoutViewer` and `VenueLayoutPicker`. Flutter and the JavaScript SVG
 consumer share the Dart layout core for geometry, scene rendering and hit tests.
