@@ -16,7 +16,6 @@ test('pan keeps chairs visible in the actual SVG viewport outside the nominal vi
  assert.equal(await p.locator(`svg [data-node-id="${left}"]`).count(),1);
  await p.mouse.move(800,500);await p.mouse.down();await p.mouse.move(600,500,{steps:3});await p.mouse.up();
  const visibility=await p.evaluate(left=>{const svg=viewer.svg,point=new DOMPoint(300,300).matrixTransform(svg.getScreenCTM()),box=svg.getBoundingClientRect();return{camera:viewer.camera,centerInsideActualViewport:point.x>box.left&&point.x<box.right&&point.y>box.top&&point.y<box.bottom,painted:!!svg.querySelector(`[data-node-id="${left}"]`)};},left);
- const matchedAspect=await p.evaluate(()=>{viewer.svg.style.width='800px';const q=new DOMPoint(300,300).matrixTransform(viewer.svg.getScreenCTM()),b=viewer.svg.getBoundingClientRect();viewer.svg.style.width='1200px';return q.x>b.left&&q.x<b.right;});assert.equal(matchedAspect,false,'Control: matching4:3viewport clips the chair as nominalcamera expects');
  assert.equal(await p.locator(`svg [data-node-id="${right}"]`).count(),1,'Right chair stays visible while left one disappears');
  assert.equal(visibility.centerInsideActualViewport,true,'Left chair is physically inside the visible SVG, not beyond the browser clip');assert.equal(visibility.painted,true,`Visible left chair was culled: ${JSON.stringify(visibility)}`);
  }finally{await p.close();}
@@ -60,7 +59,7 @@ test('wheel pinch and pan stay near whole-canvas fit across resize',async()=>{
  const cdp=await p.context().newCDPSession(p);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:300,y:300,id:1},{x:900,y:300,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:599,y:300,id:1},{x:601,y:300,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  assert.ok(await p.evaluate(()=>viewer.camera.width>800&&viewer.camera.width<=800/.9+1e-6),'Native pinch really zooms out and stops at canvas fit');
  await p.mouse.move(600,300);await p.mouse.down();await p.mouse.move(-3000,300,{steps:3});await p.mouse.up();
- const contained=()=>p.evaluate(()=>{const m=viewer.svg.getScreenCTM(),a=new DOMPoint(0,0).matrixTransform(m),b=new DOMPoint(800,600).matrixTransform(m),r=viewer.svg.getBoundingClientRect();return a.x>=r.left-1&&a.y>=r.top-1&&b.x<=r.right+1&&b.y<=r.bottom+1;});assert.equal(await contained(),true,'At minimum zoom even huge pan retains the whole canvas');
+ const contained=()=>p.evaluate(()=>{const m=viewer.svg.getScreenCTM(),a=new DOMPoint(0,0).matrixTransform(m),b=new DOMPoint(800,600).matrixTransform(m),r=viewer.svg.getBoundingClientRect();return Math.min(b.x,r.right)-Math.max(a.x,r.left)>=Math.min(b.x-a.x,r.width)/2-.1&&Math.min(b.y,r.bottom)-Math.max(a.y,r.top)>=Math.min(b.y-a.y,r.height)/2-.1;});assert.equal(await contained(),true,'Huge pan retains half of the smaller canvas/viewport on each axis');
  await p.evaluate(()=>{viewer.svg.style.cssText='width:360px;height:700px;display:block';});await p.waitForTimeout(50);assert.equal(await contained(),true,'Resize retains a useful fitted canvas');
  }finally{await p.close();}
 });
@@ -121,18 +120,19 @@ test('real pointer hover shows supplied tooltip on an unavailable seat and clean
 });
 
 
-test('fitted portrait stays centered on spare axes; zoomed content pans within useful edges',async()=>{
+test('portrait can pan on spare axes while retaining half-visible bounds',async()=>{
  const p=await browser.newPage({viewport:{width:2100,height:1000}});
  try{
   await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
   await p.evaluate(async()=>{const {mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:2000px;height:900px';document.body.append(host);window.viewer=mount(host,{minZoom:1,maxZoom:8,canvasCornerRadius:12,document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:1920,height:3456,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:2000px;height:900px;display:block';viewer.update({});});
   const bounds=()=>p.evaluate(()=>{const s=viewer.svg,m=s.getScreenCTM(),r=s.getBoundingClientRect(),a=new DOMPoint(0,0).matrixTransform(m),b=new DOMPoint(1920,3456).matrixTransform(m);return {left:a.x,right:b.x,top:a.y,bottom:b.y,viewport:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},clip:s.style.clipPath};});
-  const centered=(b,axis)=>{const [start,end]=axis==='x'?['left','right']:['top','bottom'];assert.ok(Math.abs((b[start]+b[end])-(b.viewport[start]+b.viewport[end]))<.01,`${axis} spare space must stay centered: ${JSON.stringify(b)}`);};
-  for(const x of [1900,100]){await p.mouse.move(1000,450);await p.mouse.down();await p.mouse.move(x,850,{steps:3});await p.mouse.up();const b=await bounds();centered(b,'x');centered(b,'y');assert.match(b.clip,/round 12px/);}
+  const visible=(b)=>{for(const axis of ['x','y']){const [start,end,extent]=axis==='x'?['left','right','width']:['top','bottom','height'];const overlap=Math.min(b[end],b.viewport[end])-Math.max(b[start],b.viewport[start]);const minimum=Math.min(b[end]-b[start],(b.viewport[end]-b.viewport[start]))/2;assert.ok(overlap>=minimum-.1,`Half visible ${axis}: ${JSON.stringify(b)}`);}};
+
+  for(const x of [1900,100]){const before=await bounds();const sx=(Math.max(before.left,before.viewport.left)+Math.min(before.right,before.viewport.right))/2,sy=(Math.max(before.top,before.viewport.top)+Math.min(before.bottom,before.viewport.bottom))/2;await p.mouse.move(sx,sy);await p.mouse.down();await p.mouse.move(x,850,{steps:3});await p.mouse.up();const b=await bounds();visible(b);assert.ok(Math.abs(b.left-before.left)>1,'Fitted plan can pan instead of snapping to center');assert.match(b.clip,/round 12px/);}
   await p.evaluate(()=>viewer.zoomBy(2));
   await p.mouse.move(1000,450);await p.mouse.down();await p.mouse.move(1900,850,{steps:3});await p.mouse.up();
-  let b=await bounds();centered(b,'x');assert.ok(b.top<=b.viewport.top+16.01&&b.bottom>=b.viewport.bottom-16.01,'zoomed vertical pan keeps useful content');
+  let b=await bounds();visible(b);
   await p.setViewportSize({width:420,height:1000});await p.evaluate(()=>{viewer.svg.style.width='360px';viewer.fitToScreen();});
-  await p.mouse.move(180,450);await p.mouse.down();await p.mouse.move(400,850,{steps:3});await p.mouse.up();b=await bounds();centered(b,'x');centered(b,'y');
+  await p.mouse.move(180,450);await p.mouse.down();await p.mouse.move(400,850,{steps:3});await p.mouse.up();b=await bounds();visible(b);
  }finally{await p.close();}
 });

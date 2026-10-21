@@ -356,14 +356,13 @@ function boundCamera(handle, camera) {
   camera = {...camera, x: camera.x + camera.width * (1 - factor) / 2,
     y: camera.y + camera.height * (1 - factor) / 2, width: camera.width * factor, height: camera.height * factor};
   const {canvas, width, height} = cameraMetrics(handle, camera);
-  const scale = Math.min(width / camera.width, height / camera.height), margin = 16 / scale;
+  const scale = Math.min(width / camera.width, height / camera.height);
   const viewportWidth = width / scale, viewportHeight = height / scale;
   const shiftX = (viewportWidth - camera.width) / 2, shiftY = (viewportHeight - camera.height) / 2;
   const clampAxis = (position, start, extent, viewport) => {
-    // Spare space belongs on both sides, never in an off-center pan range.
-    if (extent <= viewport + 1e-6) return start + (extent - viewport) / 2;
-    const a = start - margin, b = start + extent + margin - viewport;
-    return Math.min(Math.max(a, b), Math.max(Math.min(a, b), position));
+    // Match the Flutter camera: half of the smaller plan/viewport stays visible.
+    const visible = Math.min(extent, viewport) / 2;
+    return Math.min(start + extent - visible, Math.max(start + visible - viewport, position));
   };
   return {...camera, x: clampAxis(camera.x - shiftX, canvas.x || 0, canvas.width, viewportWidth) + shiftX,
     y: clampAxis(camera.y - shiftY, canvas.y || 0, canvas.height, viewportHeight) + shiftY};
