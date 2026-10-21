@@ -5,6 +5,15 @@ from the preserved VenueSeatDocument grid schema 1. It never reinterprets a grid
 as free coordinates, nor silently upgrades stored documents. Existing grid
 controllers/widgets remain public for existing consumers.
 
+## Breaking changes when adopting object layouts
+
+`VenueLayout*` is not a drop-in replacement for `VenueSeat*`. Keep an existing
+grid integration on `VenueSeatDocument`, its controller and widgets, or explicitly
+update all three to the object API. Keep object-layout JSON separate from stored
+grid JSON. Applications that need to convert existing plans must implement and
+validate that conversion themselves; changing `schemaVersion` is insufficient.
+Upgrading the package alone does not require converting existing grid plans.
+
 New hosts use VenueLayoutDocument + VenueLayoutController and the object widgets.
 The pure `venue_layout_core` package and JS runtime share the same schema, source
 manifest and exact scene protocol. IDs are UUIDs independent of array order.
