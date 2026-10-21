@@ -23,10 +23,17 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: '3.47.2'
           cache: true
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+      - name: Resolve local layout core
+        run: python3 tool/configure_workspace.py
+      - name: Install package dependencies
+        run: flutter pub get
+      - name: Install core dependencies
+        run: dart pub get
+        working-directory: packages/venue_layout_core
       - name: Install example dependencies
         run: flutter pub get
         working-directory: example

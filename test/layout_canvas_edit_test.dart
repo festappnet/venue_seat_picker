@@ -146,7 +146,11 @@ void main() {
     tester,
   ) async {
     await open(tester, readOnly: true);
-    surface(tester).onDoubleTapAt!(const Offset(80, 80));
+    expect(surface(tester).onDoubleTapAt, isNull);
+    final point = tester.getTopLeft(canvasSurface()) + const Offset(80, 80);
+    await tester.tapAt(point);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(point);
     await tester.pumpAndSettle();
     expect(surface(tester).canvasSelected, false);
     final c = await open(tester);

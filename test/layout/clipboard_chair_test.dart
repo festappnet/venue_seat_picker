@@ -78,13 +78,24 @@ void main() {
               'fill': '#FFFFFFFF',
             },
           );
-      final c = VenueLayoutController(original);
+      final source = VenueLayoutController(original);
+      addTearDown(source.dispose);
+      source.select({original.nodes.firstWhere((n) => n.kind == 'table').id});
+      await source.copySelectionToClipboard();
+      // A nearby copy would overlap the source. Reject it atomically rather
+      // than accepting an out-of-bounds or colliding assembly.
+      await source.pasteFromClipboard();
+      expect(source.error, isNotNull);
+      expect(source.document.toJson(), original.toJson());
+      expect(source.canUndo, false);
+
+      final c = VenueLayoutController(
+        original.copyWith(nodes: [], attachments: []),
+      );
       addTearDown(c.dispose);
-      c.select({original.nodes.firstWhere((n) => n.kind == 'table').id});
-      await c.copySelectionToClipboard();
       await c.pasteFromClipboard();
       expect(c.error, isNull);
-      expect(c.document.nodes, hasLength(14));
+      expect(c.document.nodes, hasLength(7));
       expect(
         c.placementIssues.where((i) => i.code == 'outside_canvas'),
         isEmpty,

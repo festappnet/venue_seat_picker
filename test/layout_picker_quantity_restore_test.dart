@@ -30,7 +30,7 @@ void main() {
               capacityPresentation: {
                 id: {'available': 5, 'quantity': 3},
               },
-              onSelectionRequested: (_, __) async =>
+              onSelectionRequested: (_, _) async =>
                   throw StateError('Standing is not a seat hold'),
               onQuantityRequested: (_, count) {
                 counts.add(count);

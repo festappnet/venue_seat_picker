@@ -20,6 +20,13 @@ with your own backend, branding and booking flow.
 - **Make it yours:** light/dark themes, English/Czech localization, host-supplied
   availability and prices, and portable JSON with local font/image resources.
 
+## Start with a ready-made plan
+
+From halls and theatres to buses and train carriages, choose an editable starting
+plan and adapt it to your event. Here is the development template catalog:
+
+![Ready-to-edit venue templates for halls, cinemas, conferences and transport](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/template-library.png)
+
 ## See it in action
 
 Six focused workflows, recorded from the **0.3 development build** in light mode
@@ -54,19 +61,19 @@ adjust the curvature, then try selecting a place in the Flutter viewer.
 
 ![Drag an arc into the center, reshape the rows and try seat selection](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/arc.gif)
 
-### Let guests choose on their phone
+### Give transport its own style
 
-The same exported plan runs in the web picker with a clear, minimal appearance.
-Zoom in, choose places, and keep the ticket count and total in view.
+Drag in a complete bus layout and switch to coordinated transport seating with
+a different palette. Ready-made components can match your application.
 
-<img src="https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/mobile-pick.gif" width="390" alt="Select two seats in the mobile web picker">
+![Style a ready-made bus with coordinated transport seats](https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/bus.gif)
 
-### Keep the review simple
+### Choose places. Review tickets.
 
-Show selected places and their total in a clean mobile summary. Your application
-connects this selection to reservations, checkout and payment.
+Follow the complete mobile flow: zoom into the plan, choose seats, check the
+count and price, then review the selected places in one clean summary.
 
-<img src="https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/mobile-review.gif" width="390" alt="Review the selected places and their total on mobile">
+<img src="https://raw.githubusercontent.com/festappnet/venue_seat_picker/main/doc/media/mobile-order.gif" width="390" alt="Choose seats and review the selected places and total on a phone">
 
 ## Start building
 

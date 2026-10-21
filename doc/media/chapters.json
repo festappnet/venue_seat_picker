@@ -28,17 +28,17 @@
     "duration": 13.933333
   },
   {
-    "id": "mobile-pick",
-    "title": "Simple seats. Clear selection.",
-    "caption": "Explore the same plan with a minimal appearance, then choose your places.",
+    "id": "bus",
+    "title": "A bus layout. Your own style.",
+    "caption": "Drag in a ready-made bus and give its seats a coordinated transport appearance.",
     "start": 46.767,
-    "duration": 5.4
+    "duration": 9.233008
   },
   {
-    "id": "mobile-review",
-    "title": "Review your selected tickets",
-    "caption": "Your places and their total, in a clean mobile summary.",
-    "start": 52.167,
-    "duration": 2.766667
+    "id": "mobile-order",
+    "title": "Choose your seats. Review your tickets.",
+    "caption": "Explore the plan, choose your places and review the total on your phone.",
+    "start": 56.0,
+    "duration": 7.4
   }
 ]
