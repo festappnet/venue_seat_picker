@@ -77,6 +77,7 @@ export function mount(container, options = {}) {
   const root = document.createElement('div');
   root.className = 'venue-layout-viewer';
   root.style.position = 'relative';
+  root.style.touchAction = 'none';
   const svg = element('svg', {role: 'img', 'aria-label': options.accessibilityLabel || message(options, 'viewerLabel'), width: '100%', height: '100%'});
   svg.style.touchAction = 'none';
   svg.style.display = 'block';
@@ -106,6 +107,10 @@ export function mount(container, options = {}) {
     handle.hideTooltip?.(); handle.camera = null; render(handle, []);
   }};
   handle.click = async event => {
+    if (!svg.contains(event.target)) {
+      if (event.target === root) handle.suppressClick = false;
+      return;
+    }
     const inverse = svg.getScreenCTM()?.inverse();
     if (!inverse) return;
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
@@ -113,7 +118,7 @@ export function mount(container, options = {}) {
     if (handle.suppressClick) {handle.suppressClick = false; return;}
     if (id) await requestSelection(handle, id);
   };
-  svg.addEventListener('click', handle.click);
+  root.addEventListener('click', handle.click);
   installCamera(handle);
   installTooltip(handle, options);
   try {update(handle, options);} catch(error) {dispose(handle);throw error;}
@@ -388,9 +393,13 @@ function boundCamera(handle, camera) {
     y: clampAxis(camera.y - shiftY, canvas.y || 0, canvas.height, viewportHeight) + shiftY};
 }
 function installCamera(handle) {
-  const svg = handle.svg;
+  const svg = handle.svg, surface = handle.root;
+  // Canvas framing clips SVG hit testing as well as paint. The surrounding
+  // surface remains the gesture plane, while HTML controls keep their own UI.
+  const onSurface = event => event.target === surface || svg.contains(event.target);
   handle.wheel = event => {
-    if (!handle.camera) return;
+    if (!handle.camera || !onSurface(event)) return;
+    handle.hideTooltip?.();
     event.preventDefault();
     const matrix = svg.getScreenCTM(), p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()), c = handle.camera;
     if (event.shiftKey) {
@@ -405,10 +414,10 @@ function installCamera(handle) {
     render(handle, []);
   };
   let start, pinch; const pointers = new Map();
-  handle.pointerdown = event => {if (event.button !== 0 && event.button !== 1) return; pointers.set(event.pointerId, {x:event.clientX,y:event.clientY}); if (pointers.size === 2) {const [a,b] = [...pointers.values()]; pinch = {distance:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),center:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},camera:{...handle.camera},inverse:svg.getScreenCTM()?.inverse()};} start = {x: event.clientX, y: event.clientY, camera: {...handle.camera}, inverse: svg.getScreenCTM()?.inverse()}; svg.setPointerCapture(event.pointerId);};
+  handle.pointerdown = event => {if (!onSurface(event) || (event.button !== 0 && event.button !== 1)) return; handle.hideTooltip?.(); pointers.set(event.pointerId, {x:event.clientX,y:event.clientY}); if (pointers.size === 2) {const [a,b] = [...pointers.values()]; pinch = {distance:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),center:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},camera:{...handle.camera},inverse:svg.getScreenCTM()?.inverse()};} start = {x: event.clientX, y: event.clientY, camera: {...handle.camera}, inverse: svg.getScreenCTM()?.inverse()}; svg.setPointerCapture(event.pointerId);};
   handle.pointermove = event => {if (pointers.has(event.pointerId)) pointers.set(event.pointerId,{x:event.clientX,y:event.clientY}); if (pointers.size === 2 && pinch?.inverse) {const [a,b] = [...pointers.values()], factor=zoomFactor(handle,pinch.camera,pinch.distance/Math.max(1,Math.hypot(a.x-b.x,a.y-b.y))), origin=new DOMPoint(pinch.center.x,pinch.center.y).matrixTransform(pinch.inverse), current=new DOMPoint((a.x+b.x)/2,(a.y+b.y)/2).matrixTransform(pinch.inverse), c=pinch.camera;  handle.camera={x:origin.x+(c.x-origin.x)*factor+(origin.x-current.x),y:origin.y+(c.y-origin.y)*factor+(origin.y-current.y),width:c.width*factor,height:c.height*factor};handle.suppressClick=true;render(handle,[]);return;} if (!start?.inverse) return; const dx = event.clientX - start.x, dy = event.clientY - start.y; if (Math.hypot(dx, dy) < 4) return; const a = new DOMPoint(start.x, start.y).matrixTransform(start.inverse), b = new DOMPoint(event.clientX, event.clientY).matrixTransform(start.inverse); handle.camera = {...start.camera, x: start.camera.x + a.x - b.x, y: start.camera.y + a.y - b.y}; handle.suppressClick = true; render(handle, []);};
   handle.pointerup = event => {pointers.delete(event.pointerId);start = null;pinch = null;};
-  svg.addEventListener('wheel', handle.wheel, {passive: false}); svg.addEventListener('pointerdown', handle.pointerdown); svg.addEventListener('pointermove', handle.pointermove); svg.addEventListener('pointerup', handle.pointerup); svg.addEventListener('pointercancel', handle.pointerup);
+  surface.addEventListener('wheel', handle.wheel, {passive: false}); surface.addEventListener('pointerdown', handle.pointerdown); surface.addEventListener('pointermove', handle.pointermove); surface.addEventListener('pointerup', handle.pointerup); surface.addEventListener('pointercancel', handle.pointerup);
 }
 function renderList(handle) {
   const allNodes = handle.listDocument === handle.options.document ? handle.listNodes : handle.options.document.nodes.filter(n => n.kind === 'seat' || n.kind === 'capacityArea');
@@ -449,14 +458,14 @@ function renderList(handle) {
 export function dispose(handle) {
   if (handle.disposed) return;
   handle.disposed = true; handle.generation++;
-  handle.svg.removeEventListener('click', handle.click);
+  handle.root.removeEventListener('click', handle.click);
   handle.svg.removeEventListener('pointermove', handle.hover);
   for (const name of ['pointerleave', 'pointerdown', 'pointercancel', 'wheel']) handle.svg.removeEventListener(name, handle.hideTooltip);
   handle.tooltipWindow?.removeEventListener?.('keydown', handle.tooltipKey);
   handle.tooltipWindow?.removeEventListener?.('scroll', handle.hideTooltip, true);
   handle.tooltipWindow?.removeEventListener?.('resize', handle.hideTooltip);
   handle.hideTooltip?.();
-  for (const name of ['wheel','pointerdown','pointermove','pointerup','pointercancel']) handle.svg.removeEventListener(name, handle[name === 'pointercancel' ? 'pointerup' : name]);
+  for (const name of ['wheel','pointerdown','pointermove','pointerup','pointercancel']) handle.root.removeEventListener(name, handle[name === 'pointercancel' ? 'pointerup' : name]);
   handle.resizeObserver?.disconnect();
   handle.root.remove(); handle.pending.clear();
 }

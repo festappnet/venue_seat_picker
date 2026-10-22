@@ -9,6 +9,42 @@ const root=resolve(new URL('..',import.meta.url).pathname);
 before(async()=>{server=createServer(async(req,res)=>{if(req.url==='/fixture'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><style>body{margin:0}</style><script src="/dist/venue_layout_kernel.js"></script>');return;}try{const p=join(root,new URL(req.url,'http://localhost').pathname);res.setHeader('Content-Type',({'.js':'text/javascript','.json':'application/json'}[extname(p)]||'application/octet-stream'));res.end(await readFile(p));}catch{res.statusCode=404;res.end();}});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch({headless:true});});
 after(async()=>{await browser?.close();await new Promise(r=>server.close(r));});
 const left='00000000-0000-4000-8000-000000000001',right='00000000-0000-4000-8000-000000000002';
+test('blank space outside a rounded portrait canvas accepts the same bounded pan gestures',async()=>{
+ const p=await browser.newPage({viewport:{width:1300,height:800},hasTouch:true});
+ try{
+  await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
+  await p.evaluate(async left=>{const{mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:1200px;height:600px';document.body.append(host);window.selectionRequests=0;window.viewer=mount(host,{minZoom:1,maxZoom:8,canvasCornerRadius:12,onSelectionRequested:async()=>{window.selectionRequests++;return{accepted:true};},document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:800,height:1600,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[{id:left,kind:'seat',label:'',transform:{x:400,y:800,rotation:0},width:80,height:80}],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:1200px;height:600px;display:block';viewer.update({});},left);
+  const before=await p.evaluate(()=>({camera:{...viewer.camera},blank:!viewer.svg.contains(document.elementFromPoint(100,300))}));
+  assert.equal(before.blank,true,'gesture starts in the actual clipped-out margin');
+  await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(200,300,{steps:3});await p.mouse.up();
+  const after=await p.evaluate(()=>({...viewer.camera}));
+  assert.ok(Math.abs(after.x-before.camera.x)>1,'dragging blank margin must move the plan');
+  assert.equal(after.width,before.camera.width,'pan must not change zoom');
+  const seat=await p.evaluate(()=>{const point=new DOMPoint(400,800).matrixTransform(viewer.svg.getScreenCTM());return{x:point.x,y:point.y};});
+  await p.mouse.click(seat.x,seat.y);
+  assert.equal(await p.evaluate(()=>window.selectionRequests),1,'a margin drag must not swallow the next seat click');
+  await p.mouse.click(100,300);
+  assert.equal(await p.evaluate(()=>window.selectionRequests),1,'blank margin clicks never select a seat');
+  await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(1250,300,{steps:3});await p.mouse.up();
+  const bounded=await p.evaluate(()=>{const m=viewer.svg.getScreenCTM(),r=viewer.svg.getBoundingClientRect(),a=new DOMPoint(0,0).matrixTransform(m),b=new DOMPoint(800,1600).matrixTransform(m);return{left:a.x,right:b.x,center:(r.left+r.right)/2,clip:viewer.svg.style.clipPath};});
+  assert.ok(bounded.left<=bounded.center+.1&&bounded.right>=bounded.center-.1,'existing midpoint pan limit stays enforced');
+  assert.match(bounded.clip,/round 12px/);
+  await p.evaluate(()=>viewer.fitToScreen());
+  await p.mouse.move(100,300);await p.mouse.wheel(0,-100);
+  await p.waitForFunction(width=>viewer.camera.width<width,before.camera.width);
+  await p.evaluate(()=>viewer.fitToScreen());
+  const client=await p.context().newCDPSession(p);
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:100,y:300,id:1}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:160,y:300,id:1}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  assert.ok(Math.abs((await p.evaluate(()=>viewer.camera.x))-before.camera.x)>1,'touch drag starts in the blank margin too');
+  const controlCamera=await p.evaluate(()=>{const button=document.createElement('button');button.textContent='Quantity';button.style.cssText='position:absolute;left:10px;top:10px;width:80px;height:40px';viewer.detail.append(button);return{...viewer.camera};});
+  await p.mouse.move(40,30);await p.mouse.down();await p.mouse.move(200,30,{steps:3});await p.mouse.up();
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),controlCamera,'HTML controls must not become camera drag targets');
+  assert.equal(await p.evaluate(()=>viewer.detail.querySelector('button').dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}))),true,'HTML controls retain their default wheel behavior');
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),controlCamera);
+ }finally{await p.close();}
+});
 test('pan keeps chairs visible in the actual SVG viewport outside the nominal viewBox',async()=>{
  const p=await browser.newPage({viewport:{width:1300,height:800}});await p.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());try{
  await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
