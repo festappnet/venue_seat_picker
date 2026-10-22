@@ -84,9 +84,9 @@ def contents(path):
 for name in ['venue_layout_core.tar.gz','venue_seat_picker.tar.gz']:
  currentFiles,previousFiles=contents(current/name),contents(previous/name)
  changed={f for f in currentFiles.keys()|previousFiles.keys() if currentFiles.get(f)!=previousFiles.get(f)}
- # The archive verification scripts are distributed tooling, not a Dart
+ # The archive verification shell script is distributed tooling, not a Dart
  # import, Flutter asset or dependency. Every compiled input must be identical.
- assert changed <= {'tool/archive_check.sh','tool/qa_archive_browser.mjs'},f'Changed Flutter build input: {name}: {changed}'
+ assert changed <= {'tool/archive_check.sh'},f'Changed Flutter build input: {name}: {changed}'
 assert (previous/'flutter/main.dart.js').is_file()
 (current/'example-build-reuse.json').write_text(json.dumps({'from':str(previous),'identicalFlutterBuildInputs':True,'distributionOnlyException':'tool/archive_check.sh','mainDartJsSha256':hashlib.sha256((previous/'flutter/main.dart.js').read_bytes()).hexdigest()},indent=2)+'\n')
 PYREUSE
