@@ -12,3 +12,7 @@ Public references:
 - [Lucerna organizer plans](https://lucpra.com/pro-poradatele/planky)
 
 `reference_geometry.dart` stores traced coordinates; `reference_templates.dart` constructs canonical schema-2 documents. Rectangular tables expose four optional `seating.edgeCounts` preferences (top, right, bottom, left). Color palettes are selectable independently of furniture materials and geometry.
+
+## Table label defaults
+
+Template creation promotes the strict-majority resolved table typography to the table-kind defaults. Other tables retain only the differing label leaves as explicit custom styles. With no strict majority, only universally shared leaves become defaults. Existing label rendering, geometry, seat identities and unrelated text stay unchanged.

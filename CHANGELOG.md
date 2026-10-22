@@ -1,3 +1,7 @@
+## Unreleased
+
+- Let new tables inherit template typography while retaining custom label exceptions.
+
 ## 0.3.1
 
 - Restore the exact SDK fixes shipped in Festapp 35e421e27 to canonical source.

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:convert';
 import 'package:venue_layout_core/venue_layout_core.dart';
 import 'scout_hall.dart';
 import 'cinema_hall.dart';
@@ -20,9 +21,67 @@ class LayoutTemplate {
   final int seatCount, standingCapacity;
   final VenueLayoutDocument Function() _build;
   VenueLayoutDocument create({String Function(String)? localize}) {
-    final document = _build();
+    final document = _inheritTableTypography(_build());
     return localizeLayoutDefaultLabels(document, localize ?? (text) => text);
   }
+}
+
+/// Stock plans often materialize caption styles on every table. Make the
+/// strict majority their kind default while keeping minority values explicit.
+/// With no majority, promote only leaves shared by every table.
+VenueLayoutDocument _inheritTableTypography(VenueLayoutDocument document) {
+  final tables = document.nodes.where((node) => node.kind == 'table').toList();
+  if (tables.isEmpty) return document;
+  final labels = {
+    for (final node in tables)
+      node.id: resolveNodeAppearance(document, node).label,
+  };
+  String signature(Map<String, dynamic> label) => jsonEncode({
+    for (final key in label.keys.toList()..sort()) key: label[key],
+  });
+  final counts = <String, int>{};
+  for (final label in labels.values) {
+    final key = signature(label);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  final majority = labels.values
+      .where((label) => counts[signature(label)]! > tables.length / 2)
+      .firstOrNull;
+  final defaults =
+      majority ??
+      {
+        for (final entry in labels.values.first.entries)
+          if (labels.values.every((label) => label[entry.key] == entry.value))
+            entry.key: entry.value,
+      };
+  for (final entry in defaults.entries) {
+    document = setKindStyleLeaf(document, 'table', [
+      'label',
+      entry.key,
+    ], value: entry.value);
+  }
+  return document.copyWith(
+    nodes: [
+      for (final node in document.nodes)
+        if (node.kind == 'table')
+          (() {
+            final style = {...node.style}..remove('label');
+            final inherited = resolveNodeAppearance(
+              document,
+              node.copyWith(style: style),
+            ).label;
+            final custom = {
+              for (final entry in labels[node.id]!.entries)
+                if (inherited[entry.key] != entry.value) entry.key: entry.value,
+            };
+            return node.copyWith(
+              style: {...style, if (custom.isNotEmpty) 'label': custom},
+            );
+          })()
+        else
+          node,
+    ],
+  );
 }
 
 /// Translates stock labels while preserving arbitrary user-authored text.
