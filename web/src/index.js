@@ -77,7 +77,8 @@ export function mount(container, options = {}) {
   const root = document.createElement('div');
   root.className = 'venue-layout-viewer';
   root.style.position = 'relative';
-  root.style.touchAction = 'none';
+  const previousTouchAction = container.style.touchAction;
+  container.style.touchAction = 'none';
   const svg = element('svg', {role: 'img', 'aria-label': options.accessibilityLabel || message(options, 'viewerLabel'), width: '100%', height: '100%'});
   svg.style.touchAction = 'none';
   svg.style.display = 'block';
@@ -95,7 +96,7 @@ export function mount(container, options = {}) {
   });
   const detail = document.createElement('div');
   root.append(svg, list, detail, live); container.append(root);
-  const handle = {serial: ++viewerSerial, container, root, svg, list, detail, live, options: {}, pending: new Set(), selected: new Set(), quantities: new Map(), disposed: false, generation: 0, update(next) {return update(handle, next);}, dispose() {dispose(handle);}, zoomBy(factor) {
+  const handle = {serial: ++viewerSerial, container, root, svg, list, detail, live, previousTouchAction, options: {}, pending: new Set(), selected: new Set(), quantities: new Map(), disposed: false, generation: 0, update(next) {return update(handle, next);}, dispose() {dispose(handle);}, zoomBy(factor) {
     if (handle.disposed) throw new Error('Viewer is disposed');
     if (!Number.isFinite(factor) || factor <= 0) throw new Error('Zoom factor must be positive');
     handle.hideTooltip?.();
@@ -108,7 +109,7 @@ export function mount(container, options = {}) {
   }};
   handle.click = async event => {
     if (!svg.contains(event.target)) {
-      if (event.target === root) handle.suppressClick = false;
+      if (event.target === root || event.target === container) handle.suppressClick = false;
       return;
     }
     const inverse = svg.getScreenCTM()?.inverse();
@@ -118,7 +119,7 @@ export function mount(container, options = {}) {
     if (handle.suppressClick) {handle.suppressClick = false; return;}
     if (id) await requestSelection(handle, id);
   };
-  root.addEventListener('click', handle.click);
+  container.addEventListener('click', handle.click);
   installCamera(handle);
   installTooltip(handle, options);
   try {update(handle, options);} catch(error) {dispose(handle);throw error;}
@@ -393,10 +394,10 @@ function boundCamera(handle, camera) {
     y: clampAxis(camera.y - shiftY, canvas.y || 0, canvas.height, viewportHeight) + shiftY};
 }
 function installCamera(handle) {
-  const svg = handle.svg, surface = handle.root;
+  const svg = handle.svg, surface = handle.container;
   // Canvas framing clips SVG hit testing as well as paint. The surrounding
   // surface remains the gesture plane, while HTML controls keep their own UI.
-  const onSurface = event => event.target === surface || svg.contains(event.target);
+  const onSurface = event => event.target === surface || event.target === handle.root || svg.contains(event.target);
   handle.wheel = event => {
     if (!handle.camera || !onSurface(event)) return;
     handle.hideTooltip?.();
@@ -458,14 +459,15 @@ function renderList(handle) {
 export function dispose(handle) {
   if (handle.disposed) return;
   handle.disposed = true; handle.generation++;
-  handle.root.removeEventListener('click', handle.click);
+  handle.container.removeEventListener('click', handle.click);
+  if (handle.container.style.touchAction === 'none') handle.container.style.touchAction = handle.previousTouchAction;
   handle.svg.removeEventListener('pointermove', handle.hover);
   for (const name of ['pointerleave', 'pointerdown', 'pointercancel', 'wheel']) handle.svg.removeEventListener(name, handle.hideTooltip);
   handle.tooltipWindow?.removeEventListener?.('keydown', handle.tooltipKey);
   handle.tooltipWindow?.removeEventListener?.('scroll', handle.hideTooltip, true);
   handle.tooltipWindow?.removeEventListener?.('resize', handle.hideTooltip);
   handle.hideTooltip?.();
-  for (const name of ['wheel','pointerdown','pointermove','pointerup','pointercancel']) handle.root.removeEventListener(name, handle[name === 'pointercancel' ? 'pointerup' : name]);
+  for (const name of ['wheel','pointerdown','pointermove','pointerup','pointercancel']) handle.container.removeEventListener(name, handle[name === 'pointercancel' ? 'pointerup' : name]);
   handle.resizeObserver?.disconnect();
   handle.root.remove(); handle.pending.clear();
 }

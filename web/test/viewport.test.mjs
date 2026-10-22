@@ -13,7 +13,7 @@ test('blank space outside a rounded portrait canvas accepts the same bounded pan
  const p=await browser.newPage({viewport:{width:1300,height:800},hasTouch:true});
  try{
   await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
-  await p.evaluate(async left=>{const{mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:1200px;height:600px';document.body.append(host);window.selectionRequests=0;window.viewer=mount(host,{minZoom:1,maxZoom:8,canvasCornerRadius:12,onSelectionRequested:async()=>{window.selectionRequests++;return{accepted:true};},document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:800,height:1600,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[{id:left,kind:'seat',label:'',transform:{x:400,y:800,rotation:0},width:80,height:80}],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:1200px;height:600px;display:block';viewer.update({});},left);
+  await p.evaluate(async left=>{const{mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:1240px;height:640px;padding:20px;box-sizing:border-box;touch-action:pan-y';document.body.append(host);window.selectionRequests=0;window.viewer=mount(host,{minZoom:1,maxZoom:8,canvasCornerRadius:12,onSelectionRequested:async()=>{window.selectionRequests++;return{accepted:true};},document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:0,y:0,width:800,height:1600,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[{id:left,kind:'seat',label:'',transform:{x:400,y:800,rotation:0},width:80,height:80}],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:1200px;height:600px;display:block';viewer.update({});},left);
   const before=await p.evaluate(()=>({camera:{...viewer.camera},blank:!viewer.svg.contains(document.elementFromPoint(100,300))}));
   assert.equal(before.blank,true,'gesture starts in the actual clipped-out margin');
   await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(200,300,{steps:3});await p.mouse.up();
@@ -39,10 +39,16 @@ test('blank space outside a rounded portrait canvas accepts the same bounded pan
   await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   assert.ok(Math.abs((await p.evaluate(()=>viewer.camera.x))-before.camera.x)>1,'touch drag starts in the blank margin too');
   const controlCamera=await p.evaluate(()=>{const button=document.createElement('button');button.textContent='Quantity';button.style.cssText='position:absolute;left:10px;top:10px;width:80px;height:40px';viewer.detail.append(button);return{...viewer.camera};});
-  await p.mouse.move(40,30);await p.mouse.down();await p.mouse.move(200,30,{steps:3});await p.mouse.up();
+  await p.mouse.move(50,50);await p.mouse.down();await p.mouse.move(200,50,{steps:3});await p.mouse.up();
   assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),controlCamera,'HTML controls must not become camera drag targets');
   assert.equal(await p.evaluate(()=>viewer.detail.querySelector('button').dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}))),true,'HTML controls retain their default wheel behavior');
   assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),controlCamera);
+  await p.evaluate(()=>viewer.fitToScreen());
+  const paddingStart=await p.evaluate(()=>({x:viewer.camera.x,inside:document.elementFromPoint(10,320)===viewer.container}));
+  assert.equal(paddingStart.inside,true);
+  await p.mouse.move(10,320);await p.mouse.down();await p.mouse.move(110,320,{steps:3});await p.mouse.up();
+  assert.ok(Math.abs((await p.evaluate(()=>viewer.camera.x))-paddingStart.x)>1,'the host viewport padding is part of the same gesture surface');
+  assert.equal(await p.evaluate(()=>{viewer.dispose();return viewer.container.style.touchAction;}),'pan-y','disposing restores the host touch policy');
  }finally{await p.close();}
 });
 test('pan keeps chairs visible in the actual SVG viewport outside the nominal viewBox',async()=>{
