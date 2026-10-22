@@ -44,6 +44,17 @@ test('blank space outside a rounded portrait canvas accepts the same bounded pan
   assert.equal(await p.evaluate(()=>viewer.detail.querySelector('button').dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}))),true,'HTML controls retain their default wheel behavior');
   assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),controlCamera);
   await p.evaluate(()=>viewer.fitToScreen());
+  const multiCamera=await p.evaluate(()=>({...viewer.camera}));
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:100,y:300,id:11}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:100,y:300,id:11},{x:50,y:50,id:12}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:100,y:300,id:11},{x:60,y:50,id:12}]});
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),multiCamera,'a second touch on an HTML control must not move the camera');
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[{x:60,y:50,id:12}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:160,y:300,id:11}]});
+  await p.waitForFunction(x=>Math.abs(viewer.camera.x-x)>1,multiCamera.x);
+  assert.ok(Math.abs((await p.evaluate(()=>viewer.camera.x))-multiCamera.x)>1,'releasing an ignored control touch must preserve the original pan');
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await p.evaluate(()=>viewer.fitToScreen());
   const paddingStart=await p.evaluate(()=>({x:viewer.camera.x,inside:document.elementFromPoint(10,320)===viewer.container}));
   assert.equal(paddingStart.inside,true);
   await p.mouse.move(10,320);await p.mouse.down();await p.mouse.move(110,320,{steps:3});await p.mouse.up();
