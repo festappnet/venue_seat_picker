@@ -42,3 +42,10 @@ final restored = VenueSeatDocument.fromJson(
 `schemaVersion` protects the portable format against incompatible changes. For
 a custom model, persist your own domain objects and load them through their
 `SeatAdapter`.
+
+## Object table surface edits
+
+Changing an object table surface outline returns its unlocked chairs to automatic
+position and rotation. Seat identities and reservation protection remain intact;
+locked chairs retain their world positions and may prevent a conflicting edit.
+Ordinary seat-count changes keep manually positioned chairs in place.

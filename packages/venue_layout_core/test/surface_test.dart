@@ -2,6 +2,83 @@ import 'package:test/test.dart';
 import 'package:venue_layout_core/venue_layout_core.dart';
 
 void main() {
+  for (final manualOnNode in [false, true]) {
+    test(
+      'reshape resets manual chair poses (node flag: $manualOnNode) and preserves reservations',
+      () {
+        final original = tableLayout(
+          shape: 'ellipse',
+          count: 6,
+          width: 500,
+          height: 360,
+        );
+        final table = original.nodes.firstWhere((n) => n.kind == 'table');
+        final chair = original.nodes.firstWhere((n) => n.kind == 'seat');
+        final before = original.copyWith(
+          nodes: [
+            for (final n in original.nodes)
+              n.id == chair.id
+                  ? n.copyWith(
+                      x: 250,
+                      y: 180,
+                      rotation: 37,
+                      properties: {
+                        ...n.properties,
+                        if (manualOnNode) 'manual': true,
+                        'manualRotation': true,
+                        'fill': '#123456FF',
+                      },
+                    )
+                  : n,
+          ],
+          attachments: [
+            for (final a in original.attachments)
+              a['seatId'] == chair.id ? {...a, 'manual': true} : a,
+          ],
+        );
+        final snapshot = before.toJson();
+        expect(layoutCollisions(before), isEmpty);
+        final reserved = before.nodes
+            .where((n) => n.kind == 'seat')
+            .map((n) => n.id)
+            .toSet();
+        final after = reshapeTableSurface(
+          before,
+          table.id,
+          'rectangle',
+          protectedSeatIds: reserved,
+        );
+        final moved = after.nodes.firstWhere((n) => n.id == chair.id);
+        expect(
+          after.nodes.map((n) => n.id).toSet(),
+          before.nodes.map((n) => n.id).toSet(),
+        );
+        expect(moved.properties['manual'], isNot(true));
+        expect(moved.properties['manualRotation'], isNot(true));
+        expect(moved.properties['fill'], '#123456FF');
+        expect(moved.label, chair.label);
+        expect([moved.x, moved.y, moved.rotation], isNot([250, 180, 37]));
+        expect(after.attachments.every((a) => a['manual'] != true), isTrue);
+        expect(validateDocument(after), isEmpty);
+        expect(layoutCollisions(after), isEmpty);
+        expect(before.toJson(), snapshot);
+        expect(layoutCollisions(reflowTable(after, table.id, 6)), isEmpty);
+
+        final locked = before.copyWith(
+          nodes: [
+            for (final n in before.nodes)
+              n.id == chair.id ? n.copyWith(locked: true) : n,
+          ],
+        );
+        final lockedSnapshot = locked.toJson();
+        expect(
+          () => reshapeTableSurface(locked, table.id, 'rectangle'),
+          throwsStateError,
+        );
+        expect(locked.toJson(), lockedSnapshot);
+      },
+    );
+  }
   test(
     'new bars are editable seatless surfaces; legacy explicit stools remain readable',
     () {

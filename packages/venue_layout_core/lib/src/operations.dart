@@ -3109,7 +3109,8 @@ VenueLayoutDocument setBarGuestSide(
 }
 
 /// Reconciles edited table footprints through the existing protected-seat rules.
-/// Recentring a path must not move an attached manual/locked seat in world space.
+/// Manual chair poses return to automatic seating when the surface changes.
+/// Recentring a path must not move an attached locked seat in world space.
 VenueLayoutDocument reconcileSurfaceEdit(
   VenueLayoutDocument before,
   VenueLayoutDocument after,
@@ -3124,12 +3125,30 @@ VenueLayoutDocument reconcileSurfaceEdit(
     next.x,
     next.y,
   );
+  final automaticIds = {
+    for (final n in after.nodes)
+      if (n.parentId == id && n.kind == 'seat' && !n.locked) n.id,
+  };
   final adjusted = after.copyWith(
     nodes: [
       for (final n in after.nodes)
         n.parentId == id
-            ? n.copyWith(x: n.x - localDelta[0], y: n.y - localDelta[1])
+            ? n.copyWith(
+                x: n.x - localDelta[0],
+                y: n.y - localDelta[1],
+                properties: automaticIds.contains(n.id)
+                    ? (Map<String, dynamic>.from(n.properties)
+                        ..remove('manual')
+                        ..remove('manualRotation'))
+                    : n.properties,
+              )
             : n,
+    ],
+    attachments: [
+      for (final a in after.attachments)
+        automaticIds.contains(a['seatId'])
+            ? (Map<String, dynamic>.from(a)..remove('manual'))
+            : a,
     ],
   );
   final count = before.nodes

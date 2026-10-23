@@ -1,3 +1,8 @@
+## Unreleased
+
+- Return manually positioned chairs to automatic seating when reshaping a table,
+  preserving seat identities, reservation protection and locked chairs.
+
 ## 0.2.0
 
 ### Breaking changes and migration
