@@ -16,11 +16,14 @@ jobs:
           cache: true
       - run: dart pub global activate fvm
       - run: fvm install 3.47.2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - run: python3 tool/configure_workspace.py
       - run: fvm flutter pub get
       - run: fvm dart pub get
@@ -29,7 +32,7 @@ jobs:
       - run: fvm flutter test --concurrency=1
       - run: fvm dart pub get && fvm dart test
         working-directory: packages/venue_layout_core
-      - run: npm ci && npx playwright install --with-deps chromium
+      - run: pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium
         working-directory: web
       - run: tool/demo.sh build
       - run: tool/demo.sh check

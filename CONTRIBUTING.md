@@ -28,3 +28,6 @@ command creates public archives without uploading them and tests unpacked
 consumers. A dirty-checkout warning is expected while changes remain uncommitted.
 Font outline regeneration requires Python fonttools 4.67.0; already-built
 fixtures and demo kits have no Python/font parsing runtime dependency.
+
+Use pnpm 11.24.0 for the web package: run `pnpm install --frozen-lockfile`
+in `web/` before the distribution gates.
