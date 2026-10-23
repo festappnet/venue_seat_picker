@@ -1,0 +1,23 @@
+1
+00:00:00,000 --> 00:00:09,767
+Drag a table onto the plan, animate its chairs and try a round shape.
+
+2
+00:00:09,767 --> 00:00:22,300
+Hold Ctrl to drag out copies, then select the row and apply one appearance.
+
+3
+00:00:22,300 --> 00:00:32,833
+Paint a custom outline, then click to add each chair around its perimeter.
+
+4
+00:00:32,833 --> 00:00:46,766
+Drop curved seating in the center, adjust rows and columns, then try the viewer.
+
+5
+00:00:46,767 --> 00:00:56,000
+Drag in a ready-made bus and give its seats a coordinated transport appearance.
+
+6
+00:00:56,000 --> 00:01:03,400
+Explore the plan, choose your places and review the total on your phone.

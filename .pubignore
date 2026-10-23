@@ -23,3 +23,7 @@ build-demo-*.log
 
 # JS ships as its own npm artifact, never inside the Flutter wrapper.
 /web/
+
+# Showcase media is hosted on GitHub for registry README embeds.
+/doc/media/
+/doc/showcase.*
