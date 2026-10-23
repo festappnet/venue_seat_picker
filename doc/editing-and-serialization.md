@@ -49,3 +49,15 @@ Changing an object table surface outline returns its unlocked chairs to automati
 position and rotation. Seat identities and reservation protection remain intact;
 locked chairs retain their world positions and may prevent a conflicting edit.
 Ordinary seat-count changes keep manually positioned chairs in place.
+
+## Anchored table resizing
+
+`resizeNode(document, tableId, width, height, handle: 'w')` keeps the opposite
+edge fixed. The optional compass handle (`n`, `ne`, `e`, `se`, `s`, `sw`, `w`,
+`nw`) clips growth at the canvas rather than moving the table. Rotated and
+nested tables use the same local anchor. Unlocked chairs return to automatic
+positions; protected identities still cannot be removed. An infeasible resize
+is rejected without changing the input. Omitting `handle` keeps centered resizing.
+
+The editor's `previewTableResize` uses that resolved geometry directly, keeping
+one undo step per drag and avoiding another chair reflow during acceptance.

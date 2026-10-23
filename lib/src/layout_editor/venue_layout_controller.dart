@@ -522,6 +522,29 @@ class VenueLayoutController extends ChangeNotifier {
     return _apply(next, reflowTables: false);
   }
 
+  /// Anchored table geometry already includes collision and chair placement.
+  /// Keep the last accepted preview when the requested geometry cannot fit.
+  bool previewTableResize(
+    VenueLayoutDocument baseline,
+    String id,
+    double width,
+    double height, {
+    required String handle,
+  }) {
+    if (_gesture == null) beginGesture();
+    if (_gesture == null) return false;
+    final next = resizeNode(
+      baseline,
+      id,
+      width,
+      height,
+      handle: handle,
+      protectedSeatIds: protectedSeatIds?.call() ?? const {},
+    );
+    if (identical(next, baseline)) return false;
+    return _apply(next, reflowTables: false);
+  }
+
   void commitGesture() {
     final original = _gesture;
     if (original == null) return;

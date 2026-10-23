@@ -896,6 +896,24 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
           width = height * oldWidth / oldHeight;
         }
       }
+      if (n.kind == 'table') {
+        if (c.previewTableResize(
+          start,
+          n.id,
+          width,
+          height,
+          handle: direction,
+        )) {
+          _resizeRemovedSeats =
+              start.nodes
+                  .where((node) => node.kind == 'seat' && node.parentId == n.id)
+                  .length -
+              c.document.nodes
+                  .where((node) => node.kind == 'seat' && node.parentId == n.id)
+                  .length;
+        }
+        return;
+      }
       final resized = isRows
           ? resizeRowAssembly(start, n.id, width, height)
           : n.kind == 'furniture' && n.properties['furniture'] == 'couch'
@@ -907,18 +925,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
               height,
               protectedSeatIds: c.protectedSeatIds?.call() ?? const {},
             );
-      _resizeRemovedSeats = n.kind == 'table'
-          ? start.nodes
-                    .where(
-                      (node) => node.kind == 'seat' && node.parentId == n.id,
-                    )
-                    .length -
-                resized.nodes
-                    .where(
-                      (node) => node.kind == 'seat' && node.parentId == n.id,
-                    )
-                    .length
-          : 0;
+      _resizeRemovedSeats = 0;
       final resizedRoot = resized.nodes.firstWhere((node) => node.id == n.id);
       width = resizedRoot.width;
       height = resizedRoot.height;

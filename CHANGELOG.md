@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Keep the opposite table edge fixed during handle resizing, including at canvas
+  boundaries, and reuse settled chair layouts and spatial indexes during dragging.
+
 - Return manually positioned chairs to automatic seating when reshaping a table,
   preserving seat identities, reservation protection and locked chairs.
 

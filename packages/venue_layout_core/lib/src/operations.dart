@@ -705,8 +705,7 @@ bool _tableBodiesClear(
 
 bool _tableChairsClear(VenueLayoutDocument d, Set<String> tableIds) {
   if (tableIds.isEmpty) return true;
-  final index = LayoutSpatialIndex(d),
-      byId = {for (final n in d.nodes) n.id: n};
+  final index = spatialIndexFor(d), byId = {for (final n in d.nodes) n.id: n};
   if (!_tableBodiesClear(d, tableIds, index, byId)) return false;
   for (final seat in d.nodes.where(
     (n) => n.kind == 'seat' && tableIds.contains(n.parentId),
@@ -732,7 +731,7 @@ VenueLayoutDocument reflowTablesAtCanvasEdges(
   Set<String> tableIds,
 ) {
   if (tableIds.isEmpty) return d;
-  return _reflowTablesAtCanvasEdges(d, tableIds, LayoutSpatialIndex(d));
+  return _reflowTablesAtCanvasEdges(d, tableIds, spatialIndexFor(d));
 }
 
 VenueLayoutDocument _reflowTablesAtCanvasEdges(
@@ -1039,12 +1038,19 @@ VenueLayoutDocument _reflowTablesAtCanvasEdges(
       Map<String, LayoutNode> chosen,
       Map<String, Map<String, dynamic>> assigned,
     ) {
-      replacements.addAll(chosen);
+      for (final entry in chosen.entries) {
+        if (!sameLayoutNode(entry.value, byId[entry.key]!)) {
+          replacements[entry.key] = entry.value;
+        }
+      }
       for (final entry in assigned.entries) {
-        nextAttachments[entry.key] = {
+        final next = <String, dynamic>{
           ...attachments[entry.key]!,
           ...entry.value,
         };
+        if (!sameLayoutValue(next, attachments[entry.key])) {
+          nextAttachments[entry.key] = next;
+        }
       }
     }
 
@@ -1170,7 +1176,7 @@ VenueLayoutDocument _reflowTablesAtCanvasEdges(
       if (!pack(all)) pack(all, compact: true);
     }
   }
-  if (replacements.isEmpty) return d;
+  if (replacements.isEmpty && nextAttachments.isEmpty) return d;
   return d.copyWith(
     nodes: d.nodes.map((n) => replacements[n.id] ?? n).toList(),
     attachments: d.attachments
@@ -1482,7 +1488,7 @@ VenueLayoutDocument moveLayoutWithinCanvas(
   var x = initial[0], y = initial[1];
   for (var attempt = 0; attempt < 8; attempt++) {
     final translated = transformNodes(d, ids, dx: x, dy: y);
-    final spatial = tables.isEmpty ? null : LayoutSpatialIndex(translated);
+    final spatial = tables.isEmpty ? null : spatialIndexFor(translated);
     // A colliding tabletop cannot be repaired by moving its chairs. Reject it
     // before building perimeter candidates or running the seating packer.
     if (spatial != null &&
@@ -1560,17 +1566,81 @@ VenueLayoutDocument resizeNode(
   double width,
   double height, {
   Set<String> protectedSeatIds = const {},
+  String? handle,
 }) {
   _unlocked(d, {id});
   if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0)
     throw ArgumentError('Dimensions must be finite and positive');
   final resizeTarget = d.nodes.firstWhere((n) => n.id == id);
+  if (handle != null &&
+      (resizeTarget.kind != 'table' ||
+          !const [
+            'n',
+            'ne',
+            'e',
+            'se',
+            's',
+            'sw',
+            'w',
+            'nw',
+          ].contains(handle))) {
+    throw ArgumentError('A table resize handle must be a compass direction');
+  }
   if (isZigzagNode(resizeTarget)) {
     return resizeZigzagLine(d, id, width, height);
   }
-  final original = d.nodes.firstWhere((n) => n.id == id),
-      points = original.properties['points'],
+  final original = resizeTarget;
+  final sx = handle == null
+      ? 0
+      : (handle.contains('w') ? -1 : (handle.contains('e') ? 1 : 0));
+  final sy = handle == null
+      ? 0
+      : (handle.contains('n') ? -1 : (handle.contains('s') ? 1 : 0));
+  if (handle != null) {
+    // Clip the requested growth along the pointer's path, never translate the
+    // whole assembly to make it fit: that would move the opposite handle.
+    final matrix = worldMatrices(d)[id]!;
+    final left = (d.canvas['x'] as num).toDouble();
+    final top = (d.canvas['y'] as num).toDouble();
+    final right = left + (d.canvas['width'] as num);
+    final bottom = top + (d.canvas['height'] as num);
+    var fraction = 1.0;
+    final inset = 1 / layoutLimits['coordinateQuantum']!;
+    for (final p in localHull(original)) {
+      final start = transformPoint(matrix, p[0], p[1]);
+      final end = transformPoint(
+        matrix,
+        p[0] * width / original.width + (width - original.width) * sx / 2,
+        p[1] * height / original.height + (height - original.height) * sy / 2,
+      );
+      for (var axis = 0; axis < 2; axis++) {
+        final low = axis == 0 ? left : top;
+        final high = axis == 0 ? right : bottom;
+        final delta = end[axis] - start[axis];
+        if (delta < 0 && end[axis] < low) {
+          fraction = min(
+            fraction,
+            max(0.0, (low + inset - start[axis]) / delta),
+          );
+        } else if (delta > 0 && end[axis] > high) {
+          fraction = min(
+            fraction,
+            max(0.0, (high - inset - start[axis]) / delta),
+          );
+        }
+      }
+    }
+    width = original.width + (width - original.width) * fraction;
+    height = original.height + (height - original.height) * fraction;
+    if (width == original.width && height == original.height) return d;
+  }
+  final shiftX = (width - original.width) * sx / 2;
+  final shiftY = (height - original.height) * sy / 2;
+  final matrix = localMatrix(original);
+  final points = original.properties['points'],
       resized = original.copyWith(
+        x: original.x + matrix[0] * shiftX + matrix[2] * shiftY,
+        y: original.y + matrix[1] * shiftX + matrix[3] * shiftY,
         width: width,
         height: height,
         properties:
@@ -1608,6 +1678,19 @@ VenueLayoutDocument resizeNode(
       result = d.copyWith(
         nodes: d.nodes.map((n) => n.id == id ? resized : n).toList(),
       );
+  if (handle != null) {
+    final reconciled = reconcileSurfaceEdit(
+      d,
+      result,
+      id,
+      protectedSeatIds: protectedSeatIds,
+      constrainToCanvas: true,
+    );
+    if (!_tableChairsClear(reconciled, {id})) {
+      throw StateError('No collision-free table resize is available');
+    }
+    return reconciled;
+  }
   return original.kind == 'table'
       ? reflowTable(
           result,
@@ -3116,6 +3199,7 @@ VenueLayoutDocument reconcileSurfaceEdit(
   VenueLayoutDocument after,
   String id, {
   Set<String> protectedSeatIds = const {},
+  bool constrainToCanvas = false,
 }) {
   final old = before.nodes.firstWhere((n) => n.id == id),
       next = after.nodes.firstWhere((n) => n.id == id);
@@ -3159,6 +3243,7 @@ VenueLayoutDocument reconcileSurfaceEdit(
     id,
     min(count, tableCapacity(next)),
     protectedSeatIds: protectedSeatIds,
+    constrainToCanvas: constrainToCanvas,
   );
 }
 
