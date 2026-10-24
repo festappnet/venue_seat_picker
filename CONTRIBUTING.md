@@ -31,3 +31,6 @@ fixtures and demo kits have no Python/font parsing runtime dependency.
 
 Use pnpm 11.24.0 for the web package: run `pnpm install --frozen-lockfile`
 in `web/` before the distribution gates.
+
+Npm release automation and its one-time account setup are documented in
+[Automatic npm publishing](doc/npm-publishing.md).

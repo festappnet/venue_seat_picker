@@ -1,4 +1,11 @@
-## Unreleased
+## 0.3.6
+
+- Restore the current object-editor showcase README with six workflow GIFs,
+  downloadable videos, the template gallery and current integration examples.
+- Prepare npm trusted publishing from the verified CI archive, without a local
+  login or a stored write token. npm account setup remains a one-time prerequisite.
+
+## 0.3.5
 
 - Add `LayoutSpatialIndex.resolveTap` and `LayoutTapDisposition`: exact targets
   before nearest outlines, an 8 logical pixel tap radius in Flutter consumers,
