@@ -1140,7 +1140,7 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                                           null));
                               final bounds = _cameraCanvas;
                               if (event.kind == PointerDeviceKind.touch &&
-                                  (widget.pan || _touchPanning) &&
+                                  widget.pan &&
                                   bounds != null &&
                                   !bounds.contains(
                                     _camera.toScene(event.localPosition),
@@ -1187,15 +1187,17 @@ class _LayoutSceneSurfaceState extends State<LayoutSceneSurface>
                             }
                           },
                           onPointerCancel: (event) {
-                            if (_marginPanPointer == event.pointer)
+                            if (_marginPanPointer == event.pointer) {
                               _endMarginPan();
+                            }
                             _touchPointers.remove(event.pointer);
                             _pointTapDown = null;
                             _dragPointerDown = null;
                           },
                           onPointerUp: (event) {
-                            if (_marginPanPointer == event.pointer)
+                            if (_marginPanPointer == event.pointer) {
                               _endMarginPan();
+                            }
                             _touchPointers.remove(event.pointer);
                             _dragPointerDown = null;
                             final down = _pointTapDown;
