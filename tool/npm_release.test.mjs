@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +9,7 @@ import { planNpmRelease } from './npm_release.mjs';
 const sourceCommit = 'a'.repeat(40);
 const packageName = '@festapp/venue-layout';
 const version = '0.3.5';
+const archiveBytes = 'archive existence fixture; archive contents are owned by the archive gate';
 async function fixture(t, { commit = sourceCommit, packVersion = version, passed = true } = {}) {
   const folder = await mkdtemp(join(tmpdir(), 'npm-release-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
@@ -19,7 +21,7 @@ async function fixture(t, { commit = sourceCommit, packVersion = version, passed
   await writeFile(join(folder, 'npm-pack.json'), JSON.stringify([
     { name: packageName, version: packVersion, filename: 'verified.tgz' },
   ]));
-  await writeFile(join(folder, 'verified.tgz'), 'archive existence fixture; archive contents are owned by the archive gate');
+  await writeFile(join(folder, 'verified.tgz'), archiveBytes);
   return folder;
 }
 
@@ -30,7 +32,7 @@ test('a missing version publishes the verified archive and an existing version s
       sourceCommit, packageName, version,
       fetchRegistry: async (url) => {
         assert.equal(url, 'https://registry.npmjs.org/%40festapp%2Fvenue-layout/0.3.5');
-        return { status };
+        return { status, json: async () => ({ dist: { integrity: 'sha512-' + createHash('sha512').update(archiveBytes).digest('base64') } }) };
       },
     });
     assert.equal(result.archive, join(folder, 'verified.tgz'));
@@ -56,3 +58,11 @@ for (const status of [401, 500]) {
     }), new RegExp(`HTTP ${status}`));
   });
 }
+
+test('an existing version with different bytes cannot be treated as a successful retry', async (t) => {
+  const folder = await fixture(t);
+  await assert.rejects(planNpmRelease(folder, {
+    sourceCommit, packageName, version,
+    fetchRegistry: async () => ({ status: 200, json: async () => ({ dist: { integrity: 'sha512-other' } }) }),
+  }), /already exists with different archive bytes/);
+});

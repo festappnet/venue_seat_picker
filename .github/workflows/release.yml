@@ -1,0 +1,91 @@
+name: Release npm
+
+on:
+  push:
+    tags: ["npm-v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact JavaScript package version to publish from its protected tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'festappnet/venue_seat_picker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Require the immutable tag to match the JavaScript version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          VERSION=$(node -p "require('./web/package.json').version")
+          test "$GITHUB_REF" = "refs/tags/npm-v$VERSION"
+          test "$GITHUB_REF_PROTECTED" = true
+          if test "$GITHUB_EVENT_NAME" = workflow_dispatch; then
+            test "$REQUESTED_VERSION" = "$VERSION"
+          fi
+
+  qualify:
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: qualify
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use the BankSync trusted-publishing npm CLI
+        run: |
+          pnpm add --global npm@11.17.0
+          test "$(pnpm --dir web exec npm --version)" = 11.17.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-npm-${{ github.sha }}
+          path: release
+      - name: Verify the qualified archive and existing-version integrity
+        id: package
+        run: pnpm --dir web exec node ../tool/npm_release.mjs ../release
+      - name: Record the tested archive digest
+        env:
+          NPM_ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: sha256sum "$NPM_ARCHIVE" > "$NPM_ARCHIVE.sha256"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
+      - name: Publish the tested bytes through npm trusted publishing
+        if: steps.package.outputs.publish == 'true'
+        env:
+          NPM_ARCHIVE: ${{ steps.package.outputs.archive }}
+        working-directory: web
+        run: pnpm exec npm publish "$NPM_ARCHIVE" --access public --provenance --ignore-scripts
+      - name: Attach the same bytes to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release create "$GITHUB_REF_NAME" "$NPM_ARCHIVE" "$NPM_ARCHIVE.sha256" --verify-tag --generate-notes --title "Venue Layout JavaScript $GITHUB_REF_NAME"

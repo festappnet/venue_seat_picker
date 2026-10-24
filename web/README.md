@@ -1,4 +1,16 @@
-# Shared venue layout runtime
+# Venue Layout for JavaScript
+
+Package identifier: `@festapp/venue-layout`.
+
+The JavaScript viewer and customer picker for Venue Layout. Render a portable
+venue plan as SVG, let visitors choose seats or standing quantities, and keep
+pending feedback and rejected selections in the same selection flow. Your
+application supplies prices, availability and the reservation callback.
+
+The compiled package runs without Flutter or a Festapp backend. The object
+editor is provided by the Flutter package, including Flutter web. See the
+[root showcase](../README.md) for the complete product and [npm publication](../doc/npm-publishing.md)
+for the release process.
 
 Build with `../tool/build_web.sh` from a checkout with FVM Flutter 3.47.2.
 Load `dist/venue_layout_kernel.js` as a script, then import `mount` from the
@@ -19,7 +31,7 @@ handle.dispose();
 Resources use local font outlines and image data. The demo is in `demo/`.
 No CDN, Flutter runtime, backend or account is required by the JS consumer.
 A host owns reservations, prices, capacity and authoritative validation.
-`npm pack --dry-run` checks package contents; it does not publish.
+`pnpm pack --dry-run` checks package contents; it does not publish.
 
 Bundler consumers load the shared Dart kernel once before mounting:
 

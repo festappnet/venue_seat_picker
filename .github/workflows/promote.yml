@@ -1,0 +1,51 @@
+name: Promote npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact JavaScript package version to promote from main
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: venue-layout-release-promotion
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.repository == 'festappnet/venue_seat_picker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Require the exact main revision, package version and passing CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          git fetch --no-tags origin main
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+          test "$REQUESTED_VERSION" = "$(node -p "require('./web/package.json').version")"
+          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -z "$(git ls-remote --tags origin "refs/tags/npm-v$REQUESTED_VERSION")"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$GITHUB_SHA&status=completed" --jq '[.workflow_runs[] | select(.conclusion == "success")] | length > 0')" = true
+      - name: Create the immutable npm release tag
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "npm-v$REQUESTED_VERSION" -m "Venue Layout JavaScript $REQUESTED_VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/npm-v$REQUESTED_VERSION"
+      - name: Dispatch trusted publishing from the protected tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: gh workflow run release.yml --ref "npm-v$REQUESTED_VERSION" -f version="$REQUESTED_VERSION"

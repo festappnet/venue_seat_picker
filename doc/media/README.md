@@ -1,4 +1,4 @@
-# Venue layout showcase
+# Venue Layout showcase
 
 Short, real UI recordings in light mode with English captions. Each chapter
 shows a complete workflow and can be embedded independently.

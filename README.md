@@ -1,4 +1,4 @@
-# venue_seat_picker
+# Venue Layout
 
 **Build the room. Pick the seat.**
 
@@ -8,6 +8,12 @@ guests choose their places from the same portable plan.
 
 Built for [Festapp](https://festapp.net). Use it independently in your own app,
 with your own backend, branding and booking flow.
+
+Flutter package: `venue_seat_picker` · JavaScript package: `@festapp/venue-layout`.
+
+[Try the interactive demo](https://festappnet.github.io/venue_seat_picker/) ·
+[Flutter package](https://pub.dev/packages/venue_seat_picker) ·
+[JavaScript integration](web/README.md)
 
 - **Create the whole venue:** tables, chairs, custom outlines, curved rows,
   standing areas, couches, buses and train carriages.
@@ -19,6 +25,20 @@ with your own backend, branding and booking flow.
   pending feedback, rejection rollback and standing quantities.
 - **Make it yours:** light/dark themes, English/Czech localization, host-supplied
   availability and prices, and portable JSON with local font/image resources.
+
+## What this repository provides
+
+- **Flutter editor and picker:** `venue_seat_picker`, including the template
+  gallery, editing controller, customer selection and native/web rendering.
+- **Portable geometry:** `venue_layout_core`, the shared document, geometry,
+  display lists and selection rules used by Flutter and the JavaScript kernel.
+- **JavaScript viewer and picker:** `@festapp/venue-layout`, an SVG consumer for
+  web applications that use their own backend and booking flow.
+- **Runnable examples:** the Flutter studio, standalone JavaScript demo and
+  recorded workflows below.
+
+The package manages plans and selection UI. Your application manages live
+availability, prices, reservation locks, orders and payments.
 
 ## Start with a ready-made plan
 
@@ -82,7 +102,7 @@ Add the package to your Flutter application's `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  venue_seat_picker: ^0.3.6
+  venue_seat_picker: ^0.3.7
 ```
 
 The object API uses `VenueLayoutController`, `VenueLayoutEditor`,

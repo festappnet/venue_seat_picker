@@ -1,4 +1,5 @@
 import { readFile, appendFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -18,10 +19,17 @@ export async function planNpmRelease(folder, { sourceCommit, packageName, versio
     throw new Error('The verified npm archive does not match the selected package version');
   }
   const archive = resolve(folder, packs[0].filename);
-  await readFile(archive);
+  const archiveBytes = await readFile(archive);
   const response = await fetchRegistry(`https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(version)}`);
   if (response.status !== 200 && response.status !== 404) {
     throw new Error(`npm version lookup failed: HTTP ${response.status}`);
+  }
+  if (response.status === 200) {
+    const published = await response.json();
+    const integrity = 'sha512-' + createHash('sha512').update(archiveBytes).digest('base64');
+    if (published.dist?.integrity !== integrity) {
+      throw new Error('This npm version already exists with different archive bytes; select a new version');
+    }
   }
   return { archive, publish: response.status === 404 };
 }

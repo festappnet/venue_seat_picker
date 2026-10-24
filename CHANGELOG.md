@@ -1,3 +1,13 @@
+## 0.3.7
+
+- Present the library as Venue Layout across the README, package descriptions,
+  showcase and demo titles. Preserve the Flutter `venue_seat_picker` and
+  JavaScript `@festapp/venue-layout` package identifiers.
+- Explain the Flutter editor, shared geometry, JavaScript consumer and host-owned
+  booking responsibilities in the public repository entrypoints.
+- Follow BankSync's protected-tag and npm-environment OIDC release flow; remove
+  the earlier inactive CI publishing path and require exact archive integrity on retries.
+
 ## 0.3.6
 
 - Restore the current object-editor showcase README with six workflow GIFs,
