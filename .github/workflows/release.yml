@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: npm-release-${{ github.ref }}
@@ -21,6 +22,9 @@ jobs:
   verify:
     if: github.repository == 'festappnet/venue_seat_picker'
     runs-on: ubuntu-latest
+    outputs:
+      ci_run_id: ${{ steps.ci.outputs.run_id }}
+      artifact_name: ${{ steps.ci.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -38,16 +42,24 @@ jobs:
             test "$REQUESTED_VERSION" = "$VERSION"
           fi
 
-  qualify:
-    needs: verify
-    uses: ./.github/workflows/ci.yml
+      - name: Select the successful main CI archive for this exact source
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CI_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$GITHUB_SHA&status=completed" --jq '[.workflow_runs[] | select(.conclusion == "success" and .head_branch == "main")] | .[0] | "\(.id) \(.run_attempt)"')
+          read -r RUN_ID RUN_ATTEMPT <<< "$CI_RUN"
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=verified-npm-$GITHUB_SHA-$RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   release:
-    needs: qualify
+    needs: verify
     runs-on: ubuntu-latest
     environment: npm
     permissions:
       contents: write
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -60,14 +72,12 @@ jobs:
           node-version: 22.14.0
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Use the BankSync trusted-publishing npm CLI
-        run: |
-          pnpm add --global npm@11.17.0
-          test "$(pnpm --dir web exec npm --version)" = 11.17.0
       - uses: actions/download-artifact@v4
         with:
-          name: verified-npm-${{ github.sha }}
+          name: ${{ needs.verify.outputs.artifact_name }}
           path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.verify.outputs.ci_run_id }}
       - name: Verify the qualified archive and existing-version integrity
         id: package
         run: pnpm --dir web exec node ../tool/npm_release.mjs ../release
@@ -83,7 +93,7 @@ jobs:
         env:
           NPM_ARCHIVE: ${{ steps.package.outputs.archive }}
         working-directory: web
-        run: pnpm exec npm publish "$NPM_ARCHIVE" --access public --provenance --ignore-scripts
+        run: pnpm --package=npm@11.17.0 dlx npm publish "$NPM_ARCHIVE" --access public --provenance --ignore-scripts
       - name: Attach the same bytes to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

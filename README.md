@@ -9,7 +9,7 @@ guests choose their places from the same portable plan.
 Built for [Festapp](https://festapp.net). Use it independently in your own app,
 with your own backend, branding and booking flow.
 
-Flutter package: `venue_seat_picker` · JavaScript package: `@festapp/venue-layout`.
+Flutter package: `venue_seat_picker` · JavaScript package: [`@festapp/venue-layout`](https://www.npmjs.com/package/@festapp/venue-layout).
 
 [Try the interactive demo](https://festappnet.github.io/venue_seat_picker/) ·
 [Flutter package](https://pub.dev/packages/venue_seat_picker) ·

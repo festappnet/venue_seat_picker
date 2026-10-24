@@ -1,6 +1,6 @@
 # Venue Layout for JavaScript
 
-Package identifier: `@festapp/venue-layout`.
+Package: [`@festapp/venue-layout`](https://www.npmjs.com/package/@festapp/venue-layout).
 
 The JavaScript viewer and customer picker for Venue Layout. Render a portable
 venue plan as SVG, let visitors choose seats or standing quantities, and keep
@@ -9,8 +9,18 @@ application supplies prices, availability and the reservation callback.
 
 The compiled package runs without Flutter or a Festapp backend. The object
 editor is provided by the Flutter package, including Flutter web. See the
-[root showcase](../README.md) for the complete product and [npm publication](../doc/npm-publishing.md)
+[root showcase](https://github.com/festappnet/venue_seat_picker#readme) for the complete product and [npm publication](https://github.com/festappnet/venue_seat_picker/blob/main/doc/npm-publishing.md)
 for the release process.
+
+## Install
+
+```sh
+pnpm add @festapp/venue-layout
+```
+
+For bundlers, load the exported kernel URL before calling `mount`, as shown below.
+
+## Build from source
 
 Build with `../tool/build_web.sh` from a checkout with FVM Flutter 3.47.2.
 Load `dist/venue_layout_kernel.js` as a script, then import `mount` from the

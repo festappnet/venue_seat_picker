@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { planNpmRelease } from './npm_release.mjs';
@@ -65,4 +66,41 @@ test('an existing version with different bytes cannot be treated as a successful
     sourceCommit, packageName, version,
     fetchRegistry: async () => ({ status: 200, json: async () => ({ dist: { integrity: 'sha512-other' } }) }),
   }), /already exists with different archive bytes/);
+});
+
+for (const samePayload of [true, false]) {
+  test(`registry gzip recovery keeps exact payload identity: ${samePayload}`, async (t) => {
+    const folder = await fixture(t);
+    const payload = Buffer.from('qualified tar bytes '.repeat(100));
+    const qualified = gzipSync(payload, { level: 1 });
+    const published = gzipSync(samePayload ? payload : Buffer.from('changed tar bytes'), { level: 9 });
+    await writeFile(join(folder, 'verified.tgz'), qualified);
+    const options = { sourceCommit, packageName, version, fetchRegistry: async (url) => {
+      if (url.endsWith('.tgz')) return new Response(published);
+      return new Response(JSON.stringify({ dist: {
+        integrity: 'sha512-' + createHash('sha512').update(published).digest('base64'),
+        tarball: 'https://registry.npmjs.org/@festapp/venue-layout/-/venue-layout-0.3.5.tgz',
+      } }));
+    } };
+    if (!samePayload) {
+      await assert.rejects(planNpmRelease(folder, options), /different archive bytes/);
+      return;
+    }
+    const plan = await planNpmRelease(folder, options);
+    assert.equal(plan.publish, false);
+    assert.notEqual(plan.archive, join(folder, 'verified.tgz'));
+    assert.deepEqual(await readFile(plan.archive), published);
+    assert.deepEqual(await readFile(join(folder, 'verified.tgz')), qualified);
+  });
+}
+
+test('registry recovery cannot fetch an archive from another host', async (t) => {
+  const folder = await fixture(t);
+  await assert.rejects(planNpmRelease(folder, {
+    sourceCommit, packageName, version,
+    fetchRegistry: async (url) => {
+      assert.ok(url.startsWith('https://registry.npmjs.org/'));
+      return new Response(JSON.stringify({ dist: { integrity: 'sha512-other', tarball: 'https://example.test/archive.tgz' } }));
+    },
+  }), /Unexpected npm registry archive location/);
 });

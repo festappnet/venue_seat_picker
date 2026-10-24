@@ -1,3 +1,10 @@
+## JavaScript 0.3.6
+
+- Add registry installation instructions and working public documentation links.
+- Publish the existing successful main CI archive without rebuilding it.
+- Recover an already-published archive with different gzip encoding only when
+  its entire tar payload is identical, preserving the original registry bytes.
+
 ## 0.3.7
 
 - Present the library as Venue Layout across the README, package descriptions,
