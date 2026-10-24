@@ -1,3 +1,9 @@
+## Unreleased
+
+- Keep single-finger panning from the workspace outside the plan responsive
+  independently of ancestor gesture recognition. Transfer two-finger input to
+  the existing pinch navigation without applying camera movement twice.
+
 ## JavaScript 0.3.6
 
 - Add registry installation instructions and working public documentation links.
