@@ -232,6 +232,9 @@ test('seat taps retain the shipped eight CSS pixel hit allowance', async()=>{
   const seat=p.locator(`[data-node-id="${a}"]`).last();
   const box=await seat.boundingBox();
   await p.mouse.click(box.x+box.width+4, box.y+box.height/2);
+  await p.waitForFunction(id=>Boolean(resolveSelection[id]), a);
+  assert.deepEqual(await p.evaluate(()=>calls), [{ids:[a], selecting:true}]);
+  await p.evaluate(id=>resolveSelection[id]({accepted:true}), a);
   await p.waitForFunction(id=>viewer.selected.has(id), a);
   assert.deepEqual(await p.evaluate(()=>[...viewer.selected]), [a]);
  } finally {await p.close();}
