@@ -371,6 +371,8 @@ class _EditorColorDialogState extends State<EditorColorDialog> {
                     ],
                   ),
                 ),
+              // Required until flutter_colorpicker adopts standalone UI types.
+              // ignore: deprecated_member_use
               MaterialUiCompatibilityBridge(
                 child: sdk_material.Material(
                   type: sdk_material.MaterialType.transparency,

@@ -224,3 +224,15 @@ test('standing starts at one, has bounded plus/minus controls and rejects unavai
  assert.equal(await p.locator(`[role=list] [data-node-id="${area}"]`).getAttribute('aria-disabled'),'true');
  }finally{await p.close();}
 });
+
+
+test('seat taps retain the shipped eight CSS pixel hit allowance', async()=>{
+ const p=await setup();
+ try {
+  const seat=p.locator(`[data-node-id="${a}"]`).last();
+  const box=await seat.boundingBox();
+  await p.mouse.click(box.x+box.width+4, box.y+box.height/2);
+  await p.waitForFunction(id=>viewer.selected.has(id), a);
+  assert.deepEqual(await p.evaluate(()=>[...viewer.selected]), [a]);
+ } finally {await p.close();}
+});
