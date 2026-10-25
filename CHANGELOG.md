@@ -1,3 +1,9 @@
+## 0.4.0
+
+- Migrate Flutter UI types together to material_ui/cupertino_ui on stable Flutter 3.47.7.
+- Keep external flutter_colorpicker behind an explicit SDK Material compatibility boundary.
+- Preserve current layout/resource/kernel and reservation contracts.
+
 ## Unreleased
 
 - Keep single-finger panning from the workspace outside the plan responsive

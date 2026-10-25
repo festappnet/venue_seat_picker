@@ -21,7 +21,7 @@ For local work before the core is published, run
 `python3 tool/configure_workspace.py` then `fvm flutter pub get`.
 The generated overrides resolve `venue_layout_core` from `packages/` and are
 excluded from archives. The shipped manifest retains its concrete semver range.
-The tested toolchain is pinned in `.fvmrc` (Flutter 3.47.2 / Dart 3.13.2).
+The tested toolchain is pinned in `.fvmrc` (Flutter 3.47.7 / Dart 3.13.5).
 Use `fvm` for all SDK commands. Run `tool/demo.sh build`, `tool/demo.sh check`
 and `tool/archive_check.sh` for the standalone distribution gates. The last
 command creates public archives without uploading them and tests unpacked
