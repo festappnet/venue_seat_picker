@@ -226,16 +226,23 @@ test('standing starts at one, has bounded plus/minus controls and rejects unavai
 });
 
 
+
+
 test('seat taps retain the shipped eight CSS pixel hit allowance', async()=>{
  const p=await setup();
  try {
-  const seat=p.locator(`[data-node-id="${a}"]`).last();
+  const seat=p.locator(`svg [data-node-id="${a}"]`).last();
   const box=await seat.boundingBox();
-  await p.mouse.click(box.x+box.width+4, box.y+box.height/2);
-  await p.waitForFunction(id=>Boolean(resolveSelection[id]), a);
-  assert.deepEqual(await p.evaluate(()=>calls), [{ids:[a], selecting:true}]);
-  await p.evaluate(id=>resolveSelection[id]({accepted:true}), a);
-  await p.waitForFunction(id=>viewer.selected.has(id), a);
-  assert.deepEqual(await p.evaluate(()=>[...viewer.selected]), [a]);
+  const x=box.x+box.width+4,y=box.y+box.height/2;
+  const direct=await p.evaluate(({x,y})=>{
+   const point=new DOMPoint(x,y).matrixTransform(viewer.svg.getScreenCTM().inverse());
+   return VenueLayoutKernel.hitTest(viewer.json,point.x,point.y);
+  },{x,y});
+  assert.equal(direct,null,'fixture tap must be outside the exact kernel hit region');
+  await p.mouse.click(x,y);
+  assert.deepEqual(await p.evaluate(()=>calls),[{ids:[a],selecting:true}]);
+  await p.evaluate(id=>resolveSelection[id]({accepted:true}),a);
+  await p.waitForFunction(id=>viewer.selected.has(id),a);
+  assert.deepEqual(await p.evaluate(()=>[...viewer.selected]),[a]);
  } finally {await p.close();}
 });
