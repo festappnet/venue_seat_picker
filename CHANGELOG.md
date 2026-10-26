@@ -9,7 +9,7 @@
 ## JavaScript 0.3.7
 
 - Apply the shared CSS-pixel seat tap allowance without changing pointer-down or drag ownership.
-- Preserve host-owned template gallery integration and the existing public layout, availability and reservation contracts.
+- Keep unavailable seats in hit testing so nearby taps cannot jump across them.
 
 ## 0.4.2
 
