@@ -22,7 +22,7 @@ For bundlers, load the exported kernel URL before calling `mount`, as shown belo
 
 ## Build from source
 
-Build with `../tool/build_web.sh` from a checkout with FVM Flutter 3.47.2.
+Build with `../tool/build_web.sh` from a checkout with FVM Flutter 3.47.7.
 Load `dist/venue_layout_kernel.js` as a script, then import `mount` from the
 public `src/index.js` entry. The Dart-compiled kernel owns all geometry,
 text paths and hit tests; this adapter only draws its display list as SVG.
