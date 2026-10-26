@@ -212,3 +212,14 @@ that fixed core, and npm 0.3.8. Final exact-source CI revalidates the combined
 source; prior matrix receipts remain evidence for the compatibility design.
 Keep qualified dependency graphs inside the archive artifact directory so the
 release downloader retains its existing flat artifact layout.
+
+### Fresh-CI release corrections
+
+The first final-source CI exposed two local-environment assumptions. Minimum
+wrapper jobs must resolve the core development package context before analyzing
+the entire checkout; otherwise package:test imports fall back to the wrapper
+graph. XML 7 deprecates XmlName's original constructor, while XML 6 does not have
+XmlName.parts. Preserve the common constructor with exactly three documented
+local diagnostic suppressions. Do not raise the XML floor or globally disable
+fatal analyzer diagnostics. Old release archives are invalidated; qualify the
+corrected committed source through a fresh full CI run and new archive receipts.

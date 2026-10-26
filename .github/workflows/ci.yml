@@ -74,6 +74,9 @@ jobs:
       - run: fvm use 3.44.0 --force --skip-pub-get
       - run: python3 tool/configure_workspace.py
       - run: fvm flutter pub ${{ matrix.resolution }}
+      # Whole-tree analysis needs the core's own development package context.
+      - run: fvm dart pub get
+        working-directory: packages/venue_layout_core
       - run: fvm flutter pub deps --json > '${{ runner.temp }}/minimum-flutter-${{ matrix.resolution }}.json'
       - run: fvm flutter analyze --no-pub
       - run: fvm flutter test --no-pub --concurrency=1
