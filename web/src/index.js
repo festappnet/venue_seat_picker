@@ -100,7 +100,9 @@ export function mount(container, options = {}) {
     if (handle.disposed) throw new Error('Viewer is disposed');
     if (!Number.isFinite(factor) || factor <= 0) throw new Error('Zoom factor must be positive');
     handle.hideTooltip?.();
-    const c = handle.camera, ratio = zoomFactor(handle, c, 1 / factor);
+    const c = handle.camera;
+    if (recenterAtZoomOutLimit(handle, c, c.width / factor)) return;
+    const ratio = zoomFactor(handle, c, 1 / factor);
     handle.camera = {...c, x: c.x + c.width * (1 - ratio) / 2, y: c.y + c.height * (1 - ratio) / 2, width: c.width * ratio, height: c.height * ratio};
     render(handle, []);
   }, fitToScreen() {
@@ -273,7 +275,7 @@ function render(handle, dirtyIds) {
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   updateCanvasFrame(handle, c);
   const limits = cameraMetrics(handle, handle.camera);
-  options.onCameraChanged?.({canZoomIn: handle.camera.width > limits.minWidth + .001, canZoomOut: handle.camera.width < limits.maxWidth - .001});
+  options.onCameraChanged?.({canZoomIn: handle.camera.width > limits.minWidth + .001, canZoomOut: handle.camera.width < limits.maxWidth - .001 || !cameraCentered(handle, handle.camera)});
   if (!handle.elements) {svg.replaceChildren(element('rect', {x: c.x || 0, y: c.y || 0, width: c.width, height: c.height, fill: color(c.fill)})); handle.elements = new Map();}
   const containers=[svg],previous=new Map([[svg,svg.firstElementChild]]);
   const placeNode = node => {const parent=containers.at(-1),before=previous.get(parent)||null;if(node.parentNode!==parent||node.previousSibling!==before)parent.insertBefore(node,before?before.nextSibling:parent.firstChild);previous.set(parent,node);};
@@ -398,6 +400,21 @@ function cameraMetrics(handle, camera) {
   const aspect = camera.width / camera.height, fitWidth = Math.min(width, height * aspect) / fit;
   return {canvas, width, height, minWidth: fitWidth / (handle.options.maxZoom || 20), maxWidth: fitWidth / (handle.options.minZoom || .9)};
 }
+function centeredCamera(handle, camera) {
+  const canvas = handle.options.document.canvas;
+  return {...camera, x: (canvas.x || 0) + (canvas.width - camera.width) / 2,
+    y: (canvas.y || 0) + (canvas.height - camera.height) / 2};
+}
+function cameraCentered(handle, camera) {
+  const centered = centeredCamera(handle, camera);
+  return Math.abs(camera.x - centered.x) < .001 && Math.abs(camera.y - centered.y) < .001;
+}
+function recenterAtZoomOutLimit(handle, camera, requestedWidth) {
+  if (requestedWidth <= camera.width || camera.width < cameraMetrics(handle, camera).maxWidth - .001) return false;
+  handle.camera = centeredCamera(handle, camera);
+  render(handle, []);
+  return true;
+}
 function zoomFactor(handle, camera, factor) {
   const limits = cameraMetrics(handle, camera);
   return Math.min(limits.maxWidth, Math.max(limits.minWidth, camera.width * factor)) / camera.width;
@@ -435,13 +452,15 @@ function installCamera(handle) {
       render(handle, []); return;
     }
     // Flutter uses exp(-deltaY / 200); SVG viewBox dimensions scale inversely.
-    const factor = zoomFactor(handle, c, Math.exp(event.deltaY / 200));
+    const requestedFactor = Math.exp(event.deltaY / 200);
+    if (recenterAtZoomOutLimit(handle, c, c.width * requestedFactor)) return;
+    const factor = zoomFactor(handle, c, requestedFactor);
     handle.camera = {x: p.x + (c.x - p.x) * factor, y: p.y + (c.y - p.y) * factor, width: c.width * factor, height: c.height * factor};
     render(handle, []);
   };
   let start, pinch; const pointers = new Map();
   handle.pointerdown = event => {if (!onSurface(event) || (event.button !== 0 && event.button !== 1)) return; handle.hideTooltip?.(); pointers.set(event.pointerId, {x:event.clientX,y:event.clientY}); if (pointers.size === 2) {const [a,b] = [...pointers.values()]; pinch = {distance:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),center:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},camera:{...handle.camera},inverse:svg.getScreenCTM()?.inverse()};} start = {x: event.clientX, y: event.clientY, camera: {...handle.camera}, inverse: svg.getScreenCTM()?.inverse()}; svg.setPointerCapture(event.pointerId);};
-  handle.pointermove = event => {if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId,{x:event.clientX,y:event.clientY}); if (pointers.size === 2 && pinch?.inverse) {const [a,b] = [...pointers.values()], factor=zoomFactor(handle,pinch.camera,pinch.distance/Math.max(1,Math.hypot(a.x-b.x,a.y-b.y))), origin=new DOMPoint(pinch.center.x,pinch.center.y).matrixTransform(pinch.inverse), current=new DOMPoint((a.x+b.x)/2,(a.y+b.y)/2).matrixTransform(pinch.inverse), c=pinch.camera;  handle.camera={x:origin.x+(c.x-origin.x)*factor+(origin.x-current.x),y:origin.y+(c.y-origin.y)*factor+(origin.y-current.y),width:c.width*factor,height:c.height*factor};handle.suppressClick=true;render(handle,[]);return;} if (!start?.inverse) return; const dx = event.clientX - start.x, dy = event.clientY - start.y; if (Math.hypot(dx, dy) < 4) return; const a = new DOMPoint(start.x, start.y).matrixTransform(start.inverse), b = new DOMPoint(event.clientX, event.clientY).matrixTransform(start.inverse); handle.camera = {...start.camera, x: start.camera.x + a.x - b.x, y: start.camera.y + a.y - b.y}; handle.suppressClick = true; render(handle, []);};
+  handle.pointermove = event => {if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId,{x:event.clientX,y:event.clientY}); if (pointers.size === 2 && pinch?.inverse) {const [a,b] = [...pointers.values()]; if (recenterAtZoomOutLimit(handle, handle.camera, pinch.camera.width * pinch.distance / Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)))) {handle.suppressClick=true;return;} const factor=zoomFactor(handle,pinch.camera,pinch.distance/Math.max(1,Math.hypot(a.x-b.x,a.y-b.y))), origin=new DOMPoint(pinch.center.x,pinch.center.y).matrixTransform(pinch.inverse), current=new DOMPoint((a.x+b.x)/2,(a.y+b.y)/2).matrixTransform(pinch.inverse), c=pinch.camera;  handle.camera={x:origin.x+(c.x-origin.x)*factor+(origin.x-current.x),y:origin.y+(c.y-origin.y)*factor+(origin.y-current.y),width:c.width*factor,height:c.height*factor};handle.suppressClick=true;render(handle,[]);return;} if (!start?.inverse) return; const dx = event.clientX - start.x, dy = event.clientY - start.y; if (Math.hypot(dx, dy) < 4) return; const a = new DOMPoint(start.x, start.y).matrixTransform(start.inverse), b = new DOMPoint(event.clientX, event.clientY).matrixTransform(start.inverse); handle.camera = {...start.camera, x: start.camera.x + a.x - b.x, y: start.camera.y + a.y - b.y}; handle.suppressClick = true; render(handle, []);};
   handle.pointerup = event => {if (!pointers.delete(event.pointerId)) return;start = null;pinch = null;};
   surface.addEventListener('wheel', handle.wheel, {passive: false}); surface.addEventListener('pointerdown', handle.pointerdown); surface.addEventListener('pointermove', handle.pointermove); surface.addEventListener('pointerup', handle.pointerup); surface.addEventListener('pointercancel', handle.pointerup);
 }

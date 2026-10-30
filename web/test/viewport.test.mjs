@@ -189,3 +189,31 @@ test('portrait can pan until its edges reach the viewport midpoint',async()=>{
   await p.mouse.move(180,450);await p.mouse.down();await p.mouse.move(400,850,{steps:3});await p.mouse.up();b=await bounds();visible(b);
  }finally{await p.close();}
 });
+
+test('another zoom out at minimum recenters a panned portrait plan without changing scale', async () => {
+ const p=await browser.newPage({viewport:{width:1300,height:800},hasTouch:true});
+ try {
+  await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
+  await p.evaluate(async()=>{const{mount}=await import('/src/index.js');const host=document.createElement('div');host.style.cssText='width:1200px;height:600px';document.body.append(host);window.viewer=mount(host,{minZoom:1,maxZoom:5,onCameraChanged:state=>window.cameraState=state,document:{schemaVersion:2,symbolSetVersion:1,canvas:{x:20,y:40,width:800,height:1600,fill:'#ffffffff'},textPolicy:{language:'und',direction:'auto'},styles:{},seatingDefaults:{},nodes:[],selectionUnits:[],sections:[],attachments:[],presets:[]}});viewer.svg.style.cssText='width:1200px;height:600px;display:block';viewer.update({});});
+  const initial=await p.evaluate(()=>({...viewer.camera}));
+  await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(240,350,{steps:3});await p.mouse.up();
+  const panned=await p.evaluate(()=>({...viewer.camera}));
+  assert.notEqual(panned.x,initial.x);assert.equal(panned.width,initial.width);
+  assert.equal(await p.evaluate(()=>cameraState.canZoomOut),true,'minus stays available to recenter');
+  await p.mouse.wheel(0,80);
+  await p.waitForFunction(initial=>Math.abs(viewer.camera.x-initial.x)<.001&&Math.abs(viewer.camera.y-initial.y)<.001,initial);
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial);
+  assert.equal(await p.evaluate(()=>cameraState.canZoomOut),false);
+  await p.mouse.move(120,320);await p.mouse.down();await p.mouse.move(250,360,{steps:3});await p.mouse.up();
+  await p.evaluate(()=>viewer.zoomBy(1/1.25));
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial,'zoomBy uses the same center');
+  await p.mouse.move(120,320);await p.mouse.down();await p.mouse.move(250,360,{steps:3});await p.mouse.up();
+  const client=await p.context().newCDPSession(p);
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:300,y:300,id:1},{x:800,y:300,id:2}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:400,y:300,id:1},{x:700,y:300,id:2}]});
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial,'pinch out uses the same center');
+  await p.evaluate(()=>viewer.zoomBy(2));
+  assert.ok((await p.evaluate(()=>viewer.camera.width))<initial.width,'zoom in remains available');
+ }finally{await p.close();}
+});
