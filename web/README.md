@@ -74,3 +74,7 @@ then supplies immutable inline raster data to the synchronous renderer. It owns
 no uploader, image catalog or backend credentials. The host supplies resource
 URLs and persists only its trusted manifest/document; decoded images are transient.
 Empty resources remain protocol-neutral; nonempty resources follow kernel protocol1.
+
+At minimum zoom, another zoom-out request recenters a panned canvas without changing
+its scale. Wheel, pinch and `zoomBy` share this behavior. `canZoomOut` remains true
+while recentering is available, so hosts can keep their minus control enabled.
