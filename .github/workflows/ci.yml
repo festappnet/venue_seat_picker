@@ -39,6 +39,10 @@ jobs:
       - run: tool/demo.sh build
       - run: tool/demo.sh check
       - run: tool/archive_check.sh
+      - name: Record the qualified dependency graphs
+        run: |
+          fvm flutter pub deps --json > build/qa/archive/wrapper-dependencies.json
+          (cd packages/venue_layout_core && fvm dart pub deps --json) > build/qa/archive/core-dependencies.json
       - name: Retain verified npm distribution
         uses: actions/upload-artifact@v4
         with:
@@ -47,5 +51,67 @@ jobs:
             build/qa/archive/archive-result.json
             build/qa/archive/npm-pack.json
             build/qa/archive/*.tgz
+            build/qa/archive/wrapper-dependencies.json
+            build/qa/archive/core-dependencies.json
           if-no-files-found: error
           retention-days: 14
+
+  minimum-flutter:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        resolution: [downgrade, upgrade]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          cache: true
+      - run: dart pub global activate fvm
+      - run: fvm install 3.44.0
+      # This is an isolated CI checkout; the development pin stays at 3.47.7.
+      - run: fvm use 3.44.0 --force --skip-pub-get
+      - run: python3 tool/configure_workspace.py
+      - run: fvm flutter pub ${{ matrix.resolution }}
+      # Whole-tree analysis needs the core's own development package context.
+      - run: fvm dart pub get
+        working-directory: packages/venue_layout_core
+      - run: fvm flutter pub deps --json > '${{ runner.temp }}/minimum-flutter-${{ matrix.resolution }}.json'
+      - run: fvm flutter analyze --no-pub
+      - run: fvm flutter test --no-pub --concurrency=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimum-flutter-${{ matrix.resolution }}
+          path: ${{ runner.temp }}/minimum-flutter-${{ matrix.resolution }}.json
+
+  minimum-core:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        resolution: [downgrade, upgrade]
+    defaults:
+      run:
+        working-directory: packages/venue_layout_core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.1'
+          cache: true
+      - run: dart pub global activate fvm
+      - run: fvm install 3.38.1
+      - run: fvm use 3.38.1 --force --skip-pub-get
+        working-directory: .
+      # Keep test tooling current; only runtime dependency minima are public.
+      - run: fvm dart pub upgrade
+      - if: matrix.resolution == 'downgrade'
+        run: fvm dart pub downgrade crypto xml vector_graphics_compiler
+      - run: fvm dart pub deps --json > '${{ runner.temp }}/minimum-core-${{ matrix.resolution }}.json'
+      - run: fvm dart analyze
+      - run: fvm dart test --concurrency=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimum-core-${{ matrix.resolution }}
+          path: ${{ runner.temp }}/minimum-core-${{ matrix.resolution }}.json

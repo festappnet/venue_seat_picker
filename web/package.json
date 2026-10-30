@@ -1,6 +1,6 @@
 {
   "name": "@festapp/venue-layout",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Venue Layout: a portable SVG venue viewer and seat picker powered by a shared Dart geometry kernel",
   "type": "module",
   "main": "src/index.js",
