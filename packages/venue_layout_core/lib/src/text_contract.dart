@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'canonical_contract.dart';
 import 'model.dart';
+import 'label_placement.dart';
 
 class LayoutTextDependencyFailure implements Exception {
   const LayoutTextDependencyFailure(
@@ -258,8 +259,8 @@ List<LayoutIssue> validateCanonicalTextResources(
       'images',
     }.contains(key)) {
       issue('unknown_resource_field', 'resources.$key');
-  }
     }
+  }
   final families = resources['fontFamilies'];
   if (families is! Map) {
     issue('invalid_font_families', 'resources.fontFamilies');
@@ -291,8 +292,8 @@ List<LayoutIssue> validateCanonicalTextResources(
         if (!RegExp(r'^(400|700):(normal|italic)$').hasMatch('${face.key}') ||
             face.value is! String) {
           issue('invalid_font_face', path);
-      }
         }
+      }
     }
   }
   final texts = resources['textLayouts'];
@@ -426,9 +427,14 @@ List<double> labelRenderMatrix(
   LayoutNode node,
   Map<String, dynamic> label,
   List<double> matrix,
-) => node.kind == 'text' || label['orientation'] == 'object'
-    ? matrix
-    : <double>[1, 0, 0, 1, matrix[4], matrix[5]];
+) {
+  final offset = tableLabelOffset(node);
+  final x = matrix[4] + matrix[0] * offset[0] + matrix[2] * offset[1];
+  final y = matrix[5] + matrix[1] * offset[0] + matrix[3] * offset[1];
+  return node.kind == 'text' || label['orientation'] == 'object'
+      ? <double>[...matrix.take(4), x, y]
+      : <double>[1, 0, 0, 1, x, y];
+}
 
 Map<String, dynamic>? preparedNodeText(
   VenueLayoutDocument document,

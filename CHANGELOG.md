@@ -1,5 +1,7 @@
 ## 0.4.4
 
+- Keep custom tabletop labels inside the filled shape, including cutouts and holes, across editor previews and exported scenes.
+
 - Remove fixed table chairs from the explicitly requested side while preserving other sides and protected seats.
 - Support Flutter 3.44 / Dart 3.12 using compatible standalone Material UI releases, while retaining the current development toolchain.
 - Remove unused direct Cupertino and Flutter localization declarations; required localization remains available through Material UI.
