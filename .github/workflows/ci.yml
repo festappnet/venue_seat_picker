@@ -43,7 +43,7 @@ jobs:
         run: |
           fvm flutter pub deps --json > build/qa/archive/wrapper-dependencies.json
           (cd packages/venue_layout_core && fvm dart pub deps --json) > build/qa/archive/core-dependencies.json
-      - name: Retain verified npm distribution
+      - name: Retain verified package distributions
         uses: actions/upload-artifact@v4
         with:
           name: verified-npm-${{ github.sha }}-${{ github.run_attempt }}
@@ -51,6 +51,7 @@ jobs:
             build/qa/archive/archive-result.json
             build/qa/archive/npm-pack.json
             build/qa/archive/*.tgz
+            build/qa/archive/*.tar.gz
             build/qa/archive/wrapper-dependencies.json
             build/qa/archive/core-dependencies.json
           if-no-files-found: error

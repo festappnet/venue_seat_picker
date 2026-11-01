@@ -32,7 +32,9 @@ Font outline regeneration requires Python fonttools 4.67.0; already-built
 fixtures and demo kits have no Python/font parsing runtime dependency.
 
 Use pnpm 11.24.0 for the web package: run `pnpm install --frozen-lockfile`
-in `web/` before the distribution gates.
+in `web/` before the distribution gates. For a standalone web test run, first
+run `tool/build_web.sh`, then `pnpm --dir web test`; missing generated inputs fail
+immediately instead of waiting for each browser assertion timeout.
 
 ## Dependency and SDK compatibility policy
 
