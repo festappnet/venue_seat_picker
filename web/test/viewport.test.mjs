@@ -190,7 +190,7 @@ test('portrait can pan until its edges reach the viewport midpoint',async()=>{
  }finally{await p.close();}
 });
 
-test('another zoom out at minimum recenters a panned portrait plan without changing scale', async () => {
+test('zooming out at minimum preserves a panned portrait plan', async () => {
  const p=await browser.newPage({viewport:{width:1300,height:800},hasTouch:true});
  try {
   await p.goto(`${base}/fixture`);await p.waitForFunction(()=>!!window.VenueLayoutKernel);
@@ -199,21 +199,25 @@ test('another zoom out at minimum recenters a panned portrait plan without chang
   await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(240,350,{steps:3});await p.mouse.up();
   const panned=await p.evaluate(()=>({...viewer.camera}));
   assert.notEqual(panned.x,initial.x);assert.equal(panned.width,initial.width);
-  assert.equal(await p.evaluate(()=>cameraState.canZoomOut),true,'minus stays available to recenter');
-  await p.mouse.wheel(0,80);
-  await p.waitForFunction(initial=>Math.abs(viewer.camera.x-initial.x)<.001&&Math.abs(viewer.camera.y-initial.y)<.001,initial);
-  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial);
-  assert.equal(await p.evaluate(()=>cameraState.canZoomOut),false);
-  await p.mouse.move(120,320);await p.mouse.down();await p.mouse.move(250,360,{steps:3});await p.mouse.up();
+  await p.mouse.wheel(0,80);await p.waitForTimeout(30);
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),panned,'wheel preserves the panned camera');
+  assert.equal(await p.evaluate(()=>cameraState.canZoomOut),false,'minus is unavailable at minimum regardless of pan');
   await p.evaluate(()=>viewer.zoomBy(1/1.25));
-  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial,'zoomBy uses the same center');
-  await p.mouse.move(120,320);await p.mouse.down();await p.mouse.move(250,360,{steps:3});await p.mouse.up();
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),panned,'zoomBy preserves the panned camera');
   const client=await p.context().newCDPSession(p);
   await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:300,y:300,id:1},{x:800,y:300,id:2}]});
   await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:400,y:300,id:1},{x:700,y:300,id:2}]});
   await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial,'pinch out uses the same center');
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),panned,'pinch with a fixed midpoint preserves the panned camera');
+  await p.evaluate(()=>viewer.fitToScreen());
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),initial,'explicit fit centers the plan');
   await p.evaluate(()=>viewer.zoomBy(2));
   assert.ok((await p.evaluate(()=>viewer.camera.width))<initial.width,'zoom in remains available');
+  await p.mouse.move(100,300);await p.mouse.down();await p.mouse.move(240,350,{steps:3});await p.mouse.up();
+  await p.evaluate(()=>viewer.zoomBy(.01));
+  const atLimit=await p.evaluate(()=>({...viewer.camera}));
+  assert.notEqual(atLimit.x,initial.x,'crossing the minimum keeps an off-center position');
+  await p.mouse.wheel(0,80);await p.waitForTimeout(30);
+  assert.deepEqual(await p.evaluate(()=>({...viewer.camera})),atLimit,'another wheel event at the limit causes no second jump');
  }finally{await p.close();}
 });
