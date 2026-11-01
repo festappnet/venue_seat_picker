@@ -31,6 +31,58 @@ LayoutNode table({double rotation = 0, Map<String, dynamic>? surface}) =>
     );
 
 void main() {
+  for (final width in [72.0, 300.0]) {
+    test('small U tabletop contains the full $width-wide label', () {
+      final n = table().copyWith(
+        width: 160,
+        height: 100,
+        surface: const {
+          'type': 'grid',
+          'moduleSize': 1,
+          'outer': [
+            [0, 0],
+            [160, 0],
+            [160, 100],
+            [108, 100],
+            [108, 50],
+            [54, 50],
+            [54, 100],
+            [0, 100],
+          ],
+          'holes': [],
+        },
+      );
+      final bounds = {
+        'x': -width / 2 - 2,
+        'y': -9.0,
+        'width': width,
+        'height': 18.0,
+      };
+      final m = labelRenderMatrix(
+        n,
+        {'orientation': 'object'},
+        [1, 0, 0, 1, 0, 0],
+        textBounds: bounds,
+      );
+      if (width == 300) expect(m[0], lessThan(1));
+      final rings = nodeOutlineContours(n);
+      for (var i = 0; i <= 20; i++) {
+        for (var j = 0; j <= 6; j++) {
+          final p = transformPoint(
+            m,
+            bounds['x']! + width * i / 20,
+            bounds['y']! + 18 * j / 6,
+          );
+          expect(
+            pointInPolygon(rings.first, p[0], p[1]),
+            isTrue,
+            reason: 'entire rendered text box must fit the filled tabletop',
+          );
+        }
+      }
+    });
+  }
+
   test('U-shaped table label and its ink stay on the tabletop', () {
     final n = table();
     final matrix = labelRenderMatrix(

@@ -3,25 +3,49 @@ import 'geometry.dart';
 import 'model.dart';
 import 'node_outline.dart';
 
-final _tableLabelOffsets = Expando<List<double>>();
+final _tableLabelOffsets = Expando<({String key, List<double> placement})>();
 
 /// Place irregular table labels in the broadest filled part of the rendered
 /// tabletop, excluding holes and concavities. Shared by glyphs and native text.
-List<double> tableLabelOffset(LayoutNode node) {
+List<double> tableLabelPlacement(
+  LayoutNode node,
+  List<double> contourMatrix,
+  Map<String, double>? textBounds,
+) {
   if (node.kind != 'table' ||
       surfaceGeometryProperties(node)['shape'] != 'polygon') {
-    return const [0, 0];
+    return const [0, 0, 1];
   }
-  return _tableLabelOffsets[node] ??= _interiorOffset(
-    nodeOutlineContours(node),
-  );
+  final halfWidth = max(.5, (textBounds?['width'] ?? 2) / 2);
+  final halfHeight = max(.5, (textBounds?['height'] ?? 2) / 2);
+  final key = '$contourMatrix|$halfWidth|$halfHeight|${textBounds != null}';
+  final cached = _tableLabelOffsets[node];
+  if (cached?.key == key) return cached!.placement;
+  final rings = [
+    for (final ring in nodeOutlineContours(node))
+      [
+        for (final p in ring)
+          [
+            (contourMatrix[0] * p[0] + contourMatrix[2] * p[1]) / halfWidth,
+            (contourMatrix[1] * p[0] + contourMatrix[3] * p[1]) / halfHeight,
+          ],
+      ],
+  ];
+  final pole = _interiorOffset(rings, .5 / max(halfWidth, halfHeight));
+  final placement = [
+    pole[0] * halfWidth,
+    pole[1] * halfHeight,
+    textBounds == null ? 1.0 : min(1.0, max(0.0, pole[2]) / sqrt2 * .95),
+  ];
+  _tableLabelOffsets[node] = (key: key, placement: placement);
+  return placement;
 }
 
-List<double> _interiorOffset(List<List<List<double>>> rings) {
-  if (rings.isEmpty) return const [0, 0];
+List<double> _interiorOffset(List<List<List<double>>> rings, double precision) {
+  if (rings.isEmpty) return const [0, 0, 0];
   final bounds = boundsOfPoints(rings.first);
   final width = bounds['width']!, height = bounds['height']!;
-  if (width <= 0 || height <= 0) return const [0, 0];
+  if (width <= 0 || height <= 0) return const [0, 0, 0];
   double clearance(double x, double y) {
     var inside = false, distanceSquared = double.infinity;
     for (final ring in rings) {
@@ -61,7 +85,6 @@ List<double> _interiorOffset(List<List<List<double>>> rings) {
     ),
   ];
   // Best-first subdivision bounds placement error independently of zoom.
-  const precision = .5;
   while (pending.isNotEmpty) {
     final current = pending.removeLast();
     if (current.distance > best.distance ||
@@ -88,5 +111,5 @@ List<double> _interiorOffset(List<List<List<double>>> rings) {
       }
     }
   }
-  return [quantize(best.x), quantize(best.y)];
+  return [best.x, best.y, best.distance];
 }
