@@ -1,4 +1,5 @@
 import { mount } from '../src/index.js';
+import { editorLocation } from './navigation.js';
 let view, documentData, resources={}, prices={}, selected=new Set(), quantities={}, occupied=false, loadRequest=0, activeGeneration=0;
 const el=id=>document.getElementById(id);
 const previewToken=new URLSearchParams(location.search).get('editor');
@@ -9,7 +10,11 @@ if(fromEditor){
   document.title='Výběr míst - webový náhled';
   el('sample-label').textContent='Náhled vašeho rozpracovaného sálu';
   el('back-to-editor').hidden=false;
-  el('back-to-editor').href=`/flutter/?fromPreview=${encodeURIComponent(previewToken)}`;
+  let savedLocation;
+  try { savedLocation=sessionStorage.getItem(`venue-layout-preview:editor:${previewToken}`); } catch {}
+  const back=editorLocation(new URL(location.href),savedLocation);
+  back.searchParams.set('fromPreview',previewToken);
+  el('back-to-editor').href=back.href;
   el('import-tools').hidden=true;
   el('legend').hidden=false;
   el('reset').textContent='Zrušit výběr';
