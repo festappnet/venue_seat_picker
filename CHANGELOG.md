@@ -1,5 +1,7 @@
 ## 0.4.6
 
+- Keep the object filter visible and editable when reopening the palette.
+
 - Keep readable-seat focus, overview toggling and painter-only highlight pulses in the canonical viewer API used by Festapp.
 
 - Prepare new demo labels with the canonical text engine before saving, exporting or opening a customer preview.
