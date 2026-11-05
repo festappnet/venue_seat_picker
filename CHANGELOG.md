@@ -1,5 +1,7 @@
 ## 0.4.6
 
+- Keep readable-seat focus, overview toggling and painter-only highlight pulses in the canonical viewer API used by Festapp.
+
 - Prepare new demo labels with the canonical text engine before saving, exporting or opening a customer preview.
 - Open the promised sample hall, retain supported portable templates outside the gallery and keep mobile save/preview controls reachable.
 - Exercise current Czech editor journeys and compare Flutter/browser rasters with captured camera transforms and scoped paint accounting.

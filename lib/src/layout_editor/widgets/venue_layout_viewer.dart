@@ -10,9 +10,12 @@ class VenueLayoutViewer extends StatelessWidget {
     this.resources = const {},
     this.seatPresentation = const {},
     this.highlightedNodeIds = const {},
+    this.highlightPulse,
     this.activeNodeIds = const {},
     this.focusNodeIds = const {},
     this.focusRevision = 0,
+    this.focusMaxZoomFactor = 5,
+    this.focusSeatPixelSize,
     this.onNodeTap,
     this.wheelZoomRequiresModifier = false,
   });
@@ -22,6 +25,15 @@ class VenueLayoutViewer extends StatelessWidget {
 
   /// Increment to request a fit of [focusNodeIds], or the canvas when empty.
   final int focusRevision;
+
+  /// Optional one-shot emphasis; only the canvas painter listens to its ticks.
+  final Animation<double>? highlightPulse;
+
+  /// Maximum focus zoom relative to the whole-plan fit.
+  final double focusMaxZoomFactor;
+
+  /// Optional readable seat size in logical screen pixels, bounded by context.
+  final double? focusSeatPixelSize;
 
   /// Embedded viewers can let normal wheel scrolling reach the parent page.
   final bool wheelZoomRequiresModifier;
@@ -38,9 +50,13 @@ class VenueLayoutViewer extends StatelessWidget {
       presentation: seatPresentation,
       selected: activeNodeIds,
       highlightedIds: highlightedNodeIds,
+      highlightPulse: highlightPulse,
       showSeatSelectionChecks: false,
       focusNodeIds: focusNodeIds,
       focusRevision: focusRevision,
+      focusMaxZoomFactor: focusMaxZoomFactor,
+      focusSeatPixelSize: focusSeatPixelSize,
+      toggleFocusOnFit: focusNodeIds.isNotEmpty,
       onPointTap: onNodeTap == null
           ? null
           : (point) => onNodeTap!(hitTest(document, point.dx, point.dy)),
