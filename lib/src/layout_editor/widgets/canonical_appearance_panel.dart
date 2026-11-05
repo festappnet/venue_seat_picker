@@ -605,13 +605,14 @@ class _CanonicalAppearancePanelState extends State<CanonicalAppearancePanel> {
               !media &&
               target.kind != 'text' &&
               !openPath) ...[
-            choice(
-              'Material',
-              ['material'],
-              values['material'] as String,
-              (canonicalVisualFields['material']!['enum'] as List)
-                  .cast<String>(),
-            ),
+            if (layoutHasConstructionStyle(target))
+              choice(
+                'Material',
+                ['material'],
+                values['material'] as String,
+                (canonicalVisualFields['material']!['enum'] as List)
+                    .cast<String>(),
+              ),
             if (target.kind == 'seat')
               choice(
                 'Chair style',
@@ -1168,13 +1169,20 @@ Future<void> showCanonicalAppearanceDialog(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const LayoutText('Style family'),
-              const SizedBox(height: 12),
-              LayoutMaterialFamilies(
-                controller: controller,
-                nodeId: global ? null : nodeId,
-              ),
-              const SizedBox(height: 16),
+              if (global ||
+                  controller.document.nodes.any(
+                    (n) =>
+                        n.id == nodeId &&
+                        (layoutHasConstructionStyle(n) || n.kind == 'group'),
+                  )) ...[
+                const LayoutText('Style family'),
+                const SizedBox(height: 12),
+                LayoutMaterialFamilies(
+                  controller: controller,
+                  nodeId: global ? null : nodeId,
+                ),
+                const SizedBox(height: 16),
+              ],
               const LayoutText('Color palette'),
               const SizedBox(height: 8),
               LayoutStylePresets(

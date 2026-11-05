@@ -24,6 +24,9 @@ class VenueLayoutEditor extends StatefulWidget {
   const VenueLayoutEditor({
     super.key,
     required this.controller,
+    this.focusNodeIds = const {},
+    this.focusRevision,
+    this.highlightedNodeIds = const {},
     this.inspectorBuilder,
     this.toolbarPrefix,
     this.toolbarLeading,
@@ -54,6 +57,9 @@ class VenueLayoutEditor extends StatefulWidget {
     this.globalFontPickerBuilder,
     this.inlineTextStyleBuilder,
   });
+  /// Explicit host navigation only. Selection changes never request a camera fit.
+  final Set<String> focusNodeIds, highlightedNodeIds;
+  final int? focusRevision;
   final VenueLayoutController controller;
 
   /// Optional host font catalog for object typography, built only in edit mode.
@@ -319,19 +325,58 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     return node.parentId ?? id;
   }
 
-  LayoutTapDisposition _tapDisposition(LayoutNode node) {
+  bool _outlineSelection(LayoutNode node) =>
+      node.kind == 'shape' &&
+      node.properties['role'] == 'decoration' &&
+      !const ['line', 'polyline', 'arrow'].contains(node.properties['shape']) &&
+      !c.document.nodes.any(
+        (parent) => parent.id == node.parentId && parent.assembly != null,
+      );
+
+  // Architectural fills must leave empty space available for navigation and
+  // marquee selection. Use the core's rendered contours, including curves.
+  bool _hitsDecorationOutline(LayoutNode node, Offset point, double tolerance) {
+    final properties = effectiveNodeProperties(c.document, node);
+    final local = transformPoint(
+      inverseMatrix(spatialIndexFor(c.document).matrices[node.id]!),
+      point.dx,
+      point.dy,
+    );
+    final radius = tolerance + (properties['strokeWidth'] as num? ?? 1) / 2;
+    for (final contour in nodeOutlineContours(
+      node.copyWith(properties: properties),
+    )) {
+      for (var i = 0; i < contour.length; i++) {
+        final a = contour[i], b = contour[(i + 1) % contour.length];
+        final dx = b[0] - a[0], dy = b[1] - a[1];
+        final length = dx * dx + dy * dy;
+        final t = length == 0
+            ? 0.0
+            : (((local[0] - a[0]) * dx + (local[1] - a[1]) * dy) / length)
+                  .clamp(0.0, 1.0);
+        if (math.pow(local[0] - a[0] - t * dx, 2) +
+                math.pow(local[1] - a[1] - t * dy, 2) <=
+            radius * radius)
+          return true;
+      }
+    }
+    return false;
+  }
+
+  LayoutTapDisposition _tapDisposition(
+    LayoutNode node,
+    Offset point, {
+    double tolerance = 0,
+  }) {
     if (!_canEdit) {
       return _viewSelectable(node)
           ? LayoutTapDisposition.activate
           : LayoutTapDisposition.ignore;
     }
-    // Imported floorplans also mark real tables as decoration. Their visible
-    // tabletops must remain editable instead of falling through to the canvas.
-    return node.kind != 'table' &&
-            node.properties['role'] == 'decoration' &&
-            !c.document.nodes.any(
-              (parent) => parent.id == node.parentId && parent.assembly != null,
-            )
+    // Text and furniture remain direct targets. Closed architectural decoration
+    // is selected by its outline, so saved room backdrops do not swallow taps.
+    return _outlineSelection(node) &&
+            !_hitsDecorationOutline(node, point, tolerance)
         ? LayoutTapDisposition.ignore
         : LayoutTapDisposition.activate;
   }
@@ -342,15 +387,19 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
         point.dx,
         point.dy,
         tolerance: 8 / _viewportScale,
-        classify: _tapDisposition,
+        classify: (node) =>
+            _tapDisposition(node, point, tolerance: 8 / _viewportScale),
       );
 
   // Seats use the shared spatial index. Assembly gaps additionally hit the
   // real local footprint, cached until geometry changes.
   String? _hitAt(Offset point) {
-    final direct = spatialIndexFor(
-      c.document,
-    ).resolveTap(point.dx, point.dy, tolerance: 0, classify: _tapDisposition);
+    final direct = spatialIndexFor(c.document).resolveTap(
+      point.dx,
+      point.dy,
+      tolerance: 0,
+      classify: (node) => _tapDisposition(node, point),
+    );
     if (!identical(_hitBoundsDocument, c.document)) {
       _hitBoundsDocument = c.document;
       _rowHitBounds.clear();
@@ -1734,13 +1783,29 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
     _snapGuides = [];
     if (_marquee != null && _marqueeEnd != null) {
       final a = _marquee!, b = _marqueeEnd!;
-      final hits = hitTestRect(c.document, {
-        'x': math.min(a.dx, b.dx),
-        'y': math.min(a.dy, b.dy),
-        'width': (a.dx - b.dx).abs(),
-        'height': (a.dy - b.dy).abs(),
-      }).map(_selectionTarget).toSet().union(_marqueeSelectionBase);
+      final rect = Rect.fromPoints(a, b);
       final nodes = {for (final n in c.document.nodes) n.id: n};
+      final hits =
+          hitTestRect(c.document, {
+                'x': rect.left,
+                'y': rect.top,
+                'width': rect.width,
+                'height': rect.height,
+              })
+              .where((id) {
+                final node = nodes[id]!;
+                if (!_outlineSelection(node)) return true;
+                // Enclose architecture deliberately; a marquee inside a room must not
+                // add the whole room to a furniture selection.
+                final bounds = nodeBounds(c.document, node);
+                return bounds['x']! >= rect.left &&
+                    bounds['y']! >= rect.top &&
+                    bounds['x']! + bounds['width']! <= rect.right &&
+                    bounds['y']! + bounds['height']! <= rect.bottom;
+              })
+              .map(_selectionTarget)
+              .toSet()
+              .union(_marqueeSelectionBase);
       c.select(
         hits.where((id) {
           var parent = nodes[id]?.parentId;
@@ -2179,13 +2244,13 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                     horizontal: 3,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .surface,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
                                     border: Border.all(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outlineVariant,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
                                     ),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
@@ -2210,8 +2275,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
             child: LayoutText(
               'Objects',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
           Padding(
@@ -2220,8 +2286,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
               onChoose != null
                   ? 'Tap an object to add it. Drawing tools continue on the plan.'
                   : 'Drag onto the plan, or click to place',
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: colors.onSurfaceVariant),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
             ),
           ),
           Padding(
@@ -3282,8 +3349,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                               isScrollControlled: true,
                                               builder: (context) => SizedBox(
                                                 height:
-                                                    MediaQuery.sizeOf(context)
-                                                        .height *
+                                                    MediaQuery.sizeOf(
+                                                      context,
+                                                    ).height *
                                                     .8,
                                                 child: AnimatedBuilder(
                                                   animation: Listenable.merge([
@@ -3311,9 +3379,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                               : !_canEdit
                                               ? 'Read only'
                                               : 'Saved',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .labelMedium,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelMedium,
                                         ),
                                       ),
                                   ],
@@ -3343,8 +3411,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                               isScrollControlled: true,
                                               builder: (context) => SizedBox(
                                                 height:
-                                                    MediaQuery.sizeOf(context)
-                                                        .height *
+                                                    MediaQuery.sizeOf(
+                                                      context,
+                                                    ).height *
                                                     .8,
                                                 child: AnimatedBuilder(
                                                   animation: Listenable.merge([
@@ -3427,6 +3496,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                               widget.nativeTextPreview,
                                           key: ValueKey(_templateViewport),
                                           document: c.document,
+                                          focusNodeIds: widget.focusNodeIds.where((id) => c.document.nodes.any((node) => node.id == id)).toSet(),
+                                          focusRevision: widget.focusNodeIds.isEmpty || widget.focusNodeIds.any((id) => c.document.nodes.any((node) => node.id == id))
+                                              ? widget.focusRevision : null,
                                           backgroundSelected:
                                               _canEdit && _editingBackground,
                                           canvasSelected:
@@ -3480,6 +3552,7 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                               ? null
                                               : widget.viewSelectableIds,
                                           highlightedIds: {
+                                            ...widget.highlightedNodeIds.where((id) => c.document.nodes.any((node) => node.id == id)),
                                             ...c.hoveredIds,
                                             ?_seatTargetId,
                                           },
@@ -3604,9 +3677,9 @@ class _VenueLayoutEditorState extends State<VenueLayoutEditor> {
                                           borderRadius: BorderRadius.circular(
                                             8,
                                           ),
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .surface,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.surface,
                                           child: Padding(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 12,
