@@ -27,14 +27,35 @@ jobs:
           cache: true
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+      - run: dart pub global activate fvm
+      - run: fvm install 3.47.7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - name: Resolve the exact local core for the demo
         run: python3 tool/configure_workspace.py
       - name: Install example dependencies
         run: flutter pub get
         working-directory: example
+      - name: Verify demo storage and navigation
+        run: flutter test --platform chrome --concurrency=1 test/storage_web_test.dart test/locations_test.dart
+        working-directory: example
       - name: Build interactive demo
         run: flutter build web --release --base-href /venue_seat_picker/
         working-directory: example
+      - name: Build and include the customer preview
+        run: |
+          fvm flutter pub get
+          pnpm --dir web install --frozen-lockfile
+          tool/build_web.sh
+          node --test web/test/demo_navigation.test.mjs
+          mkdir -p example/build/web/js
+          cp -R web/demo web/dist web/src web/assets example/build/web/js/
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:

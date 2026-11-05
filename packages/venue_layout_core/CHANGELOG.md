@@ -1,3 +1,8 @@
+## 0.2.5
+
+- Derive open-path hit segments from rendered arrowheads, including their configured length and separate subpaths.
+- Index rendered closed contours with stroke padding and measure selection margins from their visible strokes.
+
 ## 0.2.4
 
 - Place custom-table labels and their measured ink within the filled tabletop, including shapes with cutouts and holes.
