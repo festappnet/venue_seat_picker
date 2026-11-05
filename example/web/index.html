@@ -149,6 +149,7 @@
       document.getElementById('overview').hidden = true;
       document.getElementById('demo-loading').hidden = false;
       document.body.classList.add('demo-mode');
+      globalThis.venueLayoutTextReady = import(new URL('layout_text_host.js', document.baseURI));
       const bootstrap = document.createElement('script');
       bootstrap.src = 'flutter_bootstrap.js';
       bootstrap.async = true;

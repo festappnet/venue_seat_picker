@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build": "../tool/build_web.sh",
-    "test": "node ../tool/check_web_test_inputs.mjs && node --test test/*.test.mjs"
+    "test": "node ../tool/check_web_test_inputs.mjs && node --test test/*.test.mjs ../tool/qa_raster_contract.test.mjs"
   },
   "license": "MIT",
   "repository": "https://github.com/festappnet/venue_seat_picker",
