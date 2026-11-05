@@ -21,8 +21,8 @@ export async function replaceIfAsked(page){
  if(await replace.count())await activate(page,replace);
 }
 export async function menu(page,name){
- await button(page,'Soubory a další možnosti').click();
- await page.getByRole('menuitem',{name,exact:true}).click();
+ await activate(page,button(page,'Soubory a další možnosti'));
+ await activate(page,page.getByRole('menuitem',{name,exact:true}));
 }
 export async function download(page,name='Exportovat plánek včetně podkladů'){
  const pending=page.waitForEvent('download',{timeout:20000});pending.catch(()=>{});
