@@ -427,11 +427,6 @@ final layoutMaterialFamilyAppearances = {
     ),
 };
 
-/// Construction controls are meaningful for seating and furniture only.
-/// Other shapes retain independent fill, outline and corner controls.
-bool layoutHasConstructionStyle(LayoutNode node) =>
-    const {'table', 'seat', 'furniture'}.contains(node.kind);
-
 /// Quick family chooser backed by the same canonical material definitions as rendering.
 class LayoutMaterialFamilies extends StatelessWidget {
   const LayoutMaterialFamilies({
