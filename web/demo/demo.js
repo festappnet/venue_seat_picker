@@ -103,7 +103,7 @@ async function load(text){
   if(scene.issues.length)throw Error('Missing or invalid prepared resource: '+scene.issues[0].reason);
   if(request!==loadRequest)return;
   const nextPrices=host.prices||{},nextPresentation=Object.fromEntries(parsed.layout.nodes.filter(n=>n.kind==='seat').map(n=>[n.id,{label:n.label||'Seat',status:'available'}]));
-  const staging=document.createElement('div');let next;
+  const staging=document.createElement('div');staging.style.height='100%';let next;
   try{next=mount(staging,{document:parsed.layout,resources:parsed.resources,seatPresentation:nextPresentation,
     onQuantityRequested:async(id,count)=>{const result=await response();if(activeGeneration!==request)return{accepted:false,message:'Document changed'};if(result.accepted){quantities[id]=count;update();}return result;},
     onSelectionRequested:async(ids,selecting)=>{const result=await response();if(activeGeneration!==request)return{accepted:false,message:'Document changed'};if(result.accepted){for(const id of units(ids)){if(selecting)selected.add(id);else selected.delete(id);}update();}return result;}});
@@ -117,7 +117,7 @@ async function load(text){
     }
   }
   // Commit only a completely decoded, validated and mounted candidate.
-  view?.dispose();el('picker').replaceChildren(...staging.childNodes);view=next;
+  view?.dispose();el('picker').replaceChildren(staging);view=next;
   activeGeneration=request;documentData=parsed.layout;resources=parsed.resources;prices=nextPrices;selected=new Set();quantities={};
   capacities();update();status(fromEditor?'Vyberte místo kliknutím. Plánek můžete přibližovat a posouvat.':'Same exported geometry loaded. Select seats or standing quantities.');
 }

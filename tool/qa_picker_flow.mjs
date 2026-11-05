@@ -35,7 +35,9 @@ try{const c=await browser.newContext({viewport:{width:1440,height:1000},acceptDo
  await js.waitForFunction(()=>window.venueDemo.selected.length===2);
  assert.deepEqual(new Set(await js.evaluate(()=>window.venueDemo.selected)),new Set(pair));
  const area=portable.layout.nodes.find(n=>n.kind==='capacityArea');
- await js.locator(`svg [data-node-id="${area.id}"]`).first().click();
+ const areaBounds=await js.locator(`svg [data-node-id="${area.id}"]`).first().boundingBox();
+ assert.ok(areaBounds,'Standing area must be visible');
+ await js.mouse.click(areaBounds.x+areaBounds.width*.2,areaBounds.y+areaBounds.height*.5);
  await js.locator('#picker').getByRole('spinbutton').fill('2');
  await js.getByRole('button',{name:'Confirm quantity',exact:true}).click();
  await js.locator('#selected').filter({hasText:'2 seats selected; 2 standing selected'}).waitFor();
