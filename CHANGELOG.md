@@ -1,3 +1,10 @@
+## 0.4.7
+
+- Publish the editor and viewer corrections made after the 0.4.6 registry release: persistent palette filtering, construction appearance controls, readable-seat focus and overview highlighting.
+- Preserve independent text resources for edited and saved layouts, including save, export and customer previews.
+- Improve mobile insertion and verify the complete organizer demo journey.
+- Require core 0.2.6 for cushion-aligned seat state markers; retain the supported SDK floors and compatible dependency ranges.
+
 ## 0.4.6
 
 - Prepare edited and saved text resources independently so labels can be resized or restyled without losing save/export support.

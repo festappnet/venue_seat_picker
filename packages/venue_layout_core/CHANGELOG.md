@@ -1,3 +1,9 @@
+## 0.2.6
+
+- Derive seat state marker bounds from the rendered chair cushion, excluding backrests and armrests.
+- Align scene state markers with those bounds and cover supported chair styles with regression tests.
+- Retain the supported Dart floor and dependency ranges.
+
 ## 0.2.5
 
 - Derive open-path hit segments from rendered arrowheads, including their configured length and separate subpaths.
