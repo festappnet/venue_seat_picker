@@ -1,3 +1,7 @@
+## Unreleased
+
+- Correct the central-stage arena template so all 96 chairs face the stage.
+
 ## 0.4.7
 
 - Publish the editor and viewer corrections made after the 0.4.6 registry release: persistent palette filtering, construction appearance controls, readable-seat focus and overview highlighting.
