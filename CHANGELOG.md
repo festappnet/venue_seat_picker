@@ -1,4 +1,7 @@
-## Unreleased
+## 0.4.8
+
+- Reduce table and bar drag-preview cost by using a physical placement index, also shared by chair reflow and automatic seat fitting.
+- Require core 0.2.7; preserve collision rejection and gesture undo.
 
 - Correct the central-stage arena template so all 96 chairs face the stage.
 

@@ -1,3 +1,9 @@
+## 0.2.7
+
+- Add `LayoutCollisionIndex`, `collisionIndexFor` and `isLayoutObstacle` as the shared geometry owner for physical placement and collision reporting across all obstacle kinds.
+- Reuse spatial bucket machinery with rendered hit testing while avoiding rendered outline tessellation during table/bar movement, chair reflow and seat fitting.
+- Preserve physical collision checks, spatial bucketing and immutable-document cache invalidation.
+
 ## 0.2.6
 
 - Derive seat state marker bounds from the rendered chair cushion, excluding backrests and armrests.
